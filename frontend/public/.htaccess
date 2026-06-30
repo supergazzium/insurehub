@@ -1,0 +1,81 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# InsureHub Vue SPA — Apache config for SiteGround subfolder deploy
+# Lives at:  https://<your-domain>/insurehub/
+# Path inside server: public_html/insurehub/.htaccess
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Disable directory listing
+Options -Indexes
+
+# ─── SPA history-mode fallback ──────────────────────────────────────────────
+# Any request that doesn't match a real file/dir gets rewritten to index.html
+# so client-side routing handles it. Without this, refreshing /policies = 404.
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /insurehub/
+
+  # Real files / directories pass through
+  RewriteCond %{REQUEST_FILENAME} -f [OR]
+  RewriteCond %{REQUEST_FILENAME} -d
+  RewriteRule ^ - [L]
+
+  # Everything else → index.html
+  RewriteRule ^ index.html [L]
+</IfModule>
+
+# ─── Compression (gzip) ─────────────────────────────────────────────────────
+<IfModule mod_deflate.c>
+  AddOutputFilterByType DEFLATE text/html text/plain text/xml text/css text/javascript
+  AddOutputFilterByType DEFLATE application/javascript application/json application/xml
+  AddOutputFilterByType DEFLATE image/svg+xml font/woff font/woff2 application/font-woff
+</IfModule>
+
+# ─── Cache headers ──────────────────────────────────────────────────────────
+# Vite emits hashed filenames (index-XXXXXXXX.js) so assets can be cached
+# forever. index.html must never be cached so users get the latest entrypoint.
+<IfModule mod_expires.c>
+  ExpiresActive On
+
+  # Hashed assets — 1 year, immutable
+  ExpiresByType text/css                       "access plus 1 year"
+  ExpiresByType application/javascript         "access plus 1 year"
+  ExpiresByType text/javascript                "access plus 1 year"
+  ExpiresByType application/font-woff          "access plus 1 year"
+  ExpiresByType font/woff                      "access plus 1 year"
+  ExpiresByType font/woff2                     "access plus 1 year"
+  ExpiresByType image/svg+xml                  "access plus 1 year"
+  ExpiresByType image/png                      "access plus 1 year"
+  ExpiresByType image/jpeg                     "access plus 1 year"
+
+  # HTML — always re-validate
+  ExpiresByType text/html                      "access plus 0 seconds"
+</IfModule>
+
+<IfModule mod_headers.c>
+  # Hashed Vite assets in /insurehub/assets/* — immutable
+  <FilesMatch "\.(js|css|woff|woff2|ttf|eot|svg|png|jpg|jpeg|gif|ico)$">
+    Header set Cache-Control "public, max-age=31536000, immutable"
+  </FilesMatch>
+
+  # index.html — must always revalidate
+  <FilesMatch "index\.html$">
+    Header set Cache-Control "no-cache, no-store, must-revalidate"
+    Header set Pragma "no-cache"
+    Header set Expires "0"
+  </FilesMatch>
+
+  # Basic security headers
+  Header set X-Content-Type-Options "nosniff"
+  Header set X-Frame-Options "SAMEORIGIN"
+  Header set Referrer-Policy "strict-origin-when-cross-origin"
+</IfModule>
+
+# ─── MIME for fonts (some older Apache configs miss these) ──────────────────
+<IfModule mod_mime.c>
+  AddType application/font-woff       woff
+  AddType application/font-woff2      woff2
+  AddType application/vnd.ms-fontobject eot
+  AddType font/ttf                    ttf
+  AddType font/otf                    otf
+  AddType image/svg+xml               svg
+</IfModule>

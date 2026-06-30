@@ -1,0 +1,19 @@
+Agent_para                               rows=   392  cols= 44
+App_Doc_Control                          rows=  3853  cols= 29
+Application                              rows=   515  cols=140
+BankName_Para                            rows=    11  cols=  2
+Client                                   rows=   357  cols= 52
+Insure_company                           rows=    45  cols= 14
+Location                                 rows=  7460  cols=  6
+Main_Product                             rows=   894  cols= 52
+MotorMarketGrouppara                     rows=    10  cols=  5
+Motor_para                               rows= 32664  cols= 36
+Occupation                               rows=    48  cols=  4
+Payment_InsComp_Status_para              rows=     3  cols=  2
+Payment_InsComp_to_para                  rows=     2  cols=  2
+Payment_method_para                      rows=     3  cols=  2
+Policies_status_para                     rows=    11  cols=  3
+nation                                   rows=   242  cols=  7
+paidstatus_para                          rows=    16  cols=  4
+prefix_para                              rows=   244  cols=  5
+religion                                 rows=    11  cols=  3

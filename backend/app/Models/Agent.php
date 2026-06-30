@@ -1,0 +1,64 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Models;
+
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
+use Illuminate\Database\Eloquent\SoftDeletes;
+
+class Agent extends Model
+{
+    use SoftDeletes;
+
+    protected $guarded = ['id'];
+
+    protected $casts = [
+        'birth_date' => 'date',
+        'joined_at' => 'date',
+        'license_expiry' => 'date',
+        'license_life_expiry' => 'date',
+        'license_non_life_expiry' => 'date',
+        'company_register_date' => 'date',
+        'doc_status' => 'boolean',
+        'active' => 'boolean',
+        'commission_pct' => 'decimal:4',
+    ];
+
+    public function tenant(): BelongsTo
+    {
+        return $this->belongsTo(Tenant::class);
+    }
+
+    public function bank(): BelongsTo
+    {
+        return $this->belongsTo(Bank::class);
+    }
+
+    public function parent(): BelongsTo
+    {
+        return $this->belongsTo(self::class, 'parent_agent_id');
+    }
+
+    public function children(): HasMany
+    {
+        return $this->hasMany(self::class, 'parent_agent_id');
+    }
+
+    public function recruitmentLinks(): HasMany
+    {
+        return $this->hasMany(RecruitmentLink::class);
+    }
+
+    public function customersAssigned(): HasMany
+    {
+        return $this->hasMany(Customer::class, 'assigned_agent_id');
+    }
+
+    public function policies(): HasMany
+    {
+        return $this->hasMany(Policy::class, 'writing_agent_id');
+    }
+}

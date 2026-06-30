@@ -1,0 +1,49 @@
+occ_Type,occ_Code,occ_des_th,occ_des_en
+Individual,1,นักการเมืองหรือบุคคลใกล้ชิดนักการเมือง ,Politician/Work for Politician
+Individual / Coporate,2,ค้าอัญมณี เพชรพลอย ทองคำ หรือเครื่องประดับที่ประดับด้วยอัญมณ เพชรพลอย ทองคำ,Jewelry Traders
+Individual / Coporate,3,ซื้อขาย แลกเปลี่ยนทรัพย์ที่ใช้แล้ว รวมถึงวัตถุโบราณ ,Merchant of used goods including antiquities
+Individual / Coporate,4,โอนและรับโอนเงินทั้งภายในประเทศและข้ามประเทศ หรือส่งคนไปทำ งานในต่างประเทศ,Money transfer in Thailand/Aboard or sending workers to aboard
+Individual / Coporate,5,นายหน้าจัดหางาน ทั้งการรับคนเข้าทำงานจากต่างประเทศ หรือส่งคน ไปทำงานในต่างประเทศ,Domestic/International Employment Brokers
+Individual / Coporate,6,คาสิโน/บ่อนการพนัน ,Casino/Gambling
+Individual / Coporate,7,สถานบริการ/สถานเริงรมย์ ,Entertainment Spot
+Individual / Coporate,8,รับแลกเปลี่ยนเงินตรา ,Money Exchange
+Individual / Coporate,9,ค้าอาวุธยุทภัณฑ์ ,Arms Trade
+Individual / Coporate,10,นำเที่ยว บริษัททัวร์ ,Travel/Tour
+Individual,11,ข้าราชการ ,Government Officer
+Individual,12,ข้าราชการบำนาญ ,Pensioner
+Individual,13,ครู/อาจารย์ ,Teacher/Instructor
+Individual,14,เจ้าของกิจการ ,Enterpreneur
+Individual,15,ตำรวจ/ทหาร ,Police/Solider
+Individual,16,นักกฎหมาย ,Lawyer
+Individual,17,นักคอมพิวเตอร์ ,Computer
+Individual,18,วิศวกร/สถาปนิก/มัณฑนากร ,Engineer/Architechture/Interior designer
+Individual,19,นักบวช ,Priest
+Individual,20,นักบัญชี ,Accountant
+Individual,21,นักเรียน/นักศึกษา ,Student
+Individual,22,บุคลากรทางการแพทย์ ,Healthcare
+Individual,23,พนักงานบริษัท ,Employee
+Individual,24,พนักงานรัฐบาล ,Government Employee
+Individual,25,พนักงานรัฐวิสาหกิจ ,State Enterprise Employee
+Individual,26,พ่อบ้าน/แม่บ้าน ,Housekeeper
+Individual,27,แพทย์/สัตวแพทย์ ,Doctor/Veterinary
+Individual,28,รับจ้าง ,Contractor
+Individual,29,ศิลปิน/นักแสดง ,Artist/Actor
+Individual,30,อาชีพอิสระ ,Freelance
+Individual,31,เกษตรกร ,Farmer
+Corporate,32,การก่อสร้าง,Construction
+Corporate,33,การขนส่ง สถานที่เก็บสินค้า และการคมนาคม,"Logistic, Warehouse, Transportation"
+Corporate,34,การประมง,Fishery
+Corporate,35,การทำเหมือนแร่และถ่านหิน,Mining and Coalmine
+Corporate,36,การบริการด้านสุขภาพและงานสังคมสงเคราะห์,Health and Social Welfare
+Corporate,37,การผลิต,Manufacturing
+Corporate,38,การไฟฟ้า แก๊ส และการประปา,"Electricity, Gas, Plumbing"
+Corporate,39,การให้บริการชุมชน สังคม และบริการส่วนบุคคล,"Serving the community, Social Services, Personal services"
+Corporate,40,การศึกษา,Education
+Corporate,41,ลูกจ้างในครัวเรือนส่วนบุคคล,Households with Employed Persons
+Corporate,42,ตัวกลางทางการเงิน,Financial intermediaries
+Corporate,43,โรงแรมและภัตตาคาร,Hotels and Restaurants
+Corporate,44,บริการด้านสังหาริมทรัพย์ การให้เช่าและบริการทางธุรกิจ,"Foreclosure Services, Renting and Business Activities"
+Corporate,45,องค์การระหว่างประเทศ และองค์การต่างประเทศอื่น ๆ และสมาชิก,International organizations and Other International Bodies and Members
+Corporate,46,การขายส่ง ขายปลีก และซ่อมแซมยานยนต์ ของใช้ส่วนบุคคล และของใช,"Wholesale, Retail, Repair of motor vehicles, of personal, and houseware"
+Corporate,47,เกษตรกรรม การล่าสัตว์และบริการที่เกี่ยวข้อง,"Agriculture, Hunting and related services"
+Individual / Coporate,999,อื่นๆ ,Others

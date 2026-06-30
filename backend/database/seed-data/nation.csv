@@ -1,0 +1,243 @@
+ID,nation_id,country_id,nation_name_th,nation_name_en,country_name_th,country_name_en
+1,TH,THA,ไทย,THAILAND,ไทย,Thailand
+2,CN,CHN,จีน,CHINA,จีน,China
+3,IN,IND,อินเดีย,INDIA,อินเดีย,India
+4,US,USA,สหรัฐอเมริกา,United States of America,สหรัฐอเมริกา,United States of America
+5,JP,JPN,ญี่ปุ่น,JAPAN,ญี่ปุ่น,Japan
+6,NZ,NZL,นิวซีแลนด์,NEW ZEALAND,นิวซีแลนด์,New Zealand
+7,RU,RUS,รัสเซีย,RUSSIAN FEDERATION,สหพันธรัฐรัสเซีย,Russian Federation
+8,TW,TWN,ไต้หวัน,"TAIWAN, PROVINCE OF CHINA",ไต้หวันสาธารณรัฐจีน,"Taiwan, Republic of China"
+9,AW,ABW,อารูบา,ARUBA,อารูบา,Aruba
+10,AF,AFG,อัฟกานิสถาน,AFGHANISTAN,อัฟกานิสถาน,Afghanistan
+11,AO,AGO,แองโกลา,ANGOLA,แองโกลา,Angola
+12,AI,AIA,แองกวิลลา,ANGUILLA,แองกวิลลา,Anguilla
+13,AX,ALA,หมู่เกาะโอลันด์,LAND ISLANDS,หมู่เกาะโอลันด์,ลland Islands
+14,AL,ALB,แอลเบเนีย,ALBANIA,แอลเบเนีย,Albania
+15,AD,AND,อันดอร์รา,ANDORRA,อันดอร์รา,Andorra
+16,AN,ANT,เนเธอแลนด์แอนทิลลิส,NETHERLANDS ANTILLES,เนเธอแลนด์แอนทิลลิส ,Netherlands Antilles
+17,AE,ARE,สหรัฐอาหรับเอมิเรตส์,UNITED ARAB EMIRATES,สหรัฐอาหรับเอมิเรตส์,United Arab Emirates
+18,AR,ARG,อาร์เจตินา,ARGENTINA,อาร์เจตินา,Argentina
+19,AM,ARM,อาร์เมเนีย,ARMENIA,อาร์เมเนีย,Armenia
+20,AS,ASM,อเมริกันซามัว,AMERICAN SAMOA,อเมริกันซามัว,American Samoa
+21,AQ,ATA,แอนตาร์กติกา,ANTARCTICA,แอนตาร์กติกา,Antarctica
+22,TF,ATF,ดินแดนเฟรนช์เซาเทิร์นและแอนตาร์กติกแลนส์,French Southern and Antarctic Lands,ดินแดนเฟรนช์เซาเทิร์นและแอนตาร์กติกแลนส์,French Southern and Antarctic Lands
+23,AG,ATG,แอนติกาและบาร์บูดา,ANTIGUA AND BARBUDA,แอนติกาและบาร์บูดา ,Antigua and Barbuda
+24,AU,AUS,ออสเตรเลีย,AUSTRALIA,ออสเตรเลีย,Australia
+25,AT,AUT,ออสเตรีย,AUSTRIA,ออสเตรีย ,Austria
+26,AZ,AZE,อาร์เซอร์ไบจาน,AZERBAIJAN,อาร์เซอร์ไบจาน,Azerbaijan
+27,BI,BDI,บุรุนดี,BURUNDI,บุรุนดี,Burundi
+28,BE,BEL,เบลเยี่ยม,BELGIUM,เบลเยี่ยม,Belgium
+29,BJ,BEN,เบนิน,BENIN,เบนิน,Benin
+30,BF,BFA,บูร์กินาฟาโซ,BURKINA FASO,บูร์กินาฟาโซ ,Burkina Faso
+31,BD,BGD,บังกลาเทศ,BANGLADESH,บังกลาเทศ ,Bangladesh
+32,BG,BGR,บัลแกเรีย,BULGARIA,บัลแกเรีย,Bulgaria
+33,BH,BHR,บาห์เรน,BAHRAIN,บาห์เรน,Bahrain
+34,BS,BHS,บาฮามาส,BAHAMAS,บาฮามาส ,Bahamas
+35,BA,BIH,บอสเนียและเฮอร์เซโกวีนา,BOSNIA AND HERZEGOVINA,บอสเนียและเฮอร์เซโกวีนา,Bosnia and Herzegovina
+36,BY,BLR,เบลารุส,BELARUS,เบลารุส,Belarus
+37,BM,BMU,เบอร์มิวดา,BERMUDA,เบอร์มิวดา,Bermuda
+38,BR,BRA,บราซิล,BRAZIL,บราซิล,Brazil
+39,BB,BRB,บาร์เบโดส,BARBADOS,บาร์เบโดส ,Barbados
+40,BT,BTN,ภูฏาน,BHUTAN,ภูฏาน,Bhutan
+41,BV,BVT,เกาะยูเว,BOUVET ISLAND,เกาะยูเว,Bouvet Island
+42,BW,BWA,บอตสวานา,BOTSWANA,บอตสวานา ,Botswana
+43,CF,CAF,สาธารณรัฐแอฟริกากลาง,CENTRAL AFRICAN REPUBLIC,สาธารณรัฐแอฟริกากลาง,Central African Republic
+44,CC,CCK,ดินแดนหมู่เกาะโคโคส(คีลิง),COCOS (KEELING) ISLANDS,ดินแดนหมู่เกาะโคโคส(คีลิง),The Territory of Cocos (Keeling) Islands
+45,CH,CHE,สวิตเซอร์แลนด์,SWITZERLAND,สวิตเซอร์แลนด์,Switzerland
+46,CL,CHL,ชิลี,CHILE,ชิลี,Chile
+47,CI,CIV,โกตดิวัวร์,Côte d’Ivoire,โกตดิวัวร์,C๔te d'Ivoire
+48,CM,CMR,แคเมอรูน,CAMEROON,แคเมอรูน,Cameroon
+49,CD,COD,สาธารณรัฐประชาธิปไตยคองโก,"CONGO, THE DEMOCRATIC REPUBLIC OF THE",สาธารณรัฐประชาธิปไตยคองโก,The Democratic Republic of the Congo
+50,CK,COK,หมู่เกาะคุก ,COOK ISLANDS,หมู่เกาะคุก ,Cook Islands
+51,CO,COL,โคลอมเบีย,COLOMBIA,โคลอมเบีย ,Colombia
+52,KM,COM,คอโมโรส,COMOROS,คอโมโรส ,Comoros
+53,CV,CPV,กาบูว์ดี,Cabo Verde,กาบูว์ดี,Cabo Verde
+54,CR,CRI,คอสตาริกา,COSTA RICA,คอสตาริกา,Costa Rica
+55,CU,CUB,คิวบา,CUBA,คิวบา,Cuba
+56,CX,CXR,เกาะคริสต์มาส,CHRISTMAS ISLAND,เกาะคริสต์มาส,Christmas Island
+57,KY,CYM,หมู่เกาะเคย์แมน,CAYMAN ISLANDS,หมู่เกาะเคย์แมน,Cayman Islands
+58,CY,CYP,ไซปรัส,CYPRUS,ไซปรัส,Cyprus
+59,CZ,CZE,สาธารณรัฐเช็ก,CZECH REPUBLIC,สาธารณรัฐเช็ก,Czech Republic
+60,DE,DEU,เยอรมนี,GERMANY,เยอรมนี,Germany
+61,DJ,DJI,จิบูตี,DJIBOUTI,จิบูตี,Djibouti
+62,DK,DNK,เดนมาร์ก,DENMARK,เดนมาร์ก ,Danmark
+63,DZ,DZA,แอลจีเรีย,ALGERIA,แอลจีเรีย,Algeria
+64,EC,ECU,เอกวาดอร์,ECUADOR,เอกวาดอร์,Ecuador
+65,EG,EGY,อียิปต์,EGYPT,อียิปต์,Egypt
+66,ER,ERI,เอริเทรีย,ERITREA,เอริเทรีย,Eritrea
+67,EH,ESH,เวสเทิร์นสะฮารา,WESTERN SAHARA,เวสเทิร์นสะฮารา,Western Sahara
+68,ES,ESP,สเปน,SPAIN,สเปน,Spain
+69,EE,EST,เอสโตเนีย,ESTONIA,เอสโตเนีย,Estonia
+70,ET,ETH,เอธิโอเปีย,ETHIOPIA,เอธิโอเปีย,Ethiopia
+71,FI,FIN,ฟินแลนด์,FINLAND,ฟินแลนด์,Finland
+72,FJ,FJI,ฟิจิ,FIJI,ฟิจิ,Fiji
+73,FK,FLK,หมู่เกาะฟอล์กแลนด์ (มัลวีนัส),FALKLAND ISLANDS (MALVINAS),หมู่เกาะฟอล์กแลนด์ (มัลวีนัส),Falkland Islands (Malvinas)
+74,FR,FRA,ฝรั่งเศส,FRANCE,ฝรั่งเศส,France
+75,FO,FRO,หมู่เกาะแฟโร,FAROE ISLANDS,หมู่เกาะแฟโร,Faroe Islands
+76,FM,FSM,ไมโครนีเซีย,"MICRONESIA, FEDERATED STATES OF",ไมโครนีเซีย,Micronesia
+77,GA,GAB,กาบอง,GABON,กาบอง,Gabon
+78,GB,GBR,สหราชอาณาจักร,UNITED KINGDOM,สหราชอาณาจักร,United Kingdom
+79,GE,GEO,จอร์เจีย,GEORGIA,จอร์เจีย,Georgia
+80,GH,GHA,กานา,GHANA,กานา,Ghana
+81,GI,GIB,ยิบรอลตาร์,GIBRALTAR,ยิบรอลตาร์ ,Gibraltar
+82,GN,GIN,กินี,GUINEA,กินี,Guinea
+83,GP,GLP,กวาเดอลูป,GUADELOUPE,กวาเดอลูป,Guadeloupe
+84,GM,GMB,แกมเบีย,GAMBIA,แกมเบีย,Gambia
+85,GQ,GNQ,อิเควทอเรียลกินี,EQUATORIAL GUINEA,อิเควทอเรียลกินี,Equatorial Guinea
+86,GR,GRC,กรีซ,GREECE,กรีซ,Greece
+87,GD,GRD,เกรเนดา,GRENADA,เกรเนดา,Grenada
+88,GL,GRL,กรีนแลนด์ ,GREENLAND,กรีนแลนด์ ,Greenland
+89,GT,GTM,กัวเตมาลา,GUATEMALA,กัวเตมาลา,Guatemala
+90,GF,GUF,เฟรนช์เกียนา,FRENCH GUIANA,เฟรนช์เกียนา,French Guiana
+91,GU,GUM,กวม,GUAM,กวม,Guam
+92,GY,GUY,กายอานา,GUYANA,กายอานา,Guyana
+93,HK,HKG,ฮ่องกง,HONG KONG,ฮ่องกง,Hong Kong
+94,HM,HMD,หมู่เกาะเฮิร์ดและหมู่เกาะแมกดอนัลด์,Heard and McDonald Islands,หมู่เกาะเฮิร์ดและหมู่เกาะแมกดอนัลด์,Heard and McDonald Islands
+95,HN,HND,ฮอนดูรัส,HONDURAS,ฮอนดูรัส,Honduras
+96,HT,HTI,เฮติ,HAITI,เฮติ,Haiti
+97,HU,HUN,ฮังการี,HUNGARY,ฮังการี,Hungary
+98,ID,IDN,อินโดนีเซีย,INDONESIA,อินโดนีเซีย ,Indonesia
+99,IO,IOT,บริติชอินเดียนโอเชียนเทร์ริทอรี,BRITISH INDIAN OCEAN TERRITORY,บริติชอินเดียนโอเชียนเทร์ริทอรี,British Indian Ocean Territory
+100,IE,IRL,ไอร์แลนด์,IRELAND,ไอร์แลนด์,Ireland
+101,IQ,IRQ,อิรัก,IRAQ,อิรัก,Iraq
+102,IS,ISL,ไอซ์แลนด์,ICELAND,ไอซ์แลนด์ ,Iceland
+103,IL,ISR,อิสราเอล,ISRAEL,อิสราเอล,Israel
+104,IT,ITA,อิตาลี,ITALY,อิตาลี,Italy
+105,JM,JAM,จาเมกา,JAMAICA,จาเมกา,Jamaica
+106,JO,JOR,จอร์แดน,JORDAN,จอร์แดน,Jordan
+107,KZ,KAZ,คาซัคสถาน,KAZAKHSTAN,คาซัคสถาน ,Kazakhstan
+108,KE,KEN,เคนยา,KENYA,เคนยา,Kenya
+109,KG,KGZ,คีร์กีซสถาน,KYRGYZSTAN,คีร์กีซสถาน ,Kyrgyzstan
+110,KH,KHM,กัมพูชา,CAMBODIA,กัมพูชา,Cambodia
+111,KR,KOR,เกาหลีใต้,"KOREA, REPUBLIC OF",เกาหลีใต้,Republic of Korea
+112,KW,KWT,คูเวต,KUWAIT,คูเวต,Kuwait
+113,LB,LBN,เลบานอน,LEBANON,เลบานอน,Lebanon
+114,LR,LBR,ไลบีเรีย,LIBERIA,ไลบีเรีย,Liberia
+115,LY,LBY,ลิเบีย,LIBYAN ARAB JAMAHIRIYA,ลิเบีย,Libya
+116,LC,LCA,เซนต์ลูเซีย,SAINT LUCIA,เซนต์ลูเซีย ,Saint Lucia
+117,LK,LKA,ศรีลังกา,SRI LANKA,ศรีลังกา,Sri Lanka
+118,LS,LSO,เลโซโท,LESOTHO,เลโซโท,Lesotho
+119,LT,LTU,ลิทัวเนีย,LITHUANIA,ลิทัวเนีย,Lithuania
+120,LU,LUX,ลักเซมเบิร์ก,LUXEMBOURG,ลักเซมเบิร์ก,Luxembourg
+121,LV,LVA,ลัตเวีย,LATVIA,ลัตเวีย,Latvia
+122,MO,MAC,มาเก๊า,MACAO,มาเก๊า,Macao
+123,MA,MAR,โมร็อกโก,MOROCCO,โมร็อกโก,Morocco
+124,MC,MCO,โมนาโก,MONACO,โมนาโก,Monaco
+125,MG,MDG,มาดากัสการ์,MADAGASCAR,มาดากัสการ์,Madagascar
+126,MV,MDV,มัลดีฟส์,MALDIVES,มัลดีฟส์,Maldives
+127,MX,MEX,เม็กซิโก,MEXICO,เม็กซิโก,Mexico
+128,MK,MKD,สาธารณรัฐมาซิโดเนีย,"MACEDONIA, THE FORMER YUGOSLAV REPUBLIC OF",สาธารณรัฐมาซิโดเนีย,Republic of Macedonia
+129,ML,MLI,มาลี,MALI,มาลี,Mali
+130,MT,MLT,มอลตา,MALTA,มอลตา,Malta
+131,MM,MMR,พม่า,MYANMAR,พม่า,Myanmar
+132,ME,MNE,มอนเตเนโกร,Montenegro,มอนเตเนโกร,Montenegro
+133,MN,MNG,มองโกเลีย,MONGOLIA,มองโกเลีย,Mongolia
+134,MP,MNP,หมู่เกาะนอร์เทิร์นมาเรียนา,NORTHERN MARIANA ISLANDS,หมู่เกาะนอร์เทิร์นมาเรียนา,Northern Mariana Islands
+135,MZ,MOZ,โมซัมบิก,MOZAMBIQUE,โมซัมบิก,Mozambique
+136,MR,MRT,มอริเตเนีย,MAURITANIA,มอริเตเนีย,Mauritania
+137,MS,MSR,มอนต์เซอร์รัต,MONTSERRAT,มอนต์เซอร์รัต,Montserrat
+138,MQ,MTQ,มาร์ตินิก,MARTINIQUE,มาร์ตินิก,Martinique
+139,MY,MYS,มาเลเซีย,MALAYSIA,มาเลเซีย,Malaysia
+140,YT,MYT,มายอต,MAYOTTE,มายอต,Mayotte
+141,NA,NAM,นามิเบีย,NAMIBIA,นามิเบีย,Namibia
+142,NC,NCL,นิวแคลิโดเนีย,NEW CALEDONIA,นิวแคลิโดเนีย,New Caledonia
+143,NE,NER,ไนเจอร์,NIGER,ไนเจอร์,Niger
+144,NF,NFK,เกาะนอร์ฟอล์ก,NORFOLK ISLAND,เกาะนอร์ฟอล์ก,Norfolk Island
+145,NG,NGA,ไนจีเรีย,NIGERIA,ไนจีเรีย,Nigeria
+146,NI,NIC,นิการากัว,NICARAGUA,นิการากัว,Nicaragua
+147,NU,NIU,นีอูเอ,NIUE,นีอูเอ,Niue
+148,NO,NOR,นอร์เวย์,NORWAY,นอร์เวย์,Norway
+149,NR,NRU,นาอูรู,NAURU,นาอูรู,Nauru
+150,OM,OMN,โอมาน,OMAN,โอมาน,Oman
+151,PK,PAK,ปากีสถาน,PAKISTAN,ปากีสถาน,Pakistan
+152,PA,PAN,ปานามา,PANAMA,ปานามา,Panama
+153,PN,PCN,หมู่เกาะพิตแคร์น,Pitcairn Islands,หมู่เกาะพิตแคร์น,Pitcairn Islands
+154,PE,PER,เปรู,PERU,เปรู,Peru
+155,PH,PHL,ฟิลิปปินส์,PHILIPPINES,ฟิลิปปินส์,Philippines
+156,PW,PLW,ปาเลา,PALAU,ปาเลา,Palau
+157,PG,PNG,ปาปัวนิวกินี,PAPUA NEW GUINEA,ปาปัวนิวกินี,Papua New Guinea
+158,PR,PRI,เปอร์โตริโก,PUERTO RICO,เปอร์โตริโก ,Puerto Rico
+159,PT,PRT,โปรตุเกส,PORTUGAL,โปรตุเกส,Portugal
+160,PY,PRY,ปารากวัย,PARAGUAY,ปารากวัย,Paraguay
+161,PF,PYF,เฟรนช์โปลินีเซีย,FRENCH POLYNESIA,เฟรนช์โปลินีเซีย,French Polynesia
+162,QA,QAT,กาตาร์,QATAR,กาตาร์,Qatar
+163,RE,REU,เรอูเนียง,R?union,เรอูเนียง,R้union
+164,RO,ROU,โรมาเนีย,ROMANIA,โรมาเนีย,Romania
+165,RW,RWA,รวันดา,RWANDA,รวันดา,Rwanda
+166,SD,SDN,ซูดาน,SUDAN,ซูดาน,Sudan
+167,SN,SEN,เซเนกัล,SENEGAL,เซเนกัล,Senegal
+168,SG,SGP,สิงคโปร์,SINGAPORE,สิงคโปร์,Singapore
+169,GS,SGS,เกาะเซาท์จอร์เจียและหมู่เกาะเซาท์แซนด์วิช,SOUTH GEORGIA AND THE SOUTH SANDWICH ISLANDS,เกาะเซาท์จอร์เจียและหมู่เกาะเซาท์แซนด์วิช,South Georgia and the South Sandwich Islands
+170,SH,SHN,เซนต์เฮเลนา,SAINT HELENA,เซนต์เฮเลนา,Saint Helena
+171,SJ,SJM,สฟาลบาร์และยานไมเอน,SVALBARD AND JAN MAYEN,สฟาลบาร์และยานไมเอน,Svalbard and Jan Mayen
+172,SB,SLB,หมู่เกาะโซโลมอน,SOLOMON ISLANDS,หมู่เกาะโซโลมอน,Solomon Islands
+173,SL,SLE,เซียร์ราลีโอน,SIERRA LEONE,เซียร์ราลีโอน,Sierra Leone
+174,SV,SLV,เอลซัลวาดอร์,EL SALVADOR,เอลซัลวาดอร์,El Salvador
+175,SM,SMR,ซานมารีโน,SAN MARINO,ซานมารีโน ,San Marino
+176,SO,SOM,โซมาเลีย,SOMALIA,โซมาเลีย ,Somalia
+177,PM,SPM,แซงปีแยร์และมีเกอลง,SAINT PIERRE AND MIQUELON,แซงปีแยร์และมีเกอลง,Saint Pierre and Miquelon
+178,CS,SRB,เซอร์เบีย,SERBIA AND MONTENEGRO,เซอร์เบีย,Serbia
+179,ST,STP,เซาตูเมและปรินซิปี,S?o Tom? and Pr?ncipe,เซาตูเมและปรินซิปี,Sao Tome and Principe
+180,SI,SVN,สโลวีเนีย,SLOVENIA,สโลวีเนีย,Slovenia
+181,SE,SWE,สวีเดน,SWEDEN,สวีเดน,Sweden
+182,SZ,SWZ,สวาซิแลนด์,SWAZILAND,สวาซิแลนด์,Swaziland
+183,TC,TCA,หมู่เกาะเติร์กและหมู่เกาะเคลอส,TURKS AND CAICOS ISLANDS,หมู่เกาะเติร์กและหมู่เกาะเคลอส,Turks and Caicos Islands
+184,TD,TCD,ชาด,CHAD,ชาด,Tchad
+185,TG,TGO,โตโก,TOGO,โตโก,Togo
+186,TJ,TJK,ทาจิกิสถาน,TAJIKISTAN,ทาจิกิสถาน ,Tajikistan
+187,TK,TKL,โตเกเลา,TOKELAU,โตเกเลา,Tokelau
+188,TM,TKM,เติร์กเมนิสถาน,TURKMENISTAN,เติร์กเมนิสถาน,Turkmenistan
+189,TL,TLS,ติมอร์-เลสเต,TIMOR-LESTE,ติมอร์-เลสเต,Timor-Leste
+190,TT,TTO,ตรินิแดดและโตเบโก,TRINIDAD AND TOBAGO,ตรินิแดดและโตเบโก,Trinidad and Tobago
+191,TN,TUN,ตูนิเซีย,TUNISIA,ตูนิเซีย,Tunisia
+192,TR,TUR,ตุรกี,TURKEY,ตุรกี,Turkey
+193,TV,TUV,ตูวาลู,TUVALU,ตูวาลู,Tuvalu
+194,UG,UGA,ยูกันดา,UGANDA,ยูกันดา,Uganda
+195,UA,UKR,ยูเครน,UKRAINE,ยูเครน,Ukraine
+196,UM,UMI,เกาะเล็กรอบนอกของสหรัฐอเมริกา,UNITED STATES MINOR OUTLYING ISLANDS,เกาะเล็กรอบนอกของสหรัฐอเมริกา,United States Minor Outlying Islands
+197,UY,URY,อุรุกวัย,URUGUAY,อุรุกวัย,Uruguay
+198,UZ,UZB,อุซเบกิสถาน,UZBEKISTAN,อุซเบกิสถาน,Uzbekistan
+199,VA,VAT,นครรัฐวาติกัน,Vatican City State,นครรัฐวาติกัน,State of the Vatican City
+200,VC,VCT,เซนต์วินเซนต์และเกรนาดีนส์,SAINT VINCENT AND THE GRENADINES,เซนต์วินเซนต์และเกรนาดีนส์,Saint Vincent and the Grenadines
+201,VG,VGB,หมู่เกาะบริติซเวอร์จิน,"VIRGIN ISLANDS, BRITISH",หมู่เกาะบริติซเวอร์จิน,British Virgin Islands
+202,VI,VIR,หมู่เกาะเวอร์จินของสหรัฐอเมริกา,"VIRGIN ISLANDS, U.S.",หมู่เกาะเวอร์จินของสหรัฐอเมริกา ,"United States Virgin Islands,USVI"
+203,VN,VNM,เวียดนาม,Socialist Republic of Vietnam,เวียดนาม,Viet Nam
+204,VU,VUT,วานูอาตู,VANUATU,วานูอาตู,Vanuatu
+205,WF,WLF,วาลลิสและฟูตูนา,WALLIS AND FUTUNA,วาลลิสและฟูตูนา,Wallis and Futuna
+206,WS,WSM,ซามัว,SAMOA,ซามัว,Samoa
+207,YE,YEM,เยเมน,YEMEN,เยเมน ,Yemen
+208,ZM,ZMB,แซมเบีย,"Zaire see CONGO, THE DEMOCRATIC REPUBLIC OF THE ZAMBIA",แซมเบีย ,Zambia
+209,ZW,ZWE,ซิมบับเว,ZIMBABWE,ซิมบับเว,Zimbabwe
+210,BN,BRN,เนการา บรูไนคารุสซาลาม,BRUNEI DARUSSALAM,เนการาบรูไนคารุสซาลาม,Negara Brunei Darussalam
+211,BO,BOL,โบลิเวีย,BOLIVIA,รัฐพหุชนชาติแห่งโบลิเวีย,Plurinational State of Bolivia
+212,BZ,BLZ,เบลีซ,BELIZE,เบลีซ์,Belize
+213,CA,CAN,แคนาดา,CANADA,แคนาดา,Canada
+214,CG,COG,สาธารณรัฐคองโก,CONGO,คองโก,Congo
+215,DM,DMA,ดอมินีกา,DOMINICA,โดมินิกา,Dominica
+216,DO,DOM,สาธารณรัฐโดมินิกัน,DOMINICAN REPUBLIC,สหรัสโดมิกัน,Dominican Republic
+217,GW,GNB,กินี-บิสเซา,GUINEA-BISSAU,กินีบิสเซา,Guinea-Bissau
+218,HR,HRV,โครเอเชีย,CROATIA,โครเอเซีย,Croatia
+219,IR,IRN,อิหร่าน,"IRAN, ISLAMIC REPUBLIC OF",สาธารณรัฐอิสลามอิหร่าน,Islamic Republic of Iran
+220,KI,KIR,คิริบาส,KIRIBATI,คิริบาตี,Kiribati
+221,KN,KNA,เซนต์คิตส์และเนวิส,SAINT KITTS AND NEVIS,เซนต์ศิตส์และเนวิส,Saint Kitts and Nevis
+222,KP,PRK,กาหลีเหนือ,"KOREA, DEMOCRATIC PEOPLE'S REPUBLIC OF",เกาหลีเหนือ,Democratic People's Republic of Korea
+223,LA,LAO,ลาว,LAO PEOPLE'S DEMOCRATIC REPUBLIC,สาธารณรัฐประชาธิปไตยประชาชนลาว,Lao People's Democratic Republic
+224,LI,LIE,ลิกเตนสไตน์,LIECHTENSTEIN,ลิกเตนส์ไตน์,Liechtenstein
+225,MD,MDA,มอลโดวา,"MOLDOVA, REPUBLIC OF",สาธารณรัฐมอลโดวา ,Republic of Moldova
+226,MH,MHL,หมู่เกาะมาร์แชลล์,MARSHALL ISLANDS,หมู่เกาะมาร์แซลล์,Marshall Islands
+227,MU,MUS,มอริเชียส,MAURITIUS,เมริเซียส,Mauritius
+228,MW,MWI,มาลาวี,MALAWI,สาธารณรัฐมาลาวี,Republic of Malawi
+229,NL,NLD,เนเธอร์แลนด์,NETHERLANDS,เนเธอแลนด์,Netherlands
+230,NP,NPL,เนปาล,NEPAL,สหพันธ์สาธารณประชาชาธิปไตยเนปาล,Federal Democratic Republic of Nepal
+231,PL,POL,โปแลนด์,POLAND,สาธารณรัฐโปแลนด์,Republic of Poland
+232,PS,PSE,ปาเลสไตน์,"PALESTINIAN TERRITORY, OCCUPIED",รัฐปาเลสไตน์,State of Palestine
+233,SA,SAU,ซาอุดีอาระเบีย,SAUDI ARABIA,ซาอุดิอาระเบีย,Saudi Arabia
+234,SC,SYC,เซเชลส์,SEYCHELLES,เซเซลล์,Seychelles
+235,SK,SVK,สโลวาเกีย,SLOVAKIA,สโลวะเกีย,Slovakia
+236,SR,SUR,ซูรินาม,SURINAME,ซูรินาเม ,Suriname
+237,SY,SYR,ซีเรีย,SYRIAN ARAB REPUBLIC,สาธารณรัฐอาหรับซีเรีย,Syrian Arab Republic
+238,TO,TON,ตองก้า,TONGA,ตองกา,Tonga
+239,TZ,TZA,แทนซาเนีย,"TANZANIA, UNITED REPUBLIC OF",สหสาธารณรัฐแทนซาเนีย,United Republic of Tanzania
+240,VE,VEN,เวเนซุเอลา,VENEZUELA,สาธารณรัฐโบลีวาร์แห่งเวเนซุเอลา,Bolivarian Republic of Venezuela
+241,ZA,ZAF,แอฟริกาใต้,SOUTH AFRICA,สาธารณรัฐแอฟริกาใต้,Republic of South Africa
+242,KS,KOS,คอซอวอ,Kosovo,สาธารณรัฐคอซอวอ,Republic of Kosovo

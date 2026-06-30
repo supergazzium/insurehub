@@ -1,0 +1,245 @@
+Insured_Type,Insured_Type_ID,Title_Code,Description_TH,Description_EN
+Corporate,2,1,บริษัท,Company
+Corporate,2,2,ห้างหุ้นส่วนจำกัด,Limited Partnership
+Corporate,2,3,ร้าน,Shop
+Corporate,2,5,สมาคม,Association
+Corporate,2,6,มูลนิธิ,Foundation
+Corporate,2,7,ห้างหุ้นส่วนสามัญ,Registered Ordinary Partnership
+Corporate,2,8,สำนักงาน,Office
+Corporate,2,9,มหาวิทยาลัย,University
+Corporate,2,10,โรงเรียน,School
+Corporate,2,11,โรงพยาบาล,Hospital
+Corporate,2,12,อื่นๆ,Other
+Corporate,2,13,กรม,Department
+Corporate,2,14,กลุ่ม,Group
+Corporate,2,15,กอง,Division
+Corporate,2,16,โกดัง,Warehouse
+Corporate,2,17,คณะ,Faculty
+Corporate,2,18,คลินิก,Clinic
+Corporate,2,19,ชมรม,Club
+Corporate,2,20,เทศบาล,Municipality
+Corporate,2,21,ธนาคาร,Bank
+Corporate,2,22,นิติบุคคล,Juristic person
+Corporate,2,23,บจก.,PLC
+Corporate,2,24,บมจ.,PCL
+Corporate,2,25,โรงงาน,Factory
+Corporate,2,26,โรงแรม,Hotel
+Corporate,2,27,วิทยาลัย,College
+Corporate,2,28,ศาล,Court
+Corporate,2,29,ศูนย์,Center
+Corporate,2,30,สถานี,Station
+Corporate,2,31,สถาบัน,Institute
+Corporate,2,32,ห้าง,Department Store
+Corporate,2,33,องค์การ,Organization
+Corporate,2,35,วัด,Temple
+Individual,1,5,คุณ,Khun
+Individual,1,6,นาย,Mr.
+Individual,1,7,นาง,Mrs.
+Individual,1,8,นางสาว,Miss
+Individual,1,11,จ่าสิบตรี,Sergeant Major 3rd class(SM.3)
+Individual,1,12,จ่าสิบตรีหญิง,Sergeant Major 3rd class(SM.3)
+Individual,1,13,จ่าสิบโท,Sergeant Major 2nd class(SM.2)
+Individual,1,14,จ่าสิบโทหญิง,Sergeant Major 2nd class(SM.2)
+Individual,1,15,จ่าสิบเอก,Sergeant Major 1st class(SM.1)
+Individual,1,16,จ่าสิบเอกหญิง,Sergeant Major 1st class(SM.1)
+Individual,1,17,ร้อยตรี,Sub Lieutenant (SubLt.)
+Individual,1,18,ร้อยตรีหญิง,Sub Lieutenant (SubLt.)
+Individual,1,19,ร้อยโท,Lieutenant (Lt.)
+Individual,1,20,ร้อยโทหญิง,Lieutenant (Lt.)
+Individual,1,21,ร้อยเอก,Captain(Capt.)
+Individual,1,22,ร้อยเอกหญิง,Captain(Capt.)
+Individual,1,23,พันตรี,Major(Maj.)
+Individual,1,24,พันตรีหญิง,Major(Maj.)
+Individual,1,25,พันโท,Lieutenant Colonel(Lt.Col)
+Individual,1,26,พันโทหญิง,Lieutenant Colonel(Lt.Col)
+Individual,1,27,พันเอก,Colonel(Col.)
+Individual,1,28,พันเอกหญิง,Colonel(Col.)
+Individual,1,29,พลตรี,Major General(Maj.Gen.)
+Individual,1,30,พลตรีหญิง,Major General(Maj.Gen.)
+Individual,1,31,พลโท,Lieutenant General(Lt.Gen.)
+Individual,1,32,พลโทหญิง,Lieutenant General(Lt.Gen.)
+Individual,1,33,พลเอก,General(Gen.)
+Individual,1,34,พลเอกหญิง,General(Gen.)
+Individual,1,35,พันจ่าตรี,Chief Petty Officer 3rd class (CPO 3)
+Individual,1,36,พันจ่าตรีหญิง,Chief Petty Officer 3rd class (CPO 3)
+Individual,1,37,พันจ่าโท,Chief Petty Officer 2nd class (CPO 2)
+Individual,1,38,พันจ่าโทหญิง,Chief Petty Officer 2nd class (CPO 2)
+Individual,1,39,พันจ่าเอก,Chief Petty Officer 1st class(CPO 1)
+Individual,1,40,พันจ่าเอกหญิง,Chief Petty Officer 1st class(CPO 1)
+Individual,1,41,สิบตรี,Private 1st class(Pfc.)
+Individual,1,42,สิบตรีหญิง,Private 1st class(Pfc.)
+Individual,1,43,สิบโท,Corporal(Cpl.)
+Individual,1,44,สิบโทหญิง,Corporal(Cpl.)
+Individual,1,45,สิบเอก,Sergeant(Sgt.)
+Individual,1,46,สิบเอกหญิง,Sergeant(Sgt.)
+Individual,1,47,ว่าที่ร้อยตรีหรือว่าที่เรือตรี,Acting Second Lieutenant
+Individual,1,48,ว่าที่ร้อยโท,Acting First Lieutenant
+Individual,1,49,ว่าที่ร้อยเอก,Acting Captain
+Individual,1,50,พลทหาร,Private(Pvt.)
+Individual,1,51,พลทหารหญิง,Private(Pvt.)
+Individual,1,52,พลตำรวจตรี,Police Major General (Pol.Maj.General)
+Individual,1,53,พลตำรวจโท,Police Lieutenant General (Pol.Lt.Gen.)
+Individual,1,54,พลตำรวจเอก,Police General(Pol.Gen.)
+Individual,1,55,พันตำรวจตรี,Police Major (Pol.Maj.)
+Individual,1,56,พันตำรวจตรีหญิง,Police Major (Pol.Maj.)
+Individual,1,57,พันตำรวจโท,Police Lieutenant Colonel (Pol.Lt.Col)
+Individual,1,58,พันตำรวจโทหญิง,Police Lieutenant Colonel (Pol.Lt.Col)
+Individual,1,59,พันตำรวจเอก,Police Colonel (Pol.Col.)
+Individual,1,60,พันตำรวจเอกหญิง,Police Colonel (Pol.Col.)
+Individual,1,61,ร้อยตำรวจตรี,Police Sub-Lieutenant (Pol.Sub.Lt)
+Individual,1,62,ร้อยตำรวจตรีหญิง,Police Sub-Lieutenant (Pol.Sub.Lt)
+Individual,1,63,ร้อยตำรวจโท,Police Lieutenant (Pol.Lt.)
+Individual,1,64,ร้อยตำรวจโทหญิง,Police Lieutenant (Pol.Lt.)
+Individual,1,65,ร้อยตำรวจเอก,Police Captain (Pol.Capt.)
+Individual,1,66,ร้อยตำรวจเอกหญิง,Police Captain (Pol.Capt.)
+Individual,1,67,ดาบตำรวจ,Police Senior Sergeant Major (Pol.Sen.Sgt.Maj.)
+Individual,1,68,ดาบตำรวจหญิง,Police Senior Sergeant Major (Pol.Sen.Sgt.Maj.)
+Individual,1,69,จ่าสิบตำรวจ,Police Sergeant Major (Pol.Sgt.Maj.)
+Individual,1,70,จ่าสิบตำรวจหญิง,Police Sergeant Major (Pol.Sgt.Maj.)
+Individual,1,71,สิบตำรวจตรี,Police Lance Corporal (Pol.L/C)
+Individual,1,72,สิบตำรวจตรีหญิง,Police Lance Corporal (Pol.L/C)
+Individual,1,73,สิบตำรวจโท,Police Corporal (Pol.Cpl.)
+Individual,1,74,สิบตำรวจโทหญิง,Police Corporal (Pol.Cpl.)
+Individual,1,75,สิบตำรวจเอก,Police Sergeant (Pol.Sgt.)
+Individual,1,76,สิบตำรวจเอกหญิง,Police Sergeant (Pol.Sgt.)
+Individual,1,77,พลตำรวจ,Police Constable (Pol.Const.)
+Individual,1,78,พลตำรวจหญิง,Police Constable (Pol.Const.)
+Individual,1,79,พลอากาศตรี,Air Vice Marshal(AVM)
+Individual,1,80,พลอากาศโท,Air Marshal(AM)
+Individual,1,81,พลอากาศเอก,Air Chief Marshal(ACM)
+Individual,1,82,นาวาอากาศตรี,Squadron Leader(Sqn.Ldr.)
+Individual,1,83,นาวาอากาศตรีหญิง,Squadron Leader(Sqn.Ldr.)
+Individual,1,84,นาวาอากาศโท,Wing Commander(Wg.Cdr.)
+Individual,1,85,นาวาอากาศโทหญิง,Wing Commander(Wg.Cdr.)
+Individual,1,86,นาวาอากาศเอก,Group Captain(Gp.Capt)
+Individual,1,87,นาวาอากาศเอกหญิง,Group Captain(Gp.Capt)
+Individual,1,88,เรืออากาศตรี,Pilot Officer(Plt.Off)
+Individual,1,89,เรืออากาศตรีหญิง,Pilot Officer(Plt.Off)
+Individual,1,90,เรืออากาศโท,Flying Officer(Flg.Off.)
+Individual,1,91,เรืออากาศโทหญิง,Flying Officer(Flg.Off.)
+Individual,1,92,เรืออากาศเอก,Flight Lieutenant(Flt.Lt.)
+Individual,1,93,เรืออากาศเอกหญิง,Flight Lieutenant(Flt.Lt.)
+Individual,1,94,พันจ่าอากาศตรี,Flight Sergeant 3rd class(FS 3)
+Individual,1,95,พันจ่าอากาศตรีหญิง,Flight Sergeant 3rd class(FS 3)
+Individual,1,96,พันจ่าอากาศโท,Flight Sergeant 2nd class(FS 2)
+Individual,1,97,พันจ่าอากาศโทหญิง,Flight Sergeant 2nd class(FS 2)
+Individual,1,98,พันจ่าอากาศเอก,Flight Sergeant 1st class(FS 1)
+Individual,1,99,พันจ่าอากาศเอกหญิง,Flight Sergeant 1st class(FS 1)
+Individual,1,100,พลเรือตรี,Rear Admiral (RAdm.)
+Individual,1,101,พลเรือโท,Vice Admiral(VAdm.)
+Individual,1,102,พลเรือเอก,Admiral (Adm.)
+Individual,1,103,นาวาตรี...(ร.น.),Lieutenant Commander(Lt.Comdr./LCDR)
+Individual,1,104,นาวาตรีหญิง...(ร.น.),Lieutenant Commander(Lt.Comdr./LCDR)
+Individual,1,105,นาวาโท...(ร.น.),Commander(Cdr./CDR)
+Individual,1,106,นาวาโทหญิง...(ร.น.),Commander(Cdr./CDR)
+Individual,1,107,นาวาเอก...(ร.น.),Captain(Capt.)
+Individual,1,108,นาวาเอกหญิง...(ร.น.),Captain(Capt.)
+Individual,1,109,เรือตรี(ร.ต....ร.น.),Sub-Lieutenant(Sub.Lt.)
+Individual,1,110,เรือตรีหญิง(ร.ต.ญ....ร.น.),Sub-Lieutenant(Sub.Lt.)
+Individual,1,111,เรือโท(ร.ท....ร.น.),Lieutenant Junior Grade(LTJG)
+Individual,1,112,เรือโทหญิง(ร.ท.ญ....ร.น.),Lieutenant Junior Grade(LTJG)
+Individual,1,113,เรือเอก(ร.อ....ร.น.),Lieutenant(Lt.)
+Individual,1,114,เรือเอกหญิง(ร.อ.ญ....ร.น.),Lieutenant(Lt.)
+Individual,1,115,จ่าตรี,Petty Officer 3rd class(PO 3)
+Individual,1,116,จ่าตรีหญิง,Petty Officer 3rd class(PO 3)
+Individual,1,117,จ่าโท,Petty Officer 2nd class(PO 2)
+Individual,1,118,จ่าโทหญิง,Petty Officer 2nd class(PO 2)
+Individual,1,119,จ่าเอก,Petty Officer 1st class(PO 1)
+Individual,1,120,จ่าเอกหญิง,Petty Officer 1st class(PO 1)
+Individual,1,121,จ่าอากาศตรี,Leading Aircraftman(LAC)
+Individual,1,122,จ่าอากาศตรีหญิง,Leading Aircraftman(LAC)
+Individual,1,123,จ่าอากาศโท,Corporal(Cpl.)
+Individual,1,124,จ่าอากาศโทหญิง,Corporal(Cpl.)
+Individual,1,125,จ่าอากาศเอก,Sergeant(Sgt.)
+Individual,1,126,จ่าอากาศเอกหญิง,Sergeant(Sgt.)
+Individual,1,127,พันจ่าอากาศตรี,Flight Sergeant 3rd class(FS 3)
+Individual,1,128,พันจ่าอากาศตรีหญิง,Flight Sergeant 3rd class(FS 3)
+Individual,1,129,พันจ่าอากาศโท,Flight Sergeant 2nd class(FS 2)
+Individual,1,130,พันจ่าอากาศโทหญิง,Flight Sergeant 2nd class(FS 2)
+Individual,1,131,พันจ่าอากาศเอก,Flight Sergeant 1st class(FS 1)
+Individual,1,132,พันจ่าอากาศเอกหญิง,Flight Sergeant 1st class(FS 1)
+Individual,1,133,ผู้ช่วยศาสตราจารย์,Assistant Professor
+Individual,1,134,รองศาสตราจารย์,Associate Professor
+Individual,1,135,ศาสตราจารย์,Professor
+Individual,1,136,ด๊อกเตอร์,Doctor
+Individual,1,137,รองศาสตราจารย์ด๊อกเตอร์,Assoc. Prof. Dr.
+Individual,1,138,นายแพทย์,Physician
+Individual,1,139,แพทย์หญิง,Physician
+Individual,1,140,ทันตแพทย์,Dentist
+Individual,1,141,ทันตแพทย์หญิง,Dentist
+Individual,1,142,เภสัชกร,Pharmacist
+Individual,1,143,เภสัชกรหญิง,Pharmacist
+Individual,1,145,หม่อมหลวง,Mom Luang (M.L.)
+Individual,1,146,หม่อมราชวงศ์,Mom Rajawong (M.R.)
+Individual,1,147,หม่อมเจ้า,Mom Chao (M.C.)
+Individual,1,148,สามเณร,Novice
+Individual,1,149,พระ,Buddhist Monk
+Individual,1,150,พระครูสังฆรักษ์,Phrakrusangkharuk
+Individual,1,153,พันเอกพิเศษ,Senior Colonel (Sr Col)
+Individual,1,154,บาทหลวง,Rev.
+Individual,1,155,ผู้ช่วยศาสตราจารย์ด๊อกเตอร์,ASST. PROF. DR.
+Individual,1,156,อาจารย์,Teacher
+Individual,1,157,นายพล,General
+Individual,1,158,จ่าสิบตำรวจ,Police Sergeant Major (Pol.Sgt.Maj.)
+Individual,1,159,ไม่ระบุสถานภาพสมรส,undefined marriage status
+Individual,1,160,ซิสเตอร์,Sister
+Individual,1,161,คุณหญิง,Lady
+Individual,1,163,ว่าที่ร้อยตำรวจตรี,Acting Police Sub-Lieutenant
+Individual,1,166,พันเอกพิเศษหญิง,Senior Colonel (Sr COL)
+Individual,1,167,ศาสตราจารย์ นายแพทย์,Professor doctor
+Individual,1,168,ท่านผู้หญิง,Lady
+Individual,1,169,ว่าที่ร้อยตำรวจโท,Acting Police Lieutenant
+Individual,1,170,นาวาเอกนายแพทย์,Captain Doctor
+Individual,1,172,ว่าที่ร้อยตำรวจเอก,Acting Police Captain
+Individual,1,174,ว่าที่พันตรี,Acting Major
+Individual,1,176,ศ.ดร.,Prof. Dr.
+Individual,1,177,พันตำรวจเอก(พิเศษ),Police Colonel
+Individual,1,178,พลอาสาสมัคร,Militiamen
+Individual,1,181,ว่าที่พันตำรวจตรี,Acting Police Major
+Individual,1,182,พระครู,Phrakru
+Individual,1,183,ท่านผู้พิพากษา,Judge
+Individual,1,184,ว่าที่ร้อยตรีหญิง,Acting Second Lieutenant
+Individual,1,185,ศาสตราจารย์ ด๊อกเตอร์,Prof. Dr.
+Individual,1,186,พลอากาศตรีหญิง,Air Vice Marshal(AVM)
+Individual,1,187,พระครูปลัด,Phrakhu Palad
+Individual,1,188,พระมหา,Phramaha
+Individual,1,189,ฯพณฯ,H.E.
+Individual,1,191,ว่าที่พลตำรวจเอก,Acting Police General
+Individual,1,192,พลเรือโทหญิง,Vice Admiral
+Individual,1,193,ว่าที่พันตำรวจตรีหญิง,Acting Police Major
+Individual,1,194,ว่าที่ร้อยตรี,Acting Police Sub-Lieutenant
+Individual,1,195,ว่าที่ร้อยตำรวจโทหญิง,Acting Police Lieutenant
+Individual,1,196,ว่าที่ร้อยตำรวจตรีหญิง,Acting Police Sub-Lieutenant
+Individual,1,197,นาวาเอกพิเศษ,Captain
+Individual,1,199,ว่าที่เรือตรี,Acting Sub-Lieutenant
+Individual,1,200,พลตำรวจตรีหม่อมหลวง,Pol.Maj.General
+Individual,1,201,ว่าที่เรือโท,Acting Lieutenant Junior Grade
+Individual,1,202,พลเรือตรีหญิง,Rear Admiral(R.Adm/RADM)
+Individual,1,203,ว่าที่เรืออากาศโท,Acting Flying Officer
+Individual,1,204,นาวาตรี,Lieutenant Commander(Lt.Comdr./LCDR)
+Individual,1,205,นาวาตรีหญิง,Lieutenant Commander(Lt.Comdr./LCDR)
+Individual,1,206,นาวาเอก,Captain(Capt.)
+Individual,1,207,นาวาเอกหญิง,Captain(Capt.)
+Individual,1,208,นาวาโท,Commander(Cdr./CDR)
+Individual,1,209,นาวาโทหญิง,Commander(Cdr./CDR)
+Individual,1,210,ว่าที่ร้อยตรีหรือว่าที่เรือตรี,Acting Second Lieutenant
+Individual,1,211,เรือตรี,Sub-Lieutenant(Sub.Lt.)
+Individual,1,212,เรือตรีหญิง,Sub-Lieutenant(Sub.Lt.)
+Individual,1,213,เรือเอก,Lieutenant(Lt.)
+Individual,1,214,เรือเอกหญิง,Lieutenant(Lt.)
+Individual,1,215,เรือโท,Lieutenant Junior Grade(LTJG)
+Individual,1,216,เรือโทหญิง,Lieutenant Junior Grade(LTJG)
+Individual,1,217,พลตำรวจโทหญิง,Police Lieutenant General (Pol.Lt.Gen.)
+Individual,1,219,ว่าที่พันตำรวจเอกหญิง,Acting Police Colonel
+Individual,1,220,ว่าที่เรือตรีหญิง,Acting Sub-Lieutenant
+Individual,1,221,ว่าที่เรืออากาศตรี,Acting Pilot Officer
+Individual,1,222,ว่าที่ร้อยโทหญิง,Acting First Lieutenant
+Individual,1,223,หม่อมเจ้าหญิง,M.C.
+Individual,1,224,ร้อยเอกหญิง,Captain
+Individual,1,226,ว่าที่เรืออากาศตรีหญิง,Acting Pilot Officer
+Individual,1,227,ว่าที่ร้อยตำรวจเอกหญิง,Acting Police Captain
+Individual,1,228,ว่าที่พันตำรวจโท,Acting Police Lieutenant Colonel
+Individual,1,229,ว่าที่เรือเอก,Acting Lieutenant
+Individual,1,258,เด็กชาย,Master
+Individual,1,262,เด็กหญิง,Miss
+Corporate,2,263,สหกรณ์,Cooperative

@@ -1,0 +1,69 @@
+# ── Top-level archives we deliberately don't track ───────────────────────────
+# Original Access XLSX exports — we keep their derived CSVs under backend/database/seed-data/
+/Access Database/
+# Strapi SQL dump — Strapi has been retired
+/Database Agent - Dbeaver/
+# Source-of-truth docx templates — content is now in EmailTemplateSeeder
+/Email Template/
+# Old compiled deploy build
+/insurehub-deploy.zip
+# Spec docs (uncomment to track them)
+/insurance-saas-requirements.docx
+/insurance_saas_function_reference.html
+# Local-only SSH key dir
+/ssh/
+
+# OS / editor cruft
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*~
+
+# ── Backend (Laravel) ────────────────────────────────────────────────────────
+/backend/vendor/
+/backend/node_modules/
+/backend/public/build/
+/backend/public/hot/
+/backend/public/storage
+/backend/storage/*.key
+/backend/storage/app/private/
+/backend/storage/app/public/*
+!/backend/storage/app/public/.gitkeep
+/backend/storage/framework/cache/data/
+/backend/storage/framework/sessions/
+/backend/storage/framework/testing/
+/backend/storage/framework/views/
+/backend/storage/logs/*.log
+
+/backend/.env
+/backend/.env.backup
+/backend/.env.production
+/backend/.phpunit.result.cache
+/backend/Homestead.json
+/backend/Homestead.yaml
+/backend/auth.json
+/backend/npm-debug.log
+/backend/yarn-error.log
+
+# ── Frontend (Vite + Vue) ────────────────────────────────────────────────────
+/frontend/node_modules/
+/frontend/dist/
+/frontend/dist-ssr/
+/frontend/.vite/
+/frontend/coverage/
+*.local
+
+/frontend/.env
+/frontend/.env.local
+/frontend/.env.*.local
+
+/frontend/npm-debug.log*
+/frontend/yarn-debug.log*
+/frontend/yarn-error.log*
+/frontend/pnpm-debug.log*
+/frontend/lerna-debug.log*
+
+# Vue type-check stamp
+/frontend/*.tsbuildinfo

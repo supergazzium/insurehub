@@ -1,0 +1,35 @@
+@import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans+Thai:wght@300;400;500;600;700&family=Sarabun:wght@300;400;500;600;700&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html, body, #app {
+    height: 100%;
+  }
+  body {
+    @apply font-sans bg-slate-50 text-slate-800 antialiased;
+    font-feature-settings: "ss01";
+  }
+  h1, h2, h3, h4 {
+    @apply text-slate-900 font-semibold;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-xl border border-slate-200 shadow-sm;
+  }
+  .section-title {
+    @apply text-xl font-semibold text-slate-900;
+  }
+  .section-subtitle {
+    @apply text-sm text-slate-500;
+  }
+}
+
+/* PrimeVue tweaks to match Tailwind look */
+.p-component {
+  font-family: inherit;
+}

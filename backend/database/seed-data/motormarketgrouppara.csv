@@ -1,0 +1,11 @@
+ID,VEHICLE_MARKET_GROUP,Desc_Eng,Desc_Thai,Redbook_Type
+1,01,Luxury,รถหรู,PS
+2,02,Market ,รถตลาดทั่วไป,PS
+3,03,High Sum,รถไฮซัม,PS
+4,10,Bus,รถบัส,BS
+5,11,Motorcycle,รถมอเตอร์ไซค์,MC
+6,12,Pick-up,รถกระบะ 2 ประตู,PU
+7,13,Truck,รถบรรทุก,TK
+8,14,Pick-up 4 Doors,รถกระบะ 4 ประตู,PU
+9,15,Trailer,รถหางพ่วง,TL
+10,99,Other,รถอื่นๆ,PS
