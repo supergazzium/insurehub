@@ -41,19 +41,10 @@ const moduleRoutes: RouteRecordRaw[] = MODULES.filter((m) => !IMPLEMENTED_MODULE
 }))
 
 const routes: RouteRecordRaw[] = [
-  // Public auth routes (no app shell)
-  {
-    path: '/',
-    component: AuthLayout,
-    children: [
-      { path: 'login', name: 'login', component: Login },
-      { path: 'register', name: 'register', component: Register },
-      { path: 'forgot-password', name: 'forgot-password', component: ForgotPassword },
-      { path: 'reset-password', name: 'reset-password', component: ResetPassword },
-      { path: 'invite/:token?', name: 'accept-invitation', component: AcceptInvitation },
-    ],
-  },
-  // App-shell routes
+  // App-shell routes (authenticated). Registered first so the app shell owns
+  // the bare `/` index (dashboard); otherwise the AuthLayout parent below —
+  // which also sits at `/` but has no index child — would shadow it and render
+  // an empty auth shell after login.
   {
     path: '/',
     component: AppLayout,
@@ -75,6 +66,19 @@ const routes: RouteRecordRaw[] = [
       { path: 'support', name: 'agent-support', component: AgentSupport, meta: { moduleKey: 'agent-support' } },
       { path: 'ops', name: 'agent-operation-support', component: AgentOperationSupport, meta: { moduleKey: 'agent-operation-support' } },
       ...moduleRoutes,
+    ],
+  },
+  // Public auth routes (no app shell). Their child paths (/login, /register, …)
+  // don't collide with the app shell above; only bare `/` was contested.
+  {
+    path: '/',
+    component: AuthLayout,
+    children: [
+      { path: 'login', name: 'login', component: Login },
+      { path: 'register', name: 'register', component: Register },
+      { path: 'forgot-password', name: 'forgot-password', component: ForgotPassword },
+      { path: 'reset-password', name: 'reset-password', component: ResetPassword },
+      { path: 'invite/:token?', name: 'accept-invitation', component: AcceptInvitation },
     ],
   },
 ]
