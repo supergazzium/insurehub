@@ -153,7 +153,7 @@ export default {
       title: 'เข้าสู่ระบบ',
       subtitle: 'เข้าสู่ระบบจัดการตัวแทนประกันภัย',
       email: 'อีเมล',
-      emailPlaceholder: 'name@agency.co.th',
+      emailPlaceholder: "name{'@'}agency.co.th",
       password: 'รหัสผ่าน',
       remember: 'จดจำการเข้าสู่ระบบ',
       forgot: 'ลืมรหัสผ่าน?',
@@ -292,7 +292,7 @@ export default {
       inviteDialog: {
         title: 'เชิญสมาชิกใหม่',
         email: 'อีเมลผู้รับเชิญ',
-        emailPlaceholder: 'name@example.com',
+        emailPlaceholder: "name{'@'}example.com",
         role: 'บทบาท',
         message: 'ข้อความ (ไม่บังคับ)',
         send: 'ส่งคำเชิญ',
