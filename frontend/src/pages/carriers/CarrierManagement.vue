@@ -5,7 +5,6 @@ import {
   useCarrierContactsStore,
   DEPARTMENT_LABELS,
   INSURANCE_TYPE_LABELS,
-  AUTO_SEED_NOTE,
   isAutoSeeded,
   type CarrierContactGroup,
   type ContactDepartment,
