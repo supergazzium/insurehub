@@ -1,27 +1,77 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { MODULES, MODULE_GROUPS } from '../types/modules'
+import { useAuthStore } from '../stores/auth'
 
 const route = useRoute()
+const router = useRouter()
 const { t } = useI18n()
+const auth = useAuthStore()
 
 const sidebarOpen = ref(true)
 const userMenuOpen = ref(false)
 
+const isAgent = computed(() => auth.user?.role === 'agent')
+
+/** Home target — agents go to their portal, everyone else to the admin dashboard. */
+const homeRoute = computed(() => (isAgent.value ? { name: 'portal-dashboard' } : { name: 'dashboard' }))
+const activeHomeRoute = computed(() =>
+  isAgent.value ? route.name === 'portal-dashboard' : route.name === 'dashboard',
+)
+
+/** Top-bar "Profile" target — role-dependent. */
+function goToProfile(): void {
+  userMenuOpen.value = false
+  router.push({ name: isAgent.value ? 'portal-profile' : 'user-account' })
+}
+
+/** Top-bar "Settings" target — role-dependent. */
+function goToSettings(): void {
+  userMenuOpen.value = false
+  router.push({ name: isAgent.value ? 'portal-settings' : 'tenant-settings' })
+}
+
+async function doLogout(): Promise<void> {
+  userMenuOpen.value = false
+  try {
+    await auth.logout()
+  } finally {
+    void router.push({ name: 'public-home' })
+  }
+}
+
+/**
+ * Role-aware nav. If the current user is an agent, hide every module
+ * except portal modules (which explicitly opt in via `roles: ['agent']`).
+ * Non-agent users (admin/staff/super_admin) see everything EXCEPT modules
+ * that are agent-only.
+ */
+const visibleModules = computed(() => {
+  const isAgent = auth.user?.role === 'agent'
+  return MODULES.filter((m) => {
+    const isAgentOnly = m.roles?.length === 1 && m.roles[0] === 'agent'
+    if (isAgent) return m.roles?.includes('agent') ?? false
+    return !isAgentOnly
+  })
+})
+
 const groupedModules = computed(() =>
-  MODULE_GROUPS.map((g) => ({
-    ...g,
-    modules: MODULES.filter((m) => m.group === g.key),
-  })),
+  MODULE_GROUPS
+    .map((g) => ({
+      ...g,
+      modules: visibleModules.value.filter((m) => m.group === g.key),
+    }))
+    .filter((g) => g.modules.length > 0),
 )
 
 const currentCrumbs = computed(() => {
+  const homePath = isAgent.value ? '/portal' : '/'
   const crumbs: { label: string; to?: string }[] = [
-    { label: t('nav.dashboard'), to: '/' },
+    { label: t('nav.dashboard'), to: homePath },
   ]
-  if (route.name && route.name !== 'dashboard') {
+  if (route.name && route.name !== 'dashboard' && route.name !== 'portal-dashboard') {
     const mod = MODULES.find((m) => m.routeName === route.name)
     if (mod) crumbs.push({ label: t(`modules.${mod.i18nKey}.name`) })
   }
@@ -46,7 +96,7 @@ function closeUserMenu(e: MouseEvent) {
       ]"
     >
       <div class="h-16 flex items-center gap-3 px-4 border-b border-slate-200 shrink-0 overflow-hidden">
-        <RouterLink to="/" class="flex items-center gap-3 min-w-0">
+        <RouterLink :to="homeRoute" class="flex items-center gap-3 min-w-0">
           <!-- Collapsed: owl-only crop -->
           <div
             v-if="!sidebarOpen"
@@ -71,10 +121,10 @@ function closeUserMenu(e: MouseEvent) {
 
       <nav class="flex-1 overflow-y-auto py-3">
         <RouterLink
-          to="/"
+          :to="homeRoute"
           class="mx-2 mb-3 px-3 py-2 rounded-lg flex items-center gap-3 text-sm transition"
           :class="[
-            $route.name === 'dashboard'
+            activeHomeRoute
               ? 'bg-brand-50 text-brand-700 font-medium'
               : 'text-slate-600 hover:bg-slate-50',
           ]"
@@ -161,11 +211,11 @@ function closeUserMenu(e: MouseEvent) {
               @click.stop="userMenuOpen = !userMenuOpen"
             >
               <div class="w-8 h-8 rounded-full bg-brand-600 text-white flex items-center justify-center text-sm font-medium">
-                ผ
+                {{ (auth.user?.name || '?').charAt(0).toUpperCase() }}
               </div>
               <div class="hidden md:block text-right">
-                <div class="text-sm text-slate-900 font-medium leading-tight">ผู้ดูแลระบบ</div>
-                <div class="text-[11px] text-slate-500 leading-tight">admin@insurehub.test</div>
+                <div class="text-sm text-slate-900 font-medium leading-tight">{{ auth.user?.name || '—' }}</div>
+                <div class="text-[11px] text-slate-500 leading-tight">{{ auth.user?.email || '' }}</div>
               </div>
               <i class="pi pi-angle-down text-slate-400 text-xs" />
             </button>
@@ -174,14 +224,17 @@ function closeUserMenu(e: MouseEvent) {
               v-if="userMenuOpen"
               class="absolute right-0 mt-2 w-48 bg-white rounded-lg shadow-lg border border-slate-200 py-1 z-50"
             >
-              <button class="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700">
+              <button class="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700"
+                @click="goToProfile">
                 <i class="pi pi-user text-slate-400" /> {{ t('topbar.profile') }}
               </button>
-              <button class="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700">
+              <button class="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2 text-slate-700"
+                @click="goToSettings">
                 <i class="pi pi-cog text-slate-400" /> {{ t('topbar.settings') }}
               </button>
               <div class="border-t border-slate-100 my-1" />
-              <button class="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2 text-rose-600">
+              <button class="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-center gap-2 text-rose-600"
+                @click="doLogout">
                 <i class="pi pi-sign-out" /> {{ t('topbar.logout') }}
               </button>
             </div>

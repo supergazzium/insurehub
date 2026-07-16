@@ -1,15 +1,64 @@
 <script setup lang="ts">
+import { computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MODULES, MODULE_GROUPS } from '../types/modules'
+import { useReportsStore } from '../stores/reports'
 
 const { t } = useI18n()
+const reports = useReportsStore()
 
-const stats = [
-  { key: 'activePolicies', value: '1,284', delta: '+5.2%', icon: 'pi pi-file', tone: 'sky' },
-  { key: 'newCustomers', value: '146', delta: '+12%', icon: 'pi pi-user-plus', tone: 'emerald' },
-  { key: 'premiumVolume', value: '฿24.6M', delta: '+8.4%', icon: 'pi pi-chart-line', tone: 'violet' },
-  { key: 'pendingPayouts', value: '฿1.92M', delta: '32 ตัวแทน', icon: 'pi pi-wallet', tone: 'amber' },
-]
+onMounted(() => {
+  void reports.loadKpis()
+})
+
+// Thai-locale compact currency: ฿1.69M etc.
+function formatBaht(n: number): string {
+  if (n >= 1_000_000) return `฿${(n / 1_000_000).toFixed(2)}M`
+  if (n >= 1_000) return `฿${(n / 1_000).toFixed(1)}K`
+  return `฿${Math.round(n).toLocaleString()}`
+}
+
+const stats = computed(() => {
+  const k = reports.kpis
+  if (!k) {
+    return [
+      { key: 'activePolicies', value: '—', delta: '', icon: 'pi pi-file', tone: 'sky' },
+      { key: 'newCustomers', value: '—', delta: '', icon: 'pi pi-user-plus', tone: 'emerald' },
+      { key: 'premiumVolume', value: '—', delta: '', icon: 'pi pi-chart-line', tone: 'violet' },
+      { key: 'pendingPayouts', value: '—', delta: '', icon: 'pi pi-wallet', tone: 'amber' },
+    ]
+  }
+  return [
+    {
+      key: 'activePolicies',
+      value: k.activePolicies.toLocaleString(),
+      delta: `จาก ${k.totalPolicies.toLocaleString()} ทั้งหมด`,
+      icon: 'pi pi-file',
+      tone: 'sky',
+    },
+    {
+      key: 'newCustomers',
+      value: k.totalCustomers.toLocaleString(),
+      delta: `${k.totalAgents} ตัวแทน`,
+      icon: 'pi pi-user-plus',
+      tone: 'emerald',
+    },
+    {
+      key: 'premiumVolume',
+      value: formatBaht(k.inForcePremium),
+      delta: 'in-force premium',
+      icon: 'pi pi-chart-line',
+      tone: 'violet',
+    },
+    {
+      key: 'pendingPayouts',
+      value: k.expiring60d.toLocaleString(),
+      delta: 'กรมธรรม์ที่จะครบกำหนดใน 60 วัน',
+      icon: 'pi pi-wallet',
+      tone: 'amber',
+    },
+  ]
+})
 
 const toneClasses: Record<string, string> = {
   sky: 'bg-sky-50 text-sky-700',
@@ -31,13 +80,17 @@ const groupedModules = MODULE_GROUPS.map((g) => ({
       <p class="text-slate-500 mt-1">{{ t('app.tagline') }}</p>
     </section>
 
+    <section v-if="reports.error" class="card p-4 bg-rose-50 border-rose-200 text-rose-700 text-sm">
+      {{ reports.error }}
+    </section>
+
     <section class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
-      <div v-for="s in stats" :key="s.key" class="card p-5">
+      <div v-for="s in stats" :key="s.key" class="card p-5" :aria-busy="reports.loading">
         <div class="flex items-center justify-between">
           <div :class="['w-10 h-10 rounded-lg flex items-center justify-center', toneClasses[s.tone]]">
             <i :class="s.icon" />
           </div>
-          <span class="text-xs text-emerald-600 font-medium">{{ s.delta }}</span>
+          <span class="text-xs text-slate-500">{{ s.delta }}</span>
         </div>
         <div class="mt-4">
           <div class="text-2xl font-semibold text-slate-900">{{ s.value }}</div>

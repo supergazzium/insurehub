@@ -89,8 +89,11 @@ async function request<T>(
       parsed && typeof parsed === 'object'
         ? (parsed as ApiErrorBody)
         : null
-    if (response.status === 401) {
-      // Token expired/invalid — clear so we don't keep sending it.
+    // Only clear the token when the auth-check endpoint itself says the
+    // session is dead. Otherwise a single 401 on any random data endpoint
+    // (transient network hiccup, race with backend restart, ACL edge case)
+    // would kick the user back to /login and nuke every open tab.
+    if (response.status === 401 && path.replace(/^\/+/, '') === 'auth/me') {
       setToken(null)
     }
     throw new ApiError(response.status, errBody)

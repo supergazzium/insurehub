@@ -6,7 +6,10 @@ export interface ModuleDef {
   icon: string
   i18nKey: string
   functions: string[]
-  group: 'core' | 'people' | 'business' | 'commission' | 'reporting' | 'platform' | 'support'
+  group: 'core' | 'people' | 'business' | 'commission' | 'reporting' | 'platform' | 'support' | 'portal'
+  // If omitted, module is visible to admin/staff/super_admin only. Include
+  // 'agent' to also expose it to logged-in agents inside their portal.
+  roles?: Array<'admin' | 'super_admin' | 'staff' | 'agent'>
 }
 
 export const MODULES: ModuleDef[] = [
@@ -173,6 +176,20 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
+    key: 'renewal-pipeline',
+    number: 8,
+    routePath: '/policies/expiring',
+    routeName: 'policies-expiring',
+    icon: 'pi pi-clock',
+    i18nKey: 'renewalPipeline',
+    group: 'business',
+    functions: [
+      'คิวกรมธรรม์ที่จะครบกำหนด (30 / 60 / 90 / 180 วัน)',
+      'ไฮไลต์กรมธรรม์ด่วน (≤7 วัน)',
+      'สรุปยอด premium ที่ต้องต่ออายุในช่วงเวลา',
+    ],
+  },
+  {
     key: 'commission-engine',
     number: 9,
     routePath: '/commissions/engine',
@@ -208,6 +225,20 @@ export const MODULES: ModuleDef[] = [
       'ดูรายละเอียดรายการ (เหตุการณ์ที่ทำให้เกิด + สายตัวแทน)',
       'ย้อนรายการแบบแมนนวล (สำหรับผู้ดูแล)',
       'ส่งออกบัญชีค่าคอมฯ เป็น CSV',
+    ],
+  },
+  {
+    key: 'rebate-reconciliation',
+    number: 10,
+    routePath: '/commissions/rebates',
+    routeName: 'commission-rebates',
+    icon: 'pi pi-calculator',
+    i18nKey: 'rebateReconciliation',
+    group: 'commission',
+    functions: [
+      'ตรวจสอบ Calculated vs Actual บนสามขา — InH / OV / Agent',
+      'ระบุ mismatch (|Δ| > 1 THB) เพื่อ audit',
+      'ดูประวัติ rebate ledger ต่อกรมธรรม์',
     ],
   },
   {
@@ -266,6 +297,21 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
+    key: 'import-failures',
+    number: 14,
+    routePath: '/settings/import-failures',
+    routeName: 'settings-import-failures',
+    icon: 'pi pi-exclamation-triangle',
+    i18nKey: 'importFailures',
+    group: 'platform',
+    functions: [
+      'คิว triage สำหรับ legacy applications ที่ไม่สามารถ import ได้',
+      'กรองตาม reason (missing_client / agent / product / company)',
+      'ดู raw source row เพื่อวิเคราะห์',
+      'บันทึก resolution notes และ mark resolved',
+    ],
+  },
+  {
     key: 'platform-admin',
     number: 14,
     routePath: '/admin',
@@ -312,6 +358,156 @@ export const MODULES: ModuleDef[] = [
       'การแจ้งเตือนระบบ: sync error, API drop',
     ],
   },
+  // ── Phase 5 — Quotation module. Visible to admin/staff + agents ────────
+  {
+    key: 'quotes',
+    number: 51,
+    routePath: '/quotes',
+    routeName: 'quotes',
+    icon: 'pi pi-calculator',
+    i18nKey: 'quotes',
+    group: 'business',
+    roles: ['admin', 'super_admin', 'staff', 'agent'],
+    functions: [],
+  },
+  // ── Admin oversight (Phase 4) — admin/super_admin only ─────────────────
+  {
+    key: 'admin-agent-approvals',
+    number: 90,
+    routePath: '/admin/agent-approvals',
+    routeName: 'admin-agent-approvals',
+    icon: 'pi pi-user-plus',
+    i18nKey: 'adminAgentApprovals',
+    group: 'platform',
+    functions: [],
+  },
+  {
+    key: 'admin-downline-tree',
+    number: 91,
+    routePath: '/admin/downline-tree',
+    routeName: 'admin-downline-tree',
+    icon: 'pi pi-sitemap',
+    i18nKey: 'adminDownlineTree',
+    group: 'platform',
+    functions: [],
+  },
+  {
+    key: 'admin-payouts',
+    number: 92,
+    routePath: '/admin/payouts',
+    routeName: 'admin-payouts',
+    icon: 'pi pi-money-bill',
+    i18nKey: 'adminPayouts',
+    group: 'commission',
+    functions: [],
+  },
+  {
+    key: 'admin-motor-tariffs',
+    number: 93,
+    routePath: '/admin/motor-tariffs',
+    routeName: 'admin-motor-tariffs',
+    icon: 'pi pi-car',
+    i18nKey: 'adminMotorTariffs',
+    group: 'platform',
+    functions: [],
+  },
+  // Phase 8a — operational reports (admin/staff)
+  {
+    key: 'report-freelook',
+    number: 80,
+    routePath: '/reports/freelook',
+    routeName: 'report-freelook',
+    icon: 'pi pi-eye',
+    i18nKey: 'reportFreelook',
+    group: 'reporting',
+    functions: [],
+  },
+  {
+    key: 'report-cancellations',
+    number: 81,
+    routePath: '/reports/cancellations',
+    routeName: 'report-cancellations',
+    icon: 'pi pi-ban',
+    i18nKey: 'reportCancellations',
+    group: 'reporting',
+    functions: [],
+  },
+  {
+    key: 'report-mailing',
+    number: 82,
+    routePath: '/reports/mailing',
+    routeName: 'report-mailing',
+    icon: 'pi pi-envelope',
+    i18nKey: 'reportMailing',
+    group: 'reporting',
+    functions: [],
+  },
+  {
+    key: 'report-payments',
+    number: 83,
+    routePath: '/reports/payments',
+    routeName: 'report-payments',
+    icon: 'pi pi-credit-card',
+    i18nKey: 'reportPayments',
+    group: 'reporting',
+    functions: [],
+  },
+  // ── Agent Portal (only visible when user.role === 'agent') ─────────────
+  {
+    key: 'portal-dashboard',
+    number: 100,
+    routePath: '/portal',
+    routeName: 'portal-dashboard',
+    icon: 'pi pi-home',
+    i18nKey: 'portalDashboard',
+    group: 'portal',
+    roles: ['agent'],
+    functions: [],
+  },
+  {
+    key: 'portal-profile',
+    number: 101,
+    routePath: '/portal/profile',
+    routeName: 'portal-profile',
+    icon: 'pi pi-user',
+    i18nKey: 'portalProfile',
+    group: 'portal',
+    roles: ['agent'],
+    functions: [],
+  },
+  {
+    key: 'portal-referral',
+    number: 102,
+    routePath: '/portal/referral',
+    routeName: 'portal-referral',
+    icon: 'pi pi-users',
+    i18nKey: 'portalReferral',
+    group: 'portal',
+    roles: ['agent'],
+    functions: [],
+  },
+  {
+    key: 'portal-settings',
+    number: 103,
+    routePath: '/portal/settings',
+    routeName: 'portal-settings',
+    icon: 'pi pi-cog',
+    i18nKey: 'portalSettings',
+    group: 'portal',
+    roles: ['agent'],
+    functions: [],
+  },
+  {
+    key: 'portal-earnings',
+    number: 104,
+    routePath: '/portal/earnings',
+    routeName: 'portal-earnings',
+    icon: 'pi pi-wallet',
+    i18nKey: 'portalEarnings',
+    group: 'portal',
+    roles: ['agent'],
+    functions: [],
+  },
 ]
 
 export const MODULE_GROUPS: { key: ModuleDef['group']; labelTh: string }[] = [
@@ -322,4 +518,5 @@ export const MODULE_GROUPS: { key: ModuleDef['group']; labelTh: string }[] = [
   { key: 'reporting', labelTh: 'รายงานและแจ้งเตือน' },
   { key: 'platform', labelTh: 'แพลตฟอร์ม' },
   { key: 'support', labelTh: 'ฝ่ายสนับสนุน' },
+  { key: 'portal', labelTh: 'พอร์ทัลตัวแทน' },
 ]
