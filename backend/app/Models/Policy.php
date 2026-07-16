@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Observers\PolicyObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+#[ObservedBy([PolicyObserver::class])]
 class Policy extends Model
 {
     use SoftDeletes;
@@ -20,6 +23,7 @@ class Policy extends Model
     protected $casts = [
         'quote_date' => 'date',
         'app_date' => 'date',
+        'create_date' => 'date',
         'effective_date' => 'date',
         'expiry_date' => 'date',
         'issue_date' => 'date',
@@ -30,12 +34,10 @@ class Policy extends Model
         'policy_end' => 'date',
         'first_due_inst_date' => 'date',
         'last_due_inst_date' => 'date',
-        'rebate_earn_date' => 'date',
-        'rebate_ov_date' => 'date',
-        'rebate_rec_date_ag' => 'date',
         'payment_date' => 'date',
         'mailing_date' => 'date',
         'freelook_active' => 'boolean',
+        'vehicle_on_non_motor' => 'boolean',
     ];
 
     public function tenant(): BelongsTo
@@ -96,5 +98,17 @@ class Policy extends Model
     public function commissionTransactions(): HasMany
     {
         return $this->hasMany(CommissionTransaction::class);
+    }
+
+    public function rebate(): HasMany
+    {
+        // Modelled as HasMany even though the current unique constraint enforces one row per
+        // policy — this keeps the door open to a multi-entry rebate ledger without a model change.
+        return $this->hasMany(PolicyRebate::class);
+    }
+
+    public function legacyStatus(): BelongsTo
+    {
+        return $this->belongsTo(PolicyStatusLookup::class, 'legacy_policy_status_id');
     }
 }

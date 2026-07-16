@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Observers\AgentObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+#[ObservedBy([AgentObserver::class])]
 class Agent extends Model
 {
     use SoftDeletes;
@@ -25,6 +28,15 @@ class Agent extends Model
         'doc_status' => 'boolean',
         'active' => 'boolean',
         'commission_pct' => 'decimal:4',
+        'approved_at' => 'datetime',
+        'rejected_at' => 'datetime',
+        // Sensitive PII — encrypted at rest via APP_KEY. Decrypts transparently
+        // on model access; ciphertext stored in the column (see migration
+        // 2027_01_01_001000_add_approval_and_pii_to_agents).
+        'id_card' => 'encrypted',
+        'bank_account_no' => 'encrypted',
+        'bank_account_name' => 'encrypted',
+        'license_number' => 'encrypted',
     ];
 
     public function tenant(): BelongsTo

@@ -34,6 +34,11 @@ class Carrier extends Model
         return $this->hasMany(CarrierContactGroup::class);
     }
 
+    public function bankAccounts(): HasMany
+    {
+        return $this->hasMany(CarrierBankAccount::class)->orderBy('sort_order')->orderBy('id');
+    }
+
     public function contracts(): HasMany
     {
         return $this->hasMany(Contract::class);

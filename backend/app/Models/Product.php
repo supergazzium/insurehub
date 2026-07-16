@@ -21,6 +21,8 @@ class Product extends Model
         'smoker_accepted' => 'boolean',
         'preexisting_excluded' => 'boolean',
         'active' => 'boolean',
+        'valid_start' => 'date',
+        'valid_end' => 'date',
     ];
 
     public function tenant(): BelongsTo
@@ -36,5 +38,10 @@ class Product extends Model
     public function commissionRates(): HasMany
     {
         return $this->hasMany(ProductCommissionRate::class);
+    }
+
+    public function commissionRateInstallments(): HasMany
+    {
+        return $this->hasMany(ProductCommissionRateInstallment::class);
     }
 }
