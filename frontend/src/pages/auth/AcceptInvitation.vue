@@ -38,7 +38,7 @@ async function accept() {
   submitting.value = true
   await new Promise((r) => setTimeout(r, 600))
   submitting.value = false
-  router.push('/')
+  router.push({ name: 'dashboard' })
 }
 </script>
 

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, reactive, computed, nextTick } from 'vue'
+import { ref, reactive, computed } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
@@ -34,9 +34,15 @@ async function submitCredentials() {
   submitting.value = true
   try {
     await authStore.login(form.email, form.password)
-    // Skip MFA — the backend doesn't enforce it yet. Honor ?redirect if present.
-    const redirect = typeof route.query.redirect === 'string' ? route.query.redirect : '/'
-    router.push(redirect)
+    // Honor ?redirect if present, otherwise route by role: agents land in
+    // their portal, everyone else on the admin dashboard.
+    const explicit = typeof route.query.redirect === 'string' ? route.query.redirect : ''
+    if (explicit) {
+      router.push(explicit)
+    } else {
+      const isAgent = authStore.user?.role === 'agent'
+      router.push({ name: isAgent ? 'portal-dashboard' : 'dashboard' })
+    }
   } catch (err) {
     if (err instanceof ApiError && err.status === 422) {
       errorMsg.value = err.body?.errors?.email?.[0] ?? t('auth.login.invalidCreds')
@@ -55,7 +61,8 @@ async function submitMfa() {
   submitting.value = true
   await new Promise((r) => setTimeout(r, 500))
   submitting.value = false
-  router.push('/')
+  const isAgent = authStore.user?.role === 'agent'
+  router.push({ name: isAgent ? 'portal-dashboard' : 'dashboard' })
 }
 
 function onMfaInput(idx: number, e: Event) {

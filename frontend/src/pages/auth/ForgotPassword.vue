@@ -1,21 +1,29 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { api, ApiError } from '../../api/client'
 
 const { t } = useI18n()
 
 const email = ref('')
 const submitting = ref(false)
 const sent = ref(false)
+const error = ref<string | null>(null)
 
 const valid = computed(() => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.value))
 
-async function submit() {
+async function submit(): Promise<void> {
   if (!valid.value) return
   submitting.value = true
-  await new Promise((r) => setTimeout(r, 600))
-  submitting.value = false
-  sent.value = true
+  error.value = null
+  try {
+    await api.post('auth/forgot-password', { email: email.value })
+    sent.value = true
+  } catch (e: unknown) {
+    error.value = e instanceof ApiError ? e.message : 'Request failed.'
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
@@ -30,6 +38,9 @@ async function submit() {
       <h1 class="text-2xl font-semibold text-slate-900">{{ t('auth.forgot.title') }}</h1>
       <p class="text-slate-500 mt-1.5 text-sm">{{ t('auth.forgot.subtitle') }}</p>
 
+      <div v-if="error" class="mt-4 px-3 py-2 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+        {{ error }}
+      </div>
       <form class="mt-8 space-y-4" @submit.prevent="submit">
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1.5">

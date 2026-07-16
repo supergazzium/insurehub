@@ -1,15 +1,21 @@
 <script setup lang="ts">
 import { ref, computed } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { api, ApiError } from '../../api/client'
 
 const { t } = useI18n()
+const route = useRoute()
 const router = useRouter()
 
 const password = ref('')
 const confirmPassword = ref('')
 const submitting = ref(false)
 const done = ref(false)
+const error = ref<string | null>(null)
+
+const token = computed(() => (typeof route.query.token === 'string' ? route.query.token : ''))
+const emailFromLink = computed(() => (typeof route.query.email === 'string' ? route.query.email : ''))
 
 const strength = computed(() => {
   let score = 0
@@ -38,13 +44,28 @@ const strengthColor = computed(() => {
 const match = computed(() => password.value.length > 0 && password.value === confirmPassword.value)
 const canSubmit = computed(() => strength.value >= 3 && match.value && !submitting.value)
 
-async function submit() {
+async function submit(): Promise<void> {
   if (!canSubmit.value) return
+  if (!token.value || !emailFromLink.value) {
+    error.value = t('auth.reset.invalidLink')
+    return
+  }
   submitting.value = true
-  await new Promise((r) => setTimeout(r, 600))
-  submitting.value = false
-  done.value = true
-  setTimeout(() => router.push('/login'), 2000)
+  error.value = null
+  try {
+    await api.post('auth/reset-password', {
+      token: token.value,
+      email: emailFromLink.value,
+      password: password.value,
+      password_confirmation: confirmPassword.value,
+    })
+    done.value = true
+    setTimeout(() => router.push('/login'), 2000)
+  } catch (e: unknown) {
+    error.value = e instanceof ApiError ? e.message : 'Reset failed.'
+  } finally {
+    submitting.value = false
+  }
 }
 </script>
 
@@ -61,6 +82,9 @@ async function submit() {
     <h1 class="text-2xl font-semibold text-slate-900">{{ t('auth.reset.title') }}</h1>
     <p class="text-slate-500 mt-1.5 text-sm">{{ t('auth.reset.subtitle') }}</p>
 
+    <div v-if="error" class="mt-4 px-3 py-2 rounded-md bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+      {{ error }}
+    </div>
     <form class="mt-8 space-y-4" @submit.prevent="submit">
       <div>
         <label class="block text-sm font-medium text-slate-700 mb-1.5">
