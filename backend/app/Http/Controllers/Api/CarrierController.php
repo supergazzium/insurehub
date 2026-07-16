@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Requests\CarrierRequest;
+use App\Http\Resources\CarrierListResource;
 use App\Http\Resources\CarrierResource;
 use App\Models\Carrier;
 use Illuminate\Http\JsonResponse;
@@ -13,6 +14,10 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 
 class CarrierController extends ApiController
 {
+    /**
+     * Paginated carrier list — returns the lean CarrierListResource shape.
+     * Full detail (with contact groups etc.) stays on CarrierResource.
+     */
     public function index(Request $request): AnonymousResourceCollection
     {
         $q = $this->scopeTenant(Carrier::query(), $request)
@@ -23,27 +28,33 @@ class CarrierController extends ApiController
             $q->where(function ($w) use ($like): void {
                 $w->where('code', 'like', $like)
                     ->orWhere('name', 'like', $like)
-                    ->orWhere('name_en', 'like', $like);
+                    ->orWhere('name_en', 'like', $like)
+                    ->orWhere('nickname_th', 'like', $like)
+                    ->orWhere('tax_id', 'like', $like);
             });
         }
         if ($request->boolean('activeOnly')) {
             $q->where('active', true);
         }
+        if ($insureType = $request->input('insureType')) {
+            $q->where('insure_type', $insureType);
+        }
 
-        return CarrierResource::collection($q->orderBy('code')->paginate($this->perPage($request)));
+        // Order by id desc so newly-created rows land on page 1.
+        return CarrierListResource::collection($q->orderBy('id', 'desc')->paginate($this->perPage($request)));
     }
 
     public function store(CarrierRequest $request): JsonResponse
     {
         $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];
         $carrier = Carrier::create($payload);
-        return (new CarrierResource($carrier->loadCount(['products', 'contracts'])))->response()->setStatusCode(201);
+        return (new CarrierResource($carrier->load('bankAccounts')->loadCount(['products', 'contracts'])))->response()->setStatusCode(201);
     }
 
     public function show(Request $request, Carrier $carrier): CarrierResource
     {
         $this->authorizeTenant($request, $carrier);
-        return new CarrierResource($carrier->loadCount(['products', 'contracts']));
+        return new CarrierResource($carrier->load('bankAccounts')->loadCount(['products', 'contracts']));
     }
 
     public function update(CarrierRequest $request, Carrier $carrier): CarrierResource

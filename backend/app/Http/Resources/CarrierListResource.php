@@ -9,11 +9,13 @@ use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
+ * Lean list-row shape for /api/v1/carriers index.
+ *
  * @mixin Carrier
  */
-class CarrierResource extends JsonResource
+class CarrierListResource extends JsonResource
 {
-    /** @return array<string,mixed> */
+    /** @return array<string, mixed> */
     public function toArray(Request $request): array
     {
         return [
@@ -22,22 +24,17 @@ class CarrierResource extends JsonResource
             'name' => $this->name,
             'nameEn' => $this->name_en ?? '',
             'nicknameTh' => $this->nickname_th ?? '',
-            'type' => $this->insure_type ?? '',
+            'insureType' => $this->insure_type ?? '',
             'subType' => $this->sub_type ?? '',
-            'compInsureCode' => $this->comp_insure_code ?? '',
             'oicInsureComCode' => $this->oic_insure_com_code ?? '',
-            'oicLicense' => $this->oic_license ?? '',
+            'compInsureCode' => $this->comp_insure_code ?? '',
             'taxId' => $this->tax_id ?? '',
             'phone' => $this->phone ?? '',
             'email' => $this->email ?? '',
             'website' => $this->website ?? '',
-            'address' => $this->address ?? '',
-            'logoUrl' => $this->logo_url,
-            'productCount' => (int) ($this->products_count ?? $this->products()->count()),
-            'contractCount' => (int) ($this->contracts_count ?? $this->contracts()->count()),
-            'since' => $this->since ?? '',
             'active' => (bool) $this->active,
-            'bankAccounts' => CarrierBankAccountResource::collection($this->whenLoaded('bankAccounts')),
+            'productCount' => (int) ($this->products_count ?? 0),
+            'contractCount' => (int) ($this->contracts_count ?? 0),
         ];
     }
 }

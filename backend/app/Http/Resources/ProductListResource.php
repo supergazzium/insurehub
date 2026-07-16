@@ -4,17 +4,19 @@ declare(strict_types=1);
 
 namespace App\Http\Resources;
 
-use App\Models\Product;
 use App\Support\ProductKind;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
 /**
- * @mixin Product
+ * Lean list-row shape for /api/v1/products index.
+ * Joins carrier code + name so no follow-up lookup is needed.
+ *
+ * @mixin \stdClass
  */
-class ProductResource extends JsonResource
+class ProductListResource extends JsonResource
 {
-    /** @return array<string,mixed> */
+    /** @return array<string, mixed> */
     public function toArray(Request $request): array
     {
         return [
@@ -24,35 +26,22 @@ class ProductResource extends JsonResource
             'name' => $this->name,
             'nameEn' => $this->name_en ?? '',
             'carrierId' => (string) $this->carrier_id,
-            'carrierCode' => $this->carrier?->code,
-            'carrierName' => $this->carrier?->name,
-            'carrierInsureType' => $this->carrier?->insure_type ?? '',
+            'carrierCode' => $this->carrier_code,
+            'carrierName' => $this->carrier_name,
             'type' => $this->type ?? '',
             'category' => $this->category ?? '',
             'subCategory' => $this->sub_category ?? '',
             'subCategory2' => $this->sub_category_2 ?? '',
             'mainRider' => $this->main_rider ?? '',
             'productKind' => ProductKind::derive($this->type ?? '', $this->category ?? '', $this->sub_category_2 ?? ''),
-            'validStart' => $this->valid_start?->toDateString(),
-            'validEnd' => $this->valid_end?->toDateString(),
-            'summary' => $this->summary ?? '',
-            'coverage' => (float) $this->coverage,
-            'durationYears' => (int) $this->duration_years,
-            'payYears' => (int) $this->pay_years,
-            'premiumMode' => $this->premium_mode,
-            'minPremium' => (float) $this->min_premium,
-            'maxPremium' => (float) $this->max_premium,
             'minAge' => (int) $this->min_age,
             'maxAge' => (int) $this->max_age,
             'minSumAssure' => $this->min_sum_assure !== null ? (float) $this->min_sum_assure : null,
             'maxSumAssure' => $this->max_sum_assure !== null ? (float) $this->max_sum_assure : null,
-            'gender' => $this->gender,
-            'requireMedical' => (bool) $this->require_medical,
-            'smokerAccepted' => (bool) $this->smoker_accepted,
-            'preexistingExcluded' => (bool) $this->preexisting_excluded,
-            'occupationClasses' => $this->occupation_classes ?? [],
-            'notes' => $this->notes ?? '',
+            'validStart' => $this->valid_start,
+            'validEnd' => $this->valid_end,
             'active' => (bool) $this->active,
         ];
     }
+
 }
