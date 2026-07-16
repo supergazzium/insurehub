@@ -175,6 +175,19 @@ const routes: RouteRecordRaw[] = [
       ...moduleRoutes,
     ],
   },
+  // Public auth routes (no app shell). Their child paths (/login, /register, …)
+  // don't collide with the app shell above; only bare `/` was contested.
+  {
+    path: '/',
+    component: AuthLayout,
+    children: [
+      { path: 'login', name: 'login', component: Login },
+      { path: 'register', name: 'register', component: Register },
+      { path: 'forgot-password', name: 'forgot-password', component: ForgotPassword },
+      { path: 'reset-password', name: 'reset-password', component: ResetPassword },
+      { path: 'invite/:token?', name: 'accept-invitation', component: AcceptInvitation },
+    ],
+  },
 ]
 
 const router = createRouter({
