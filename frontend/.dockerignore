@@ -1,0 +1,32 @@
+# Anything not needed inside the image.
+
+.git
+.gitignore
+.gitattributes
+.editorconfig
+.vscode
+.idea
+.DS_Store
+
+# Local env — build args are passed via docker/coolify at build time.
+.env
+.env.local
+.env.*.local
+
+# npm install runs inside the image; local node_modules would just be
+# overwritten and inflate the build context.
+node_modules
+
+# Vite's build output — built inside the image.
+dist
+dist-ssr
+
+# Test + tooling.
+coverage
+playwright-report
+.playwright
+
+# Docs.
+README.md
+CHANGELOG.md
+docs

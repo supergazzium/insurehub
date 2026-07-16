@@ -1,0 +1,45 @@
+# Anything not needed inside the image — keeps builds fast and prevents
+# accidentally shipping secrets or dev cruft.
+
+.git
+.gitignore
+.gitattributes
+.editorconfig
+.vscode
+.idea
+.DS_Store
+
+# Local env files. Prod values are injected by Coolify.
+.env
+.env.local
+.env.*.local
+
+# Node — the backend image has no reason to ship it.
+node_modules
+
+# Composer install runs inside the image; local vendor/ would just be
+# overwritten and inflate the build context.
+vendor
+
+# Test + tooling.
+tests
+phpunit.xml
+.phpunit.cache
+.phpstan.cache
+.phpstan
+docker-compose*.yml
+
+# Storage — runtime-generated, must be empty in the image.
+storage/logs/*.log
+storage/framework/cache/data/*
+storage/framework/sessions/*
+storage/framework/views/*.php
+storage/app/*
+!storage/app/.gitkeep
+
+bootstrap/cache/*.php
+
+# Docs / anything already ignored by git.
+README.md
+CHANGELOG.md
+docs

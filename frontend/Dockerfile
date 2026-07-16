@@ -1,0 +1,48 @@
+# syntax=docker/dockerfile:1.7
+
+# ─── Stage 1: build the Vue app with Vite ────────────────────────────────
+FROM node:22-alpine AS build
+
+WORKDIR /app
+
+# Copy manifest first — npm ci is deterministic and its layer survives
+# code-only changes.
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+# Vite reads VITE_* env vars at build time. Pass them in via
+# `--build-arg` from Coolify (Configuration → Build Args).
+ARG VITE_API_BASE_URL
+ARG VITE_APP_URL
+ENV VITE_API_BASE_URL=${VITE_API_BASE_URL}
+ENV VITE_APP_URL=${VITE_APP_URL}
+
+COPY . .
+
+# `npm run build` = vue-tsc -b && vite build. Typecheck runs in-container
+# so a bad type slips out at build time, not at runtime.
+RUN npm run build
+
+# ─── Stage 2: serve the built SPA with nginx ─────────────────────────────
+FROM nginx:1.27-alpine AS runtime
+
+# Bangkok timezone so access-log timestamps match the ops team's clock.
+RUN apk add --no-cache tzdata \
+    && cp /usr/share/zoneinfo/Asia/Bangkok /etc/localtime \
+    && echo "Asia/Bangkok" > /etc/timezone \
+    && apk del tzdata
+
+# Nginx config — SPA fallback + gzip + long-cache for hashed assets.
+COPY docker/nginx.conf /etc/nginx/conf.d/default.conf
+
+# Copy Vite's build output. The vite.config.ts has `base: '/insurehub/'`,
+# so all asset URLs are prefixed with /insurehub/. We mirror that on
+# disk so nginx serves them at the same path.
+COPY --from=build /app/dist /usr/share/nginx/html/insurehub
+
+EXPOSE 80
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+    CMD wget -qO- http://127.0.0.1/insurehub/ >/dev/null || exit 1
+
+CMD ["nginx", "-g", "daemon off;"]

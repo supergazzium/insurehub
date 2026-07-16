@@ -1,0 +1,25 @@
+# FrankenPHP Caddyfile for InsureHub backend.
+#
+# Coolify's Traefik/nginx proxy terminates TLS in front, so we only bind :80.
+# {$SERVER_NAME:*} means: match whatever host header the proxy forwards.
+
+{
+	# Disable Caddy's own automatic HTTPS — the reverse proxy handles it.
+	auto_https off
+	# FrankenPHP options.
+	frankenphp
+}
+
+:80 {
+	root * /app/public
+	encode zstd br gzip
+
+	# Serve static assets directly; hand everything else to PHP.
+	php_server
+
+	# Access + error logs to stdout so Coolify captures them.
+	log {
+		output stdout
+		format console
+	}
+}

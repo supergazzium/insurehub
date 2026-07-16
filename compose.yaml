@@ -1,0 +1,75 @@
+# Local-first Docker Compose for InsureHub.
+#
+# This is NOT what Coolify runs — Coolify builds the two Dockerfiles as
+# separate Applications. This file exists so a new developer can:
+#
+#     cp backend/.env.example backend/.env
+#     docker compose up --build
+#
+# and get a working stack with MySQL 8 + backend + frontend. Prod
+# deployments are done via Coolify per Dockerfile.
+
+services:
+  mysql:
+    image: mysql:8.4
+    restart: unless-stopped
+    environment:
+      MYSQL_ROOT_PASSWORD: rootpw
+      MYSQL_DATABASE: insurehub
+      MYSQL_USER: insurehub
+      MYSQL_PASSWORD: insurehub
+    command:
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_unicode_ci
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -uroot -prootpw --silent"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      mysql:
+        condition: service_healthy
+    environment:
+      APP_ENV: local
+      APP_DEBUG: "true"
+      APP_URL: http://localhost:8080
+      # APP_KEY: injected via `.env` (see below); run
+      #   docker compose run --rm backend php artisan key:generate --show
+      # once, paste the value into backend/.env, then `docker compose up`.
+      DB_CONNECTION: mysql
+      DB_HOST: mysql
+      DB_PORT: "3306"
+      DB_DATABASE: insurehub
+      DB_USERNAME: insurehub
+      DB_PASSWORD: insurehub
+      SESSION_DRIVER: database
+      CACHE_STORE: database
+      QUEUE_CONNECTION: database
+    env_file:
+      - ./backend/.env
+    ports:
+      - "8080:80"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8080/api/v1
+        VITE_APP_URL: http://localhost:5173
+    restart: unless-stopped
+    ports:
+      - "5173:80"
+
+volumes:
+  mysql_data:
