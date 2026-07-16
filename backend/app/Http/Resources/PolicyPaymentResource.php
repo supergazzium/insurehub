@@ -24,6 +24,11 @@ class PolicyPaymentResource extends JsonResource
             'method' => $this->method,
             'reference' => $this->reference ?? '',
             'recordedByUserId' => $this->recorded_by_user_id !== null ? (string) $this->recorded_by_user_id : null,
+            // Fields populated by the legacy importer.
+            'paymentInscompToId' => $this->payment_inscomp_to_id !== null ? (string) $this->payment_inscomp_to_id : null,
+            'paymentInscompStatusId' => $this->payment_inscomp_status_id !== null ? (string) $this->payment_inscomp_status_id : null,
+            'countSlip' => $this->count_slip !== null ? (int) $this->count_slip : null,
+            'validateAmount' => $this->validate_amount ?? '',
         ];
     }
 }

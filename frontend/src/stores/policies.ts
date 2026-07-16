@@ -10,7 +10,16 @@
 
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
-import { api, buildQuery, type Paginated, type Single } from '../api/client'
+import { api, type Single } from '../api/client'
+import {
+  fetchPolicyList,
+  type PolicyListRow,
+  type PolicyListFilters,
+} from '../api/policies'
+
+// Re-export list types so pages can import both the detail Policy and the
+// lean PolicyListRow from a single store module.
+export type { PolicyListRow, PolicyListFilters }
 
 export type PolicyStatus =
   | 'quote'
@@ -140,6 +149,9 @@ export interface Policy {
   motor: MotorDetails | null
   property: PropertyDetails | null
   status: PolicyStatus
+  /** Original Thai label from lu_policy_status. Prefer for display. */
+  statusLabel?: string
+  statusGroup?: string | null
   notes: string
   events: PolicyEvent[]
   payments: PolicyPayment[]
@@ -149,10 +161,21 @@ export interface Policy {
 const TODAY_BE = '2569-06-06'
 
 export const usePolicyStore = defineStore('policies', () => {
-  // ── State ────────────────────────────────────────────────────────────────
+  // ── Paginated list state ─────────────────────────────────────────────────
+  // The list view uses server-side pagination + filters. `list` is the
+  // current page of lean rows returned by GET /api/v1/policies.
+  const list = ref<PolicyListRow[]>([])
+  const listMeta = ref<{ currentPage: number; lastPage: number; perPage: number; total: number } | null>(null)
+  const listFilters = ref<PolicyListFilters>({ page: 1, perPage: 25 })
+  const listLoading = ref(false)
+  const listError = ref<string | null>(null)
+
+  // ── Detail cache ─────────────────────────────────────────────────────────
+  // `policies` holds full-detail Policy objects loaded on demand (by id).
+  // Downstream code (detail panels, mutations) continues to read from this
+  // cache; nothing is preloaded upfront.
   const policies = ref<Policy[]>([])
   const loading = ref(false)
-  const loaded = ref(false)
   const error = ref<string | null>(null)
 
   // ── Helpers ──────────────────────────────────────────────────────────────
@@ -160,6 +183,11 @@ export const usePolicyStore = defineStore('policies', () => {
     return policies.value.find((p) => p.id === id) ?? null
   }
 
+  /**
+   * Deprecated: policies are no longer preloaded. Callers should query the
+   * server (`fetchPolicyList({ customerId })`) or use the child endpoint.
+   * Kept for compat with pages that only need the cached subset.
+   */
   function policiesForCustomer(customerId: string): Policy[] {
     return policies.value.filter((p) => p.customerId === customerId)
   }
@@ -187,7 +215,7 @@ export const usePolicyStore = defineStore('policies', () => {
   // ── Identifier generators (client-side; backend will be authoritative later) ─
   function nextQuoteNo(): string {
     const today = TODAY_BE.slice(0, 7)
-    const sameMonth = policies.value.filter((p) => p.quoteNo.startsWith(`Q-${today}`)).length
+    const sameMonth = policies.value.filter((p) => (p.quoteNo ?? '').startsWith(`Q-${today}`)).length
     return `Q-${today}-${String(sameMonth + 1).padStart(3, '0')}`
   }
   function nextApplicationNo(quoteNo: string): string {
@@ -204,30 +232,105 @@ export const usePolicyStore = defineStore('policies', () => {
     }
   }
 
-  // ── Loaders ──────────────────────────────────────────────────────────────
+  // ── Server-paginated list loader ─────────────────────────────────────────
+
+  /**
+   * Fetch a page of policies from the server. `filters` overrides the store's
+   * current filter state; omitted keys keep their existing value.
+   * Never preloads everything — the total dataset is ~20k rows.
+   */
+  async function loadPage(filters: PolicyListFilters = {}): Promise<void> {
+    listFilters.value = { ...listFilters.value, ...filters }
+    listLoading.value = true
+    listError.value = null
+    try {
+      const res = await fetchPolicyList(listFilters.value)
+      list.value = res.data
+      const m = res.meta
+      listMeta.value = m
+        ? { currentPage: m.current_page, lastPage: m.last_page, perPage: m.per_page, total: m.total }
+        : null
+    } catch (err) {
+      listError.value = err instanceof Error ? err.message : 'Failed to load policies.'
+      throw err
+    } finally {
+      listLoading.value = false
+    }
+  }
+
+  /**
+   * Legacy full-load shim — first page only. Used by pages that still expect
+   * `policies.value` populated (CommissionEngine, old PolicyList). New code
+   * should use loadPage() / ensureDetail(id).
+   */
+  const loaded = ref(false)
   async function load(force = false): Promise<void> {
     if (loaded.value && !force) return
     loading.value = true
     error.value = null
     try {
-      const all: Policy[] = []
-      let page = 1
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const response = await api.get<Paginated<Policy>>(
-          `policies${buildQuery({ page, perPage: 100 })}`,
-        )
-        all.push(...response.data)
-        const meta = response.meta
-        if (!meta || page >= meta.last_page) break
-        page += 1
-      }
-      // List endpoint may not include child arrays — normalise.
-      policies.value = all.map(normalize)
+      const res = await fetchPolicyList({ page: 1, perPage: 100 })
+      // list rows are lean; upgrade to normalized Policy shape via minimal cast.
+      policies.value = res.data.map((r) => normalize({
+        id: r.id,
+        quoteNo: r.quoteNo ?? '',
+        applicationNo: r.applicationNo,
+        policyNo: r.policyNo,
+        customerId: r.customerId,
+        productId: r.productId,
+        carrierId: r.carrierId,
+        writingAgentId: r.writingAgentId,
+        coverage: r.coverage,
+        annualPremium: r.annualPremium,
+        premiumMode: r.premiumMode as Policy['premiumMode'],
+        quoteDate: '',
+        effectiveDate: r.effectiveDate,
+        expiryDate: r.expiryDate,
+        issueDate: r.issueDate,
+        nextPremiumDue: null,
+        cancelDate: r.cancelDate,
+        lapseDate: null,
+        policyYear: 1,
+        actYear: 1,
+        newOrRenew: r.newOrRenew,
+        freelookActive: r.freelookActive,
+        riders: [],
+        beneficiaries: [],
+        motor: null,
+        property: null,
+        status: r.status,
+        notes: '',
+        events: [],
+        payments: [],
+        documents: [],
+      }))
       loaded.value = true
     } catch (err) {
       error.value = err instanceof Error ? err.message : 'Failed to load policies.'
-      throw err
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /**
+   * Ensure the full-detail Policy for `id` is in the cache. Fetches from
+   * /policies/{id} if missing. Returns the cached record.
+   */
+  async function ensureDetail(id: string, force = false): Promise<Policy | null> {
+    if (!force) {
+      const cached = getPolicy(id)
+      if (cached && cached.events !== undefined) return cached
+    }
+    loading.value = true
+    error.value = null
+    try {
+      const res = await api.get<Single<Policy>>(`policies/${id}`)
+      const p = normalize(res.data)
+      upsertPolicy(p)
+      return p
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to load policy.'
+      return null
     } finally {
       loading.value = false
     }
@@ -442,18 +545,25 @@ export const usePolicyStore = defineStore('policies', () => {
   }
 
   return {
-    // state
+    // list state (server-paginated)
+    list,
+    listMeta,
+    listFilters,
+    listLoading,
+    listError,
+    loadPage,
+    // detail-cache state
     policies,
     loading,
     loaded,
     error,
+    load,
+    ensureDetail,
     // helpers
     getPolicy,
     policiesForCustomer,
     policiesForAgent,
     totalsByStatus,
-    // loaders
-    load,
     // lifecycle
     createQuote,
     createPolicyDirect,
