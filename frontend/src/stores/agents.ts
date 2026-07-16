@@ -14,6 +14,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api, buildQuery, type Paginated, type Single } from '../api/client'
+import {
+  fetchAgentList,
+  type AgentListRow,
+  type AgentListFilters,
+} from '../api/agents'
+
+export type { AgentListRow, AgentListFilters }
 
 export type AgentLevel = 'l1' | 'l2' | 'l3' | 'l4' | 'l5'
 export type Gender = 'male' | 'female' | 'other' | ''
@@ -92,7 +99,16 @@ const LEVEL_PCT: Record<AgentLevel, number> = {
 }
 
 export const useAgentStore = defineStore('agents', () => {
-  // ── State ────────────────────────────────────────────────────────────────
+  // ── Paginated list state (server-side) ───────────────────────────────────
+  const list = ref<AgentListRow[]>([])
+  const listMeta = ref<{ currentPage: number; lastPage: number; perPage: number; total: number } | null>(null)
+  const listFilters = ref<AgentListFilters>({ page: 1, perPage: 25 })
+  const listLoading = ref(false)
+  const listError = ref<string | null>(null)
+
+  // ── Full-load cache (kept because the tree/hierarchy UI needs all agents) ─
+  // Agents is small (~400 rows) so loading everything upfront still makes sense
+  // for the hierarchy + tree helpers below.
   const agents = ref<Agent[]>([])
   const links = ref<RecruitmentLink[]>([])
   const loading = ref(false)
@@ -159,8 +175,8 @@ export const useAgentStore = defineStore('agents', () => {
   // ── Loaders ──────────────────────────────────────────────────────────────
 
   /**
-   * Fetch all agents + active recruitment links. The agents endpoint paginates
-   * (default 25/page) so we walk pages until we've collected everything.
+   * Fetch all agents + active recruitment links. Used by the hierarchy tree
+   * and dropdowns that need the full set (~400 rows).
    */
   async function load(force = false): Promise<void> {
     if (loaded.value && !force) return
@@ -169,8 +185,6 @@ export const useAgentStore = defineStore('agents', () => {
     try {
       const all: Agent[] = []
       let page = 1
-      // The API caps perPage at 100 — pull the largest pages we can.
-      // 1000 agents = 10 round-trips at worst, still well under a second.
       // eslint-disable-next-line no-constant-condition
       while (true) {
         const response = await api.get<Paginated<Agent>>(
@@ -192,6 +206,43 @@ export const useAgentStore = defineStore('agents', () => {
       throw err
     } finally {
       loading.value = false
+    }
+  }
+
+  /** Server-paginated list loader (for the AgentList table). */
+  async function loadPage(filters: AgentListFilters = {}): Promise<void> {
+    listFilters.value = { ...listFilters.value, ...filters }
+    listLoading.value = true
+    listError.value = null
+    try {
+      const res = await fetchAgentList(listFilters.value)
+      list.value = res.data
+      const m = res.meta
+      listMeta.value = m
+        ? { currentPage: m.current_page, lastPage: m.last_page, perPage: m.per_page, total: m.total }
+        : null
+    } catch (err) {
+      listError.value = err instanceof Error ? err.message : 'Failed to load agents.'
+      throw err
+    } finally {
+      listLoading.value = false
+    }
+  }
+
+  /** Full-detail fetch on-demand. */
+  async function ensureDetail(id: string, force = false): Promise<Agent | null> {
+    if (!force) {
+      const cached = getAgent(id)
+      if (cached) return cached
+    }
+    try {
+      const res = await api.get<Single<Agent>>(`agents/${id}`)
+      const a = res.data
+      agents.value = [a, ...agents.value.filter((x) => x.id !== id)]
+      return a
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to load agent.'
+      return null
     }
   }
 
@@ -261,7 +312,15 @@ export const useAgentStore = defineStore('agents', () => {
   }
 
   return {
-    // state
+    // list state (server-paginated)
+    list,
+    listMeta,
+    listFilters,
+    listLoading,
+    listError,
+    loadPage,
+    ensureDetail,
+    // full-load cache
     agents,
     links,
     loading,

@@ -43,7 +43,10 @@ class CustomerRequest extends FormRequest
             'nationality' => ['sometimes', 'nullable', 'string', 'max:255'],
             'religion' => ['sometimes', 'nullable', 'string', 'max:255'],
             'birthDate' => ['sometimes', 'nullable', 'date'],
-            'gender' => ['sometimes', 'nullable', 'string', 'in:male,female,other,'],
+            // Accept both English enum values (male/female/other) and the Thai
+            // strings used by the imported Access data (ชาย/หญิง). Empty string
+            // is treated as null via `nullable`.
+            'gender' => ['sometimes', 'nullable', 'string', 'in:male,female,other,ชาย,หญิง,'],
             'maritalStatus' => ['sometimes', 'nullable', 'string', 'in:single,married,divorced,widowed,'],
             'occupation' => ['sometimes', 'nullable', 'string', 'max:255'],
             'position' => ['sometimes', 'nullable', 'string', 'max:255'],

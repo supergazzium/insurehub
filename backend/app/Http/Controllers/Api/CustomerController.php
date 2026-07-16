@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Requests\CustomerRequest;
+use App\Http\Resources\CustomerListResource;
 use App\Http\Resources\CustomerResource;
 use App\Models\Customer;
 use Illuminate\Http\JsonResponse;
@@ -15,28 +16,61 @@ use Illuminate\Validation\Rule;
 
 class CustomerController extends ApiController
 {
+    /**
+     * Paginated customer list — server-side search + filters, with joined
+     * assigned-agent display columns. Returns the lean CustomerListResource
+     * shape (heavy detail stays on CustomerResource for show/update).
+     */
     public function index(Request $request): AnonymousResourceCollection
     {
-        $q = $this->scopeTenant(Customer::query(), $request);
+        $tenantId = $this->tenantId($request);
+
+        $q = DB::table('customers as c')
+            ->leftJoin('agents as a', 'a.id', '=', 'c.assigned_agent_id')
+            ->where('c.tenant_id', $tenantId)
+            ->whereNull('c.deleted_at')
+            ->select([
+                'c.id', 'c.customer_code', 'c.customer_type', 'c.first_name', 'c.last_name',
+                'c.nickname', 'c.id_card', 'c.phone', 'c.email', 'c.province',
+                'c.assigned_agent_id', 'c.active_policy_count', 'c.total_policy_count',
+                'c.active', 'c.registered_at',
+                'a.agent_code as assigned_agent_code',
+                'a.first_name as assigned_agent_first_name',
+                'a.last_name as assigned_agent_last_name',
+            ]);
 
         if ($search = $request->string('q')->toString()) {
             $like = "%{$search}%";
             $q->where(function ($w) use ($like): void {
-                $w->where('customer_code', 'like', $like)
-                    ->orWhere('first_name', 'like', $like)
-                    ->orWhere('last_name', 'like', $like)
-                    ->orWhere('email', 'like', $like)
-                    ->orWhere('id_card', 'like', $like);
+                $w->where('c.customer_code', 'like', $like)
+                    ->orWhere('c.first_name', 'like', $like)
+                    ->orWhere('c.last_name', 'like', $like)
+                    ->orWhere('c.email', 'like', $like)
+                    ->orWhere('c.id_card', 'like', $like)
+                    ->orWhere('c.phone', 'like', $like);
             });
         }
         if ($agentId = $request->input('assignedAgentId')) {
-            $q->where('assigned_agent_id', $agentId);
+            $q->where('c.assigned_agent_id', $agentId);
         }
         if ($request->boolean('unassigned')) {
-            $q->whereNull('assigned_agent_id');
+            $q->whereNull('c.assigned_agent_id');
+        }
+        if ($request->has('active')) {
+            $q->where('c.active', $request->boolean('active'));
+        }
+        if ($request->boolean('withPolicies')) {
+            $q->where('c.active_policy_count', '>', 0);
+        }
+        if ($ctype = $request->input('customerType')) {
+            $q->where('c.customer_type', $ctype);
         }
 
-        return CustomerResource::collection($q->orderBy('customer_code')->paginate($this->perPage($request)));
+        // Order by id desc so newly-created rows land at the top of page 1,
+        // where users expect to see them after clicking "+ New Customer".
+        $paginator = $q->orderBy('c.id', 'desc')->paginate($this->perPage($request));
+
+        return CustomerListResource::collection($paginator);
     }
 
     public function store(CustomerRequest $request): JsonResponse

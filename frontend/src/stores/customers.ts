@@ -8,6 +8,13 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api, buildQuery, type Paginated, type Single } from '../api/client'
+import {
+  fetchCustomerList,
+  type CustomerListRow,
+  type CustomerListFilters,
+} from '../api/customers'
+
+export type { CustomerListRow, CustomerListFilters }
 
 export type Gender = 'male' | 'female' | 'other'
 export type MaritalStatus = 'single' | 'married' | 'divorced' | 'widowed'
@@ -118,11 +125,17 @@ export interface CustomerReferralLink {
 }
 
 export const useCustomerStore = defineStore('customers', () => {
-  // ── State ────────────────────────────────────────────────────────────────
+  // ── Paginated list state (server-side) ───────────────────────────────────
+  const list = ref<CustomerListRow[]>([])
+  const listMeta = ref<{ currentPage: number; lastPage: number; perPage: number; total: number } | null>(null)
+  const listFilters = ref<CustomerListFilters>({ page: 1, perPage: 25 })
+  const listLoading = ref(false)
+  const listError = ref<string | null>(null)
+
+  // ── Detail cache ─────────────────────────────────────────────────────────
   const customers = ref<Customer[]>([])
   const links = ref<CustomerReferralLink[]>([])
   const loading = ref(false)
-  const loaded = ref(false)
   const error = ref<string | null>(null)
 
   // ── Lookup helpers (sync, read from cache) ───────────────────────────────
@@ -171,35 +184,86 @@ export const useCustomerStore = defineStore('customers', () => {
     }
   }
 
-  // ── Loaders ──────────────────────────────────────────────────────────────
+  // ── Server-paginated list loader ─────────────────────────────────────────
+
+  async function loadPage(filters: CustomerListFilters = {}): Promise<void> {
+    listFilters.value = { ...listFilters.value, ...filters }
+    listLoading.value = true
+    listError.value = null
+    try {
+      const res = await fetchCustomerList(listFilters.value)
+      list.value = res.data
+      const m = res.meta
+      listMeta.value = m
+        ? { currentPage: m.current_page, lastPage: m.last_page, perPage: m.per_page, total: m.total }
+        : null
+    } catch (err) {
+      listError.value = err instanceof Error ? err.message : 'Failed to load customers.'
+      throw err
+    } finally {
+      listLoading.value = false
+    }
+  }
+
+  /**
+   * Legacy full-load shim. Some pages (CustomerReferral, CommissionEngine)
+   * still expect `customers.value` to be pre-populated. Rather than break
+   * them mid-refactor, this fetches the first page (25 rows) into the
+   * detail cache as normalized Customer objects — enough for demos, and
+   * cheaper than the old `while(true)` loop.
+   *
+   * New code should use loadPage() (server-paginated list rows) or
+   * ensureDetail(id) (single-record detail cache) instead.
+   */
+  const loaded = ref(false)
   async function load(force = false): Promise<void> {
     if (loaded.value && !force) return
     loading.value = true
     error.value = null
     try {
-      const allCustomers: Customer[] = []
-      let page = 1
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-        const response = await api.get<Paginated<Customer>>(
-          `customers${buildQuery({ page, perPage: 100 })}`,
-        )
-        allCustomers.push(...response.data.map(normalize))
-        const meta = response.meta
-        if (!meta || page >= meta.last_page) break
-        page += 1
-      }
-      customers.value = allCustomers
+      const res = await api.get<Paginated<Customer>>(
+        `customers${buildQuery({ page: 1, perPage: 100 })}`,
+      )
+      customers.value = res.data.map(normalize)
+      await loadReferralLinks()
+      loaded.value = true
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to load customers.'
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** Ensure the full-detail Customer for `id` is in cache, fetching if needed. */
+  async function ensureDetail(id: string, force = false): Promise<Customer | null> {
+    if (!force) {
+      const cached = getCustomer(id)
+      if (cached) return cached
+    }
+    loading.value = true
+    error.value = null
+    try {
+      const res = await api.get<Single<Customer>>(`customers/${id}`)
+      const c = normalize(res.data)
+      customers.value = [c, ...customers.value.filter((x) => x.id !== id)]
+      return c
+    } catch (err) {
+      error.value = err instanceof Error ? err.message : 'Failed to load customer.'
+      return null
+    } finally {
+      loading.value = false
+    }
+  }
+
+  /** Fetch the referral links (small dataset — one request). */
+  async function loadReferralLinks(): Promise<void> {
+    try {
       const linksResponse = await api.get<Paginated<CustomerReferralLink>>(
         `customer-referral-links${buildQuery({ perPage: 100 })}`,
       )
       links.value = linksResponse.data
-      loaded.value = true
-    } catch (err) {
-      error.value = err instanceof Error ? err.message : 'Failed to load customers.'
-      throw err
-    } finally {
-      loading.value = false
+    } catch {
+      /* referral links are non-critical; silence errors */
     }
   }
 
@@ -328,20 +392,28 @@ export const useCustomerStore = defineStore('customers', () => {
   }
 
   return {
-    // state
+    // list state (server-paginated)
+    list,
+    listMeta,
+    listFilters,
+    listLoading,
+    listError,
+    loadPage,
+    // detail-cache state
     customers,
     links,
     loading,
     loaded,
     error,
+    load,
+    ensureDetail,
+    loadReferralLinks,
     // helpers
     getCustomer,
     getCustomersByAssignedAgent,
     unassignedCustomers,
     thaiAge,
     kycStatus,
-    // loaders
-    load,
     // mutations
     createCustomer,
     updateCustomer,
