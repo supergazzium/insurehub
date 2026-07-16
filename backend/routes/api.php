@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AuthController;
+use App\Http\Controllers\Api\CarrierBankAccountController;
 use App\Http\Controllers\Api\CarrierContactGroupController;
 use App\Http\Controllers\Api\CarrierController;
 use App\Http\Controllers\Api\CommissionController;
@@ -11,15 +12,26 @@ use App\Http\Controllers\Api\ContractController;
 use App\Http\Controllers\Api\CustomerAssignmentController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerKycDocController;
+use App\Http\Controllers\Api\AdminAgentApprovalController;
+use App\Http\Controllers\Api\AdminPayoutController;
 use App\Http\Controllers\Api\CustomerReferralLinkController;
+use App\Http\Controllers\Api\MeAgentController;
 use App\Http\Controllers\Api\EmailTemplateController;
+use App\Http\Controllers\Api\ImportFailureController;
 use App\Http\Controllers\Api\LookupController;
 use App\Http\Controllers\Api\MailController;
+use App\Http\Controllers\Api\EndorsementController;
+use App\Http\Controllers\Api\MotorActTariffController;
 use App\Http\Controllers\Api\PolicyController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\PolicyDocumentController;
 use App\Http\Controllers\Api\PolicyEventController;
 use App\Http\Controllers\Api\PolicyPaymentController;
+use App\Http\Controllers\Api\PolicyRebateController;
 use App\Http\Controllers\Api\ProductController;
+use App\Http\Controllers\Api\PublicController;
+use App\Http\Controllers\Api\ProductTaxonomyController;
+use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\RecruitmentLinkController;
 use App\Http\Controllers\Api\TenantController;
 use Illuminate\Support\Facades\Route;
@@ -31,10 +43,50 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::post('auth/login', [AuthController::class, 'login']);
+Route::post('auth/register', [AuthController::class, 'register']);
+Route::post('auth/forgot-password', [AuthController::class, 'forgotPassword']);
+Route::post('auth/reset-password', [AuthController::class, 'resetPassword']);
+
+// Unauthenticated public data (recruitment-link preview, etc.)
+Route::get('public/recruit/{token}', [PublicController::class, 'recruitLink']);
 
 Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('auth/logout', [AuthController::class, 'logout']);
     Route::get('auth/me', [AuthController::class, 'me']);
+    Route::post('auth/change-password', [MeAgentController::class, 'changePassword']);
+
+    // Agent portal — "me as an agent" endpoints. Every route checks
+    // users.agent_id is set; admins-with-no-agent get 404.
+    Route::get('me/agent', [MeAgentController::class, 'show']);
+    Route::patch('me/agent/profile', [MeAgentController::class, 'updateProfile']);
+    Route::patch('me/agent/id-document', [MeAgentController::class, 'updateIdDocument']);
+    Route::patch('me/agent/license', [MeAgentController::class, 'updateLicense']);
+    Route::patch('me/agent/bank', [MeAgentController::class, 'updateBank']);
+    Route::patch('me/agent/address', [MeAgentController::class, 'updateAddress']);
+    Route::post('me/agent/profile-photo', [MeAgentController::class, 'uploadProfilePhoto']);
+    Route::post('me/agent/id-photo', [MeAgentController::class, 'uploadIdPhoto']);
+    Route::post('me/agent/bank-book-photo', [MeAgentController::class, 'uploadBankBookPhoto']);
+    Route::get('me/agent/id-card-unmask', [MeAgentController::class, 'unmaskIdCard']);
+    Route::get('me/agent/referral-link', [MeAgentController::class, 'referralLink']);
+    Route::get('me/agent/downline', [MeAgentController::class, 'downline']);
+    Route::get('me/agent/earnings', [MeAgentController::class, 'earnings']);
+
+    // Admin approval + oversight (role-gated inside the controller).
+    Route::get('admin/agents/pending', [AdminAgentApprovalController::class, 'pending']);
+    Route::post('admin/agents/{agent}/approve', [AdminAgentApprovalController::class, 'approve']);
+    Route::post('admin/agents/{agent}/reject', [AdminAgentApprovalController::class, 'reject']);
+    Route::get('admin/agents/{agent}/audit', [AdminAgentApprovalController::class, 'audit']);
+    Route::get('admin/agents/{agent}/downline-tree', [AdminAgentApprovalController::class, 'downlineTree']);
+
+    // Phase 7b — Admin payout cycle.
+    Route::post('admin/payouts/preview', [AdminPayoutController::class, 'preview']);
+    Route::post('admin/payouts', [AdminPayoutController::class, 'create']);
+    Route::get('admin/payouts', [AdminPayoutController::class, 'index']);
+    Route::get('admin/payouts/{payout}', [AdminPayoutController::class, 'show']);
+    Route::post('admin/payouts/{payout}/issue', [AdminPayoutController::class, 'issue']);
+    Route::post('admin/payouts/{payout}/pay', [AdminPayoutController::class, 'pay']);
+    Route::post('admin/payouts/{payout}/void', [AdminPayoutController::class, 'void']);
+    Route::get('admin/payouts/{payout}/pdf', [AdminPayoutController::class, 'pdf']);
 
     // Tenant settings (single resource).
     Route::get('tenant', [TenantController::class, 'show']);
@@ -44,9 +96,46 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::apiResource('agents', AgentController::class);
     Route::apiResource('customers', CustomerController::class);
     Route::apiResource('carriers', CarrierController::class);
+    Route::apiResource('carriers.bank-accounts', CarrierBankAccountController::class)
+        ->parameters(['bank-accounts' => 'bankAccount'])
+        ->only(['index', 'store', 'update', 'destroy']);
     Route::apiResource('products', ProductController::class);
+    Route::get('products/{product}/commission-rates', [ProductController::class, 'commissionRates']);
+    Route::get('carriers/{carrier}/products/next-code', [ProductController::class, 'nextCode']);
+    Route::get('product-categories', [ProductTaxonomyController::class, 'index']);
+
+    // Phase 5 — Quotation module. Quotes live in the policies table with
+    // status='quote'; converted quotes flip to 'application'.
+    Route::get('quotes', [QuoteController::class, 'index']);
+    Route::post('quotes', [QuoteController::class, 'store']);
+    Route::get('quotes/act-tariffs', [QuoteController::class, 'actTariffs']);
+    Route::post('quotes/premium/preview', [QuoteController::class, 'premiumPreview']);
+    Route::get('quotes/{policy}', [QuoteController::class, 'show']);
+    Route::patch('quotes/{policy}', [QuoteController::class, 'update']);
+    Route::post('quotes/{policy}/convert', [QuoteController::class, 'convert']);
     Route::apiResource('contracts', ContractController::class);
     Route::apiResource('policies', PolicyController::class);
+    // Phase 6 — sectioned edit (parties/dates/premium/payment/notes/identifiers).
+    Route::patch('policies/{policy}/section/{section}', [PolicyController::class, 'patchSection']);
+    // Phase 8b — renewal actions (log touchpoints + email notice).
+    Route::post('policies/{policy}/renewal/contacted', [PolicyController::class, 'markRenewalContacted']);
+    Route::post('policies/{policy}/renewal/started', [PolicyController::class, 'markRenewalStarted']);
+    Route::post('policies/{policy}/renewal/send-notice', [PolicyController::class, 'sendRenewalNotice']);
+    // Phase 9c — recompute commission accrual at current per-policy override rates.
+    Route::post('policies/{policy}/commission/recompute', [PolicyController::class, 'recomputeCommission']);
+    // Phase 9 — endorsements (event log per policy).
+    Route::get('policies/{policy}/endorsements', [EndorsementController::class, 'index']);
+    Route::post('policies/{policy}/endorsements', [EndorsementController::class, 'store']);
+    // Phase 9 — motor tariff admin CRUD.
+    Route::get('motor-act-tariffs', [MotorActTariffController::class, 'index']);
+    Route::post('motor-act-tariffs', [MotorActTariffController::class, 'store']);
+    Route::patch('motor-act-tariffs/{tariff}', [MotorActTariffController::class, 'update']);
+    Route::delete('motor-act-tariffs/{tariff}', [MotorActTariffController::class, 'destroy']);
+    // Phase 6b — riders + beneficiaries sync (replace-all shape).
+    Route::put('policies/{policy}/riders', [PolicyController::class, 'syncRiders']);
+    Route::put('policies/{policy}/beneficiaries', [PolicyController::class, 'syncBeneficiaries']);
+    // Phase 6b — multipart doc upload (in addition to the existing JSON store).
+    Route::post('policies/{policy}/documents/upload', [PolicyDocumentController::class, 'upload']);
 
     // Carrier contact groups + email templates.
     Route::apiResource('carrier-contact-groups', CarrierContactGroupController::class)
@@ -80,6 +169,9 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('policies/{policy}/events', [PolicyEventController::class, 'index']);
     Route::post('policies/{policy}/events', [PolicyEventController::class, 'store']);
 
+    // Editable rebate ledger — inline edits from /commissions/rebates.
+    Route::patch('policy-rebates/{rebate}', [PolicyRebateController::class, 'update']);
+
     // Commission ledger.
     Route::get('commissions/transactions', [CommissionController::class, 'transactions']);
     Route::post('commissions/transactions', [CommissionController::class, 'storeTransaction']);
@@ -92,6 +184,28 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
         Route::post('attachments', [MailController::class, 'uploadAttachment']);
         Route::get('incoming', [MailController::class, 'incoming']);
     });
+
+    // Reports — analytics endpoints ported from the insurehub_legacy v_* views.
+    Route::prefix('reports')->group(function (): void {
+        Route::get('dashboard-kpis', [ReportController::class, 'dashboardKpis']);
+        Route::get('expiring-soon', [ReportController::class, 'expiringSoon']);
+        Route::get('active-policies', [ReportController::class, 'activePolicies']);
+        Route::get('agent-commission-ledger', [ReportController::class, 'agentCommissionLedger']);
+        Route::get('agent-performance', [ReportController::class, 'agentPerformance']);
+        Route::get('product-performance', [ReportController::class, 'productPerformance']);
+        Route::get('new-vs-renew-by-month', [ReportController::class, 'newVsRenewByMonth']);
+        Route::get('cancellation-ledger', [ReportController::class, 'cancellationLedger']);
+        Route::get('rebate-reconciliation', [ReportController::class, 'rebateReconciliation']);
+        // Phase 8a — operational reports
+        Route::get('freelook', [ReportController::class, 'freelook']);
+        Route::get('mailing-pipeline', [ReportController::class, 'mailingPipeline']);
+        Route::get('payment-history', [ReportController::class, 'paymentHistory']);
+    });
+
+    // Applications import failures triage queue (populated by insurehub:import).
+    Route::get('import-failures', [ImportFailureController::class, 'index']);
+    Route::get('import-failures/summary', [ImportFailureController::class, 'summary']);
+    Route::patch('import-failures/{failure}/resolve', [ImportFailureController::class, 'resolve']);
 
     // Lookup tables (read-only).
     Route::prefix('lookups')->group(function (): void {
