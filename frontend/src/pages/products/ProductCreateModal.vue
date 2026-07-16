@@ -67,19 +67,6 @@ const needsMainRiderChoice = computed(() => carrierInsureType.value === 'life')
  *   - Non-life + Main → user picks Group / Motor / Non-Motor
  *   - Tax             → auto Tax
  */
-/**
- * Product-group values shown in the UI vs. stored in the DB.
- * The visible label is always "Group" for a group product, but the stored
- * value is 'Group-Life' or 'Group-NL' depending on the carrier's insureType
- * so the taxonomy for ประกันกลุ่มชีวิต only surfaces for life carriers.
- */
-const groupStorageValue = computed<string>(() => {
-  return carrierInsureType.value === 'life' ? 'Group-Life' : 'Group-NL'
-})
-function displayGroupLabel(storage: string): string {
-  return storage === 'Group-Life' || storage === 'Group-NL' ? 'Group' : storage
-}
-
 /** Options as {storage, label} pairs — storage is what we save, label is what the user sees. */
 const productGroupOptions = computed<Array<{ storage: string; label: string }>>(() => {
   const t = carrierInsureType.value

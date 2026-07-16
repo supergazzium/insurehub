@@ -50,8 +50,8 @@ async function loadRecruiter(token: string): Promise<void> {
     recruiter.value = res
   } catch (e: unknown) {
     // Invalid / revoked token: show a soft warning, don't block registration.
-    if (e instanceof ApiError && e.details && typeof e.details === 'object' && 'valid' in e.details) {
-      recruiter.value = e.details as RecruitLinkInfo
+    if (e instanceof ApiError && e.body && typeof e.body === 'object' && 'valid' in e.body) {
+      recruiter.value = e.body as unknown as RecruitLinkInfo
     } else {
       recruiter.value = { valid: false, message: e instanceof Error ? e.message : 'Unknown error' }
     }
@@ -107,9 +107,8 @@ async function submit(): Promise<void> {
     done.value = { agentCode: res.agentCode }
     setTimeout(() => router.push('/login'), 3500)
   } catch (e: unknown) {
-    if (e instanceof ApiError && e.details && typeof e.details === 'object') {
-      const d = e.details as { errors?: Record<string, string[]> }
-      if (d.errors) fieldErrors.value = d.errors
+    if (e instanceof ApiError && e.body?.errors) {
+      fieldErrors.value = e.body.errors
       error.value = e.message
     } else {
       error.value = e instanceof Error ? e.message : 'Registration failed.'

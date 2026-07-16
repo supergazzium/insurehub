@@ -66,6 +66,7 @@ export interface CorporateContact {
 export interface Customer {
   id: string
   customerCode: string
+  legacyId?: string
   customerType: CustomerType
   titleTh: string
   titleEn: string

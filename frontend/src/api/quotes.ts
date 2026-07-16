@@ -52,11 +52,23 @@ export function fetchQuote(id: string) {
   return api.get<{ data: Quote }>(`quotes/${id}`)
 }
 
-export function createQuote(payload: Partial<Quote> & { writingAgentId?: string | number | null }) {
+// FK fields on the wire accept either string (from the picker) or number
+// (from `Number(id)`). Laravel casts to int on the way in. The Quote type
+// itself keeps `string | null` because that's what the server returns.
+export type QuoteWritePayload = Omit<Partial<Quote>,
+  'customerId' | 'productId' | 'carrierId' | 'writingAgentId'
+> & {
+  customerId?: string | number | null
+  productId?: string | number | null
+  carrierId?: string | number | null
+  writingAgentId?: string | number | null
+}
+
+export function createQuote(payload: QuoteWritePayload) {
   return api.post<{ data: Quote }>('quotes', payload)
 }
 
-export function updateQuote(id: string, payload: Partial<Quote>) {
+export function updateQuote(id: string, payload: QuoteWritePayload) {
   return api.patch<{ data: Quote }>(`quotes/${id}`, payload)
 }
 

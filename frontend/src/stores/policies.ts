@@ -108,15 +108,107 @@ export interface PropertyDetails {
 }
 
 export interface Beneficiary {
+  id?: string
   name: string
   relation: string
   share: number
+  slot?: number | null
+}
+
+export interface RiderCommission {
+  rateInh: number | null
+  amtInh: number | null
+  rateAg: number | null
+  amtAg: number | null
 }
 
 export interface Rider {
+  id?: string
+  slot?: number | null
+  productId?: string | null
   name: string
   premium: number
+  commission?: RiderCommission
   notes: string
+}
+
+// Nested blocks emitted by PolicyResource on GET /policies/{id}. Keeping
+// them here so consumers (PolicyEdit, PolicyDetailDrawer) get proper types
+// without re-declaring the shape.
+export interface PolicyPremium {
+  main: number | null
+  net: number | null
+  dutyStamp: number | null
+  vat: number | null
+  totalPaid: number | null
+  netCustomerPaid: number | null
+  check?: string
+}
+export interface PolicyMainCommission {
+  rateInh: number | null
+  amtInh: number | null
+  rateAg: number | null
+  amtAg: number | null
+}
+export interface PolicyInstallment {
+  term: string
+  firstDueAmount: number | null
+  firstDueDate: string | null
+  nextDueAmount: number | null
+  lastDueDate: string | null
+  typeOfPaid: string
+  typeOfPaidNote: string
+  financeCompany: string
+  frontEndFee: number | null
+  discountAmount: number | null
+  creditCardFee: number | null
+  subsidyFromAgent: number | null
+  subsidyToFinance: number | null
+}
+export interface PolicyWht {
+  status: string
+  amount: number | null
+}
+export interface PolicyCancellation {
+  status: string
+  refundPremium: number | null
+  refundVat: number | null
+  refundTotalPremium: number | null
+  refundDiscount: number | null
+  netRefundAmount: number | null
+  refundRebateAmt: number | null
+  refundRebateOv: number | null
+}
+export interface PolicyMailing {
+  address: string
+  date: string | null
+  note: string
+}
+export interface PolicyDataQuality {
+  vehicleOnNonMotor: boolean
+  premiumCheck: string
+  importNotes: string
+}
+export interface PolicyRebate {
+  id?: string
+  policyId?: string
+  // In-house (InH) side.
+  rebateStatus: string
+  earnDate: string | null
+  ovStatus: string
+  ovDate: string | null
+  calculatedAmount: number | null
+  calculatedOv: number | null
+  actualAmount: number | null
+  actualOv: number | null
+  validateAmount: string
+  validateOv: string
+  // Agent (AG) side.
+  agentRebateStatus: string
+  agentReceiveDate: string | null
+  calculatedAgentAmount: number | null
+  actualAgentAmount: number | null
+  agentCheckStatus: string
 }
 
 export type NewOrRenew = 'new' | 'renew'
@@ -126,6 +218,7 @@ export interface Policy {
   quoteNo: string
   applicationNo: string | null
   policyNo: string | null
+  notionNo: string | null
   customerId: string
   productId: string
   carrierId: string
@@ -134,16 +227,28 @@ export interface Policy {
   annualPremium: number
   premiumMode: 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'single'
   quoteDate: string
+  appDate: string | null
+  createDate: string | null
   effectiveDate: string | null
   expiryDate: string | null
   issueDate: string | null
   nextPremiumDue: string | null
   cancelDate: string | null
   lapseDate: string | null
+  periodPaidEnd?: string | null
+  policyEnd?: string | null
   policyYear: number
   actYear: number
   newOrRenew: NewOrRenew
   freelookActive: boolean
+  premium?: PolicyPremium
+  mainCommission?: PolicyMainCommission
+  installment?: PolicyInstallment
+  wht?: PolicyWht
+  cancellation?: PolicyCancellation | null
+  mailing?: PolicyMailing
+  dataQuality?: PolicyDataQuality
+  rebate?: PolicyRebate | null
   riders: Rider[]
   beneficiaries: Beneficiary[]
   motor: MotorDetails | null
@@ -152,7 +257,9 @@ export interface Policy {
   /** Original Thai label from lu_policy_status. Prefer for display. */
   statusLabel?: string
   statusGroup?: string | null
+  statusNote?: string
   notes: string
+  internalNote?: string
   events: PolicyEvent[]
   payments: PolicyPayment[]
   documents: PolicyDocument[]
@@ -276,6 +383,7 @@ export const usePolicyStore = defineStore('policies', () => {
         quoteNo: r.quoteNo ?? '',
         applicationNo: r.applicationNo,
         policyNo: r.policyNo,
+        notionNo: null,
         customerId: r.customerId,
         productId: r.productId,
         carrierId: r.carrierId,
@@ -284,6 +392,8 @@ export const usePolicyStore = defineStore('policies', () => {
         annualPremium: r.annualPremium,
         premiumMode: r.premiumMode as Policy['premiumMode'],
         quoteDate: '',
+        appDate: r.appDate ?? null,
+        createDate: null,
         effectiveDate: r.effectiveDate,
         expiryDate: r.expiryDate,
         issueDate: r.issueDate,

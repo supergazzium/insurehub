@@ -1,7 +1,6 @@
 <script setup lang="ts">
 import { onMounted, ref, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { useI18n } from 'vue-i18n'
 import {
   fetchExpiringSoon, markRenewalContacted, markRenewalStarted, sendRenewalNotice,
   type ExpiringPolicy, type ExpiringSoonMeta,
@@ -10,7 +9,6 @@ import { ApiError } from '../../api/client'
 import { toCsv, downloadCsv } from '../../util/csvExport'
 
 const router = useRouter()
-const { t } = useI18n()
 
 const days = ref<30 | 60 | 90 | 180>(60)
 const rows = ref<ExpiringPolicy[]>([])
