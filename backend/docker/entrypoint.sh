@@ -8,6 +8,18 @@ set -euo pipefail
 
 cd /app
 
+# Refuse to boot without an explicit DB_CONNECTION. Without this Laravel
+# silently falls back to the default (SQLite at database/database.sqlite
+# baked into the image) — writes go to ephemeral container storage and
+# every restart re-runs migrations against a half-populated file, which
+# looks like "duplicate column" errors in the log. Better to fail fast
+# and force the deploy operator to wire the DB env vars.
+if [[ -z "${DB_CONNECTION:-}" ]]; then
+    echo "entrypoint: DB_CONNECTION is not set." >&2
+    echo "entrypoint: set DB_CONNECTION, DB_HOST, DB_PORT, DB_DATABASE, DB_USERNAME, DB_PASSWORD in the deploy environment." >&2
+    exit 1
+fi
+
 # Wait for the database to be reachable before running migrations. Coolify
 # starts services in parallel; without this we race and crash-loop until
 # MySQL is up.
