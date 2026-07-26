@@ -33,7 +33,9 @@ RUN composer install \
 # in memory across requests (opt-in later via APP_WORKER_MODE).
 FROM dunglas/frankenphp:1-php8.4-alpine AS runtime
 
-# System deps for the PHP extensions we install below.
+# System deps for the PHP extensions we install below. `curl` is also
+# included so Coolify's UI-defined healthcheck (which overrides the
+# Dockerfile HEALTHCHECK) can probe the container from inside.
 RUN apk add --no-cache \
         icu-libs \
         libpng \
@@ -44,6 +46,7 @@ RUN apk add --no-cache \
         oniguruma \
         tzdata \
         bash \
+        curl \
     && cp /usr/share/zoneinfo/Asia/Bangkok /etc/localtime \
     && echo "Asia/Bangkok" > /etc/timezone
 

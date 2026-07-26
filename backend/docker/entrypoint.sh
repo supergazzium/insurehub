@@ -24,12 +24,22 @@ if [[ -n "${DB_HOST:-}" ]]; then
     done
 fi
 
+# Clear any stale caches from a previous deploy before rebuilding. Wrapped
+# in `|| true` because on first boot the cache files don't exist yet and
+# artisan's *:clear commands exit non-zero.
+php artisan config:clear || true
+php artisan route:clear  || true
+php artisan view:clear   || true
+php artisan event:clear  || true
+
 # Cache config/routes/views/events for prod perf. Rebuilt every start
-# because envvars can change between deploys.
-php artisan config:cache
-php artisan route:cache
-php artisan view:cache
-php artisan event:cache || true
+# because envvars can change between deploys. Each `|| true` prevents one
+# broken sub-cache from killing the entrypoint and crash-looping the
+# container (e.g., view:cache when resources/views is missing).
+php artisan config:cache || true
+php artisan route:cache  || true
+php artisan view:cache   || true
+php artisan event:cache  || true
 
 # Run migrations. `--force` is required in non-interactive environments.
 # The first deploy on a fresh DB will run every migration in order; every
