@@ -8,6 +8,17 @@ set -euo pipefail
 
 cd /app
 
+# Ensure runtime-writable dirs exist AND are owned by www-data. Coolify
+# may mount a volume over /app/storage for persistence, which shadows
+# the dirs created at image-build time — leaving Blade with no place to
+# write compiled views (crashes /up and every view render).
+mkdir -p storage/framework/{cache,sessions,views} \
+         storage/logs \
+         storage/app/public \
+         bootstrap/cache
+chown -R www-data:www-data storage bootstrap/cache
+chmod -R ug+rwX             storage bootstrap/cache
+
 # Refuse to boot without an explicit DB_CONNECTION. Without this Laravel
 # silently falls back to the default (SQLite at database/database.sqlite
 # baked into the image) — writes go to ephemeral container storage and
