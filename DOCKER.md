@@ -78,6 +78,39 @@ compete with the request loop and lose jobs on restarts. Add them as
 - Scheduler: run a 1-min loop of `php artisan schedule:run` (Coolify has a
   "Scheduled Task" primitive for this — no image change needed).
 
+## CI/CD
+
+Two GitHub Actions workflows run this repo:
+
+- `.github/workflows/ci.yml` — on every PR and push to `main`, builds both
+  Dockerfiles via `docker compose build`, boots the stack, and smoke-tests
+  `GET /up` on the backend and `GET /insurehub/` on the frontend. The
+  images are the exact ones Coolify will build, so a green CI run means
+  "these Dockerfiles work end-to-end".
+- `.github/workflows/deploy.yml` — fires only after CI succeeds on `main`.
+  Calls Coolify's per-application deploy webhook for the backend and
+  frontend in parallel.
+
+### Wiring the deploy webhooks
+
+1. In Coolify, open each Application (backend, frontend) → **Webhooks** →
+   copy the **Deploy Webhook** URL. Each URL contains an auth token; treat
+   it like a secret.
+2. In GitHub → repo **Settings → Secrets and variables → Actions → New
+   repository secret**, add:
+   - `COOLIFY_BACKEND_WEBHOOK` = backend deploy URL
+   - `COOLIFY_FRONTEND_WEBHOOK` = frontend deploy URL
+
+That's it. Push to `main` → CI builds and smoke-tests → on success, both
+Coolify apps redeploy. If CI fails, no deploy is triggered.
+
+### Why not the GitHub-integration option in Coolify?
+
+Coolify can also auto-deploy on `git push` directly, without CI. Skip that
+mode: it will deploy broken builds because nothing has run the images
+before Coolify tries to. The webhook-gated-by-CI setup here is one extra
+config step and buys you a real safety net.
+
 ## Vite base path
 
 `vite.config.ts` sets `base: '/insurehub/'`, so the frontend serves at

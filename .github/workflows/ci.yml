@@ -1,0 +1,85 @@
+name: CI
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build-and-smoke:
+    name: Build images & smoke-test compose stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      # The compose file references backend/.env via env_file. In CI we
+      # synthesise one from .env.example plus a throwaway APP_KEY so the
+      # backend container boots the same way it would locally.
+      - name: Seed backend/.env for compose
+        run: |
+          cp backend/.env.example backend/.env
+          # Deterministic 32-byte base64 key — safe to hardcode: CI only,
+          # never used against a real DB/session store.
+          echo "APP_KEY=base64:Y2ktdGVzdC1rZXktMzItYnl0ZXMtc3RhdGljLWFiY2Q=" >> backend/.env
+
+      - name: Build images
+        run: docker compose build --pull
+
+      - name: Boot stack
+        run: docker compose up -d
+
+      - name: Wait for MySQL healthcheck
+        run: |
+          for i in $(seq 1 60); do
+            status=$(docker inspect --format='{{.State.Health.Status}}' \
+              "$(docker compose ps -q mysql)" 2>/dev/null || echo "starting")
+            if [ "$status" = "healthy" ]; then
+              echo "MySQL healthy after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "MySQL did not become healthy in 60s"; exit 1
+
+      - name: Wait for backend /up
+        run: |
+          for i in $(seq 1 60); do
+            if curl -fsS http://localhost:8080/up >/dev/null 2>&1; then
+              echo "backend /up OK after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "backend /up never returned 2xx"; exit 1
+
+      - name: Wait for frontend /insurehub/
+        run: |
+          for i in $(seq 1 30); do
+            if curl -fsS http://localhost:5173/insurehub/ >/dev/null 2>&1; then
+              echo "frontend / OK after ${i}s"; exit 0
+            fi
+            sleep 1
+          done
+          echo "frontend /insurehub/ never returned 2xx"; exit 1
+
+      - name: Dump container logs on failure
+        if: failure()
+        run: |
+          echo "===== backend ====="
+          docker compose logs backend || true
+          echo "===== frontend ====="
+          docker compose logs frontend || true
+          echo "===== mysql ====="
+          docker compose logs mysql || true
+
+      - name: Tear down
+        if: always()
+        run: docker compose down -v

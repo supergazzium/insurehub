@@ -1,0 +1,35 @@
+name: Deploy
+
+# Fires only after CI on main succeeds. This gates the Coolify webhook
+# behind a green build — a broken image never reaches the server.
+on:
+  workflow_run:
+    workflows: ["CI"]
+    branches: [main]
+    types: [completed]
+
+jobs:
+  trigger-coolify:
+    name: Trigger Coolify redeploy
+    runs-on: ubuntu-latest
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    timeout-minutes: 5
+
+    steps:
+      - name: Kick backend deploy
+        env:
+          HOOK: ${{ secrets.COOLIFY_BACKEND_WEBHOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "COOLIFY_BACKEND_WEBHOOK secret is not set"; exit 1
+          fi
+          curl -fsSL -X POST "$HOOK" -o /dev/null -w 'backend: HTTP %{http_code}\n'
+
+      - name: Kick frontend deploy
+        env:
+          HOOK: ${{ secrets.COOLIFY_FRONTEND_WEBHOOK }}
+        run: |
+          if [ -z "$HOOK" ]; then
+            echo "COOLIFY_FRONTEND_WEBHOOK secret is not set"; exit 1
+          fi
+          curl -fsSL -X POST "$HOOK" -o /dev/null -w 'frontend: HTTP %{http_code}\n'
