@@ -43,6 +43,8 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::post('auth/login', [AuthController::class, 'login']);
+Route::post('auth/email-otp/send', [\App\Http\Controllers\Api\EmailOtpController::class, 'send']);
+Route::post('auth/email-otp/verify', [\App\Http\Controllers\Api\EmailOtpController::class, 'verify']);
 Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('auth/reset-password', [AuthController::class, 'resetPassword']);

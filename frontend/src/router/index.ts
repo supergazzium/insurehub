@@ -6,7 +6,6 @@ import Dashboard from '../pages/Dashboard.vue'
 import ModulePlaceholder from '../pages/ModulePlaceholder.vue'
 
 import Login from '../pages/auth/Login.vue'
-import Register from '../pages/auth/Register.vue'
 import ForgotPassword from '../pages/auth/ForgotPassword.vue'
 import ResetPassword from '../pages/auth/ResetPassword.vue'
 import AcceptInvitation from '../pages/auth/AcceptInvitation.vue'
@@ -113,12 +112,14 @@ const routes: RouteRecordRaw[] = [
     component: AuthLayout,
     children: [
       { path: 'login', name: 'login', component: Login },
-      { path: 'register', name: 'register', component: Register },
       { path: 'forgot-password', name: 'forgot-password', component: ForgotPassword },
       { path: 'reset-password', name: 'reset-password', component: ResetPassword },
       { path: 'invite/:token?', name: 'accept-invitation', component: AcceptInvitation },
     ],
   },
+  // Legacy /register redirect — the standalone tenant-signup page was
+  // removed; agent self-registration lives at /register-agent.
+  { path: '/register', redirect: { name: 'register-agent' } },
   // App-shell routes (authenticated)
   {
     path: '/',
@@ -175,19 +176,6 @@ const routes: RouteRecordRaw[] = [
       ...moduleRoutes,
     ],
   },
-  // Public auth routes (no app shell). Their child paths (/login, /register, …)
-  // don't collide with the app shell above; only bare `/` was contested.
-  {
-    path: '/',
-    component: AuthLayout,
-    children: [
-      { path: 'login', name: 'login', component: Login },
-      { path: 'register', name: 'register', component: Register },
-      { path: 'forgot-password', name: 'forgot-password', component: ForgotPassword },
-      { path: 'reset-password', name: 'reset-password', component: ResetPassword },
-      { path: 'invite/:token?', name: 'accept-invitation', component: AcceptInvitation },
-    ],
-  },
 ]
 
 const router = createRouter({
@@ -204,7 +192,6 @@ const PUBLIC_ROUTE_NAMES = new Set([
   'register-agent',
   'recruit-link',
   'login',
-  'register',
   'forgot-password',
   'reset-password',
   'accept-invitation',

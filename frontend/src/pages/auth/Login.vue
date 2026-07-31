@@ -164,7 +164,7 @@ function onMfaPaste(e: ClipboardEvent) {
 
       <p class="text-center text-sm text-slate-500 mt-6">
         {{ t('auth.login.noAccount') }}
-        <RouterLink to="/register" class="text-brand-600 hover:text-brand-700 font-medium ml-1">
+        <RouterLink to="/register-agent" class="text-brand-600 hover:text-brand-700 font-medium ml-1">
           {{ t('auth.login.register') }}
         </RouterLink>
       </p>

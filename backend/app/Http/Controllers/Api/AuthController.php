@@ -11,6 +11,7 @@ use App\Http\Requests\LoginRequest;
 use App\Http\Requests\ResetPasswordRequest;
 use App\Models\Agent;
 use App\Models\AuditEntry;
+use App\Models\EmailVerificationToken;
 use App\Models\RecruitmentLink;
 use App\Models\Tenant;
 use App\Models\User;
@@ -150,6 +151,13 @@ class AuthController extends Controller
 
             return [$user, $agent];
         });
+
+        // Consume the email verification token so it can't be reused.
+        if (!empty($data['emailOtpToken'])) {
+            EmailVerificationToken::query()
+                ->where('token', $data['emailOtpToken'])
+                ->update(['consumed_at' => now()]);
+        }
 
         return response()->json([
             'message' => 'Registration received. An administrator will review your application.',
