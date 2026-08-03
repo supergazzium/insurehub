@@ -13,7 +13,7 @@
 //   4. Non-life License   — has/doesn't have radio
 //   5. Life License       — has/doesn't have radio
 //   6. Bank Account       — bank dropdown, account number, bankbook photo
-import { reactive, ref, computed, onMounted, watch } from 'vue'
+import { reactive, ref, computed, onBeforeUnmount, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import {
   fetchMyAgent, patchProfile, patchIdDocument, patchLicense, patchBank,
@@ -294,12 +294,56 @@ async function upload(kind: 'profile-photo' | 'id-photo' | 'bank-book-photo', fi
 }
 
 const bankLabel = (b: BankOption): string => (locale.value === 'th' ? b.nameTh : (b.nameEn || b.nameTh))
-function photoUrl(path: string | null | undefined): string {
-  if (!path) return ''
-  if (path.startsWith('http')) return path
-  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/api\/v1\/?$/, '') ?? 'http://localhost:8080'
-  return `${base}/storage/${path.replace(/^\/+/, '')}`
+
+// ── Photo rendering ─────────────────────────────────────────────────
+// Photos are stored on the backend's private `local` disk (never at a
+// public /storage URL). They're fetched through the bearer-authenticated
+// GET /me/agent/photo/{kind} endpoint, wrapped in a blob URL so <img src>
+// can render them. Re-fetch runs on hydrate whenever the stored path
+// changes so uploads render immediately after save.
+const photoBlobUrls = reactive<Record<'profile' | 'id' | 'bank', string>>({
+  profile: '', id: '', bank: '',
+})
+async function refreshPhoto(kind: 'profile' | 'id' | 'bank', path: string | null | undefined): Promise<void> {
+  // Revoke the previous blob URL so we don't leak memory across re-renders.
+  if (photoBlobUrls[kind]) {
+    URL.revokeObjectURL(photoBlobUrls[kind])
+    photoBlobUrls[kind] = ''
+  }
+  if (!path) return
+  const { getToken } = await import('../../api/client')
+  const token = getToken()
+  if (!token) return
+  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, '')
+    ?? 'http://127.0.0.1:8000/api/v1'
+  try {
+    const res = await fetch(`${base}/me/agent/photo/${kind}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    })
+    if (!res.ok) return
+    const blob = await res.blob()
+    photoBlobUrls[kind] = URL.createObjectURL(blob)
+  } catch { /* silent — placeholder icon renders */ }
 }
+function photoUrlFor(kind: 'profile' | 'id' | 'bank'): string {
+  return photoBlobUrls[kind]
+}
+onBeforeUnmount(() => {
+  for (const k of ['profile', 'id', 'bank'] as const) {
+    if (photoBlobUrls[k]) URL.revokeObjectURL(photoBlobUrls[k])
+  }
+})
+// Refresh all three photo blobs whenever the agent record changes.
+watch(
+  () => me.value ? [me.value.profilePhotoPath, me.value.idCardPhotoPath, me.value.bankBookPhotoPath] as const : null,
+  (paths) => {
+    if (!paths) return
+    void refreshPhoto('profile', paths[0])
+    void refreshPhoto('id', paths[1])
+    void refreshPhoto('bank', paths[2])
+  },
+  { immediate: true, deep: false },
+)
 
 const anyDirty = computed(() =>
   dirty.personal || dirty.tax || dirty.delivery || dirty.life || dirty.nonLife || dirty.bank,
@@ -324,7 +368,7 @@ watch(bank, () => { dirty.bank = true }, { deep: true })
     <div class="bg-white rounded-2xl p-5 shadow-sm border border-slate-200 flex items-center gap-4">
       <div class="shrink-0">
         <div v-if="me.profilePhotoPath" class="w-16 h-16 rounded-full overflow-hidden bg-slate-100">
-          <img :src="photoUrl(me.profilePhotoPath)" class="w-full h-full object-cover" />
+          <img :src="photoUrlFor('profile')" class="w-full h-full object-cover" />
         </div>
         <div v-else class="w-16 h-16 rounded-full bg-brand-600 text-white flex items-center justify-center font-bold text-xl">
           {{ (me.firstName?.[0] ?? '') + (me.lastName?.[0] ?? '') }}
@@ -352,7 +396,7 @@ watch(bank, () => { dirty.bank = true }, { deep: true })
         <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ t('portalProfile.personal.profilePhoto') }}</label>
         <div class="flex items-center gap-3">
           <div class="w-20 h-20 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center">
-            <img v-if="me.profilePhotoPath" :src="photoUrl(me.profilePhotoPath)" class="w-full h-full object-cover" />
+            <img v-if="me.profilePhotoPath" :src="photoUrlFor('profile')" class="w-full h-full object-cover" />
             <i v-else class="pi pi-user text-3xl text-slate-400" />
           </div>
           <label class="cursor-pointer px-3 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
@@ -398,7 +442,7 @@ watch(bank, () => { dirty.bank = true }, { deep: true })
           <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ t('portalProfile.personal.idPhoto') }} *</label>
           <div class="flex items-center gap-3">
             <div class="w-32 h-20 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center border border-slate-200">
-              <img v-if="me.idCardPhotoPath" :src="photoUrl(me.idCardPhotoPath)" class="w-full h-full object-cover" />
+              <img v-if="me.idCardPhotoPath" :src="photoUrlFor('id')" class="w-full h-full object-cover" />
               <i v-else class="pi pi-id-card text-3xl text-slate-400" />
             </div>
             <label class="cursor-pointer px-3 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
@@ -617,7 +661,7 @@ watch(bank, () => { dirty.bank = true }, { deep: true })
           <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ t('portalProfile.bank.bankBookPhoto') }}</label>
           <div class="flex items-center gap-3">
             <div class="w-32 h-20 rounded-lg overflow-hidden bg-slate-100 flex items-center justify-center border border-slate-200">
-              <img v-if="me.bankBookPhotoPath" :src="photoUrl(me.bankBookPhotoPath)" class="w-full h-full object-cover" />
+              <img v-if="me.bankBookPhotoPath" :src="photoUrlFor('bank')" class="w-full h-full object-cover" />
               <i v-else class="pi pi-book text-3xl text-slate-400" />
             </div>
             <label class="cursor-pointer px-3 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">

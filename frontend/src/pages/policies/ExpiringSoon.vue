@@ -264,6 +264,50 @@ function exportCsv(): void {
   downloadCsv(csv, `renewals-${days.value}d-${new Date().toISOString().slice(0, 10)}.csv`)
 }
 
+// PDF export — server-side render via dompdf. We pass every filter the
+// user has applied so the PDF matches what's on screen exactly.
+const exportingPdf = ref(false)
+async function exportPdf(): Promise<void> {
+  if (exportingPdf.value) return
+  exportingPdf.value = true
+  try {
+    const token = (await import('../../api/client')).getToken()
+    if (!token) return
+    const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, '')
+      ?? 'http://127.0.0.1:8000/api/v1'
+    const qs = new URLSearchParams()
+    qs.set('days', String(days.value))
+    if (filters.q) qs.set('q', filters.q)
+    if (filters.fromDate) qs.set('fromDate', filters.fromDate)
+    if (filters.toDate) qs.set('toDate', filters.toDate)
+    if (filters.carrierId) qs.set('carrierId', filters.carrierId)
+    if (filters.productId) qs.set('productId', filters.productId)
+    if (filters.productType) qs.set('productType', filters.productType)
+    if (filters.insureType) qs.set('insureType', filters.insureType)
+    const url = `${base}/reports/expiring-soon/pdf?${qs.toString()}`
+    const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    // Use server-suggested filename if present; otherwise derive locally.
+    const disp = res.headers.get('Content-Disposition') ?? ''
+    const match = disp.match(/filename="?([^"]+)"?/)
+    const fileName = match?.[1]
+      ?? `Renewals-${days.value}d-${filters.fromDate || new Date().toISOString().slice(0, 10)}-to-${filters.toDate || ''}.pdf`
+    const a = document.createElement('a')
+    const objectUrl = URL.createObjectURL(blob)
+    a.href = objectUrl
+    a.download = fileName
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(objectUrl), 30000)
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'PDF export failed.'
+  } finally {
+    exportingPdf.value = false
+  }
+}
+
 function badge(dr: number): { cls: string; label: string } {
   if (dr <= 7) return { cls: 'bg-rose-100 text-rose-700', label: 'ด่วน' }
   if (dr <= 30) return { cls: 'bg-amber-100 text-amber-700', label: 'ใกล้ครบ' }
@@ -301,6 +345,12 @@ const summary = computed(() => ({
         <button type="button" class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"
           :disabled="!filteredRows.length" @click="exportCsv">
           <i class="pi pi-download text-xs" /> Export CSV
+        </button>
+        <button type="button" class="px-3 py-1.5 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-sm disabled:opacity-50 flex items-center gap-1"
+          :disabled="!filteredRows.length || exportingPdf" @click="exportPdf"
+          title="ส่งออกเป็น PDF สำหรับตัวแทนใช้ติดต่อลูกค้า">
+          <i :class="exportingPdf ? 'pi pi-spin pi-spinner' : 'pi pi-file-pdf'" class="text-xs" />
+          {{ exportingPdf ? 'กำลังสร้าง...' : 'Export PDF' }}
         </button>
       </div>
     </header>

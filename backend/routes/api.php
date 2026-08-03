@@ -74,6 +74,11 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('me/agent/profile-photo', [MeAgentController::class, 'uploadProfilePhoto']);
     Route::post('me/agent/id-photo', [MeAgentController::class, 'uploadIdPhoto']);
     Route::post('me/agent/bank-book-photo', [MeAgentController::class, 'uploadBankBookPhoto']);
+    // Streamed download of the current agent's own photos (profile/id/bank).
+    // Files live on the private `local` disk — this route serves them
+    // after session auth so <img> can render sensitive images without
+    // exposing a public /storage URL.
+    Route::get('me/agent/photo/{kind}', [MeAgentController::class, 'photo']);
     Route::get('me/agent/id-card-unmask', [MeAgentController::class, 'unmaskIdCard']);
     Route::get('me/agent/referral-link', [MeAgentController::class, 'referralLink']);
     Route::get('me/agent/downline', [MeAgentController::class, 'downline']);
@@ -214,6 +219,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::prefix('reports')->group(function (): void {
         Route::get('dashboard-kpis', [ReportController::class, 'dashboardKpis']);
         Route::get('expiring-soon', [ReportController::class, 'expiringSoon']);
+        Route::get('expiring-soon/pdf', [ReportController::class, 'expiringSoonPdf']);
         Route::get('active-policies', [ReportController::class, 'activePolicies']);
         Route::get('agent-commission-ledger', [ReportController::class, 'agentCommissionLedger']);
         Route::get('agent-performance', [ReportController::class, 'agentPerformance']);

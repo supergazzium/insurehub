@@ -440,6 +440,8 @@ class MeAgentController extends ApiController
         $agent = $this->currentAgent($request);
 
         // Segregate by tenant + agent so a leaked path can't reveal cross-tenant files.
+        // Uses the `local` (private) disk — files are read back through the
+        // authenticated photo() endpoint below, never via a public /storage URL.
         $dir = "agent-uploads/{$agent->tenant_id}/{$agent->id}/{$section}";
         $storedPath = $file->store($dir, 'local');
 
@@ -452,5 +454,34 @@ class MeAgentController extends ApiController
 
         $agent->update([$column => $storedPath]);
         return new MyAgentResource($agent->fresh());
+    }
+
+    /**
+     * Stream one of the agent's own photos (profile / id / bank-book) back
+     * to the browser. Files are stored on the private `local` disk, so this
+     * route authenticates the session, verifies the requested photo belongs
+     * to the current agent, and streams it inline for <img> display.
+     */
+    public function photo(Request $request, string $kind): \Symfony\Component\HttpFoundation\StreamedResponse
+    {
+        $columnMap = [
+            'profile' => 'profile_photo_path',
+            'id' => 'id_card_photo_path',
+            'bank' => 'bank_book_photo_path',
+        ];
+        if (! array_key_exists($kind, $columnMap)) {
+            abort(404);
+        }
+        $agent = $this->currentAgent($request);
+        $path = $agent->{$columnMap[$kind]};
+        if (! $path || ! Storage::disk('local')->exists($path)) {
+            abort(404);
+        }
+        $mime = Storage::disk('local')->mimeType($path) ?: 'application/octet-stream';
+        return Storage::disk('local')->response($path, basename($path), [
+            'Content-Type' => $mime,
+            'Content-Disposition' => 'inline; filename="'.addslashes(basename($path)).'"',
+            'Cache-Control' => 'private, max-age=60',
+        ]);
     }
 }

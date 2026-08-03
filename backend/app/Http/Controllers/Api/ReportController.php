@@ -4,8 +4,10 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Response;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 
@@ -129,6 +131,117 @@ class ReportController extends ApiController
                 'total' => $rows->count(),
             ],
         ]);
+    }
+
+    /**
+     * PDF export of the renewal pipeline — same query as expiringSoon() plus
+     * client-side filters echoed via query params (so the PDF matches what
+     * the operator sees on screen after filtering).
+     *
+     * Filename per spec: "Renewals-{Ndays}d-{fromDate}-to-{toDate}.pdf"
+     */
+    public function expiringSoonPdf(Request $request): Response
+    {
+        // dompdf's Cellmap can be memory-heavy on wide tables; bump the
+        // per-request limit so 500-row PDFs render reliably.
+        ini_set('memory_limit', '512M');
+        $days = max(1, min(365, (int) ($request->input('days') ?? 60)));
+        $today = Carbon::today()->toDateString();
+        $until = Carbon::today()->addDays($days)->toDateString();
+        $tenantId = $this->tenantId($request);
+
+        // Reuse the same SELECT as expiringSoon() so the PDF has all the
+        // columns we need for the agent-contact template.
+        $rows = DB::table('policies as p')
+            ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
+            ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
+            ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
+            ->leftJoin('products as pr', 'pr.id', '=', 'p.product_id')
+            ->where('p.tenant_id', $tenantId)
+            ->whereNull('p.deleted_at')
+            ->where('p.status', 'active')
+            ->whereBetween('p.expiry_date', [$today, $until])
+            ->orderBy('p.expiry_date')
+            ->limit(500)
+            ->get([
+                'p.id', 'p.application_no', 'p.policy_no',
+                'p.expiry_date', 'p.annual_premium',
+                'p.motor_license_no',
+                'p.motor_vehicle_brand', 'p.motor_vehicle_model',
+                DB::raw('DATEDIFF(p.expiry_date, CURDATE()) as days_remaining'),
+                'c.customer_code', 'c.email as customer_email', 'c.phone as customer_phone',
+                'c.customer_type',
+                DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
+                'a.agent_code', 'a.email as agent_email',
+                DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
+                'ca.id as carrier_id_out', 'ca.code as carrier_code',
+                'ca.name as carrier_name', 'ca.insure_type as carrier_insure_type',
+                'pr.id as product_id_out', 'pr.code as product_code',
+                'pr.name as product_name', 'pr.type as product_type',
+            ]);
+
+        // Echo the filter set from the client for the header + filename. We
+        // do the actual filtering here so the PDF matches what the user
+        // saw on screen exactly.
+        $qStr = trim((string) $request->input('q', ''));
+        $fromDate = (string) $request->input('fromDate', '');
+        $toDate = (string) $request->input('toDate', '');
+        $carrierId = (string) $request->input('carrierId', '');
+        $productId = (string) $request->input('productId', '');
+        $productType = (string) $request->input('productType', '');
+        $insureType = (string) $request->input('insureType', '');
+
+        $filtered = $rows->filter(function ($r) use ($qStr, $fromDate, $toDate, $carrierId, $productId, $productType, $insureType) {
+            if ($fromDate !== '' && $r->expiry_date < $fromDate) return false;
+            if ($toDate !== '' && $r->expiry_date > $toDate) return false;
+            if ($carrierId !== '' && (string) $r->carrier_id_out !== $carrierId) return false;
+            if ($productId !== '' && (string) $r->product_id_out !== $productId) return false;
+            if ($productType !== '' && (string) $r->product_type !== $productType) return false;
+            if ($insureType !== '' && (string) $r->carrier_insure_type !== $insureType) return false;
+            if ($qStr === '') return true;
+            $qLower = mb_strtolower($qStr);
+            $qDigits = preg_replace('/\D/', '', $qStr) ?? '';
+            $hay = mb_strtolower(implode(' ', array_filter([
+                $r->customer_name, $r->policy_no, $r->application_no,
+                $r->motor_license_no, $r->customer_code,
+            ])));
+            if (str_contains($hay, $qLower)) return true;
+            if ($qDigits !== '' && strlen($qDigits) >= 4) {
+                $phone = preg_replace('/\D/', '', $r->customer_phone ?? '') ?? '';
+                if (str_contains($phone, $qDigits)) return true;
+            }
+            return false;
+        })->values();
+
+        // Filename per spec — includes the actual visible range where possible.
+        $labelFrom = $fromDate !== '' ? $fromDate : $today;
+        $labelTo = $toDate !== '' ? $toDate : $until;
+        $filename = "Renewals-{$days}d-{$labelFrom}-to-{$labelTo}.pdf";
+
+        $pdf = Pdf::loadView('pdf.renewals', [
+            'rows' => $filtered,
+            'meta' => [
+                'days' => $days,
+                'windowFrom' => $today,
+                'windowTo' => $until,
+                'rangeFrom' => $labelFrom,
+                'rangeTo' => $labelTo,
+                'totalWindow' => $rows->count(),
+                'filteredCount' => $filtered->count(),
+                'generatedAt' => Carbon::now()->format('Y-m-d H:i'),
+                'urgent' => $rows->filter(fn ($r) => (int) $r->days_remaining <= 7)->count(),
+                'filters' => array_filter([
+                    'ค้นหา' => $qStr !== '' ? $qStr : null,
+                    'ช่วงวันหมดอายุ' => ($fromDate !== '' || $toDate !== '') ? ("{$labelFrom} → {$labelTo}") : null,
+                    'บริษัท' => $carrierId !== '' ? $carrierId : null,
+                    'แผน' => $productId !== '' ? $productId : null,
+                    'ประเภทผลิตภัณฑ์' => $productType !== '' ? $productType : null,
+                    'ประเภทประกัน' => $insureType !== '' ? $insureType : null,
+                ]),
+            ],
+        ])->setPaper('a4', 'landscape');
+
+        return $pdf->download($filename);
     }
 
     /**
