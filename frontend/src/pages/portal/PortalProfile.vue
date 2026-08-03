@@ -290,6 +290,15 @@ async function upload(kind: 'profile-photo' | 'id-photo' | 'bank-book-photo', fi
   try {
     const res = await uploadPhoto(kind, file)
     await hydrate(res.data)
+    // Belt-and-suspenders: if the watcher didn't fire (Vue reactivity edge
+    // case with the array getter), explicitly refresh just this kind.
+    const short: 'profile' | 'id' | 'bank' =
+      kind === 'profile-photo' ? 'profile' : kind === 'id-photo' ? 'id' : 'bank'
+    const path =
+      short === 'profile' ? res.data.profilePhotoPath
+      : short === 'id' ? res.data.idCardPhotoPath
+      : res.data.bankBookPhotoPath
+    await refreshPhoto(short, path)
   } catch (e) { console.warn('upload failed', e) } finally { uploading.value = null }
 }
 
@@ -317,13 +326,27 @@ async function refreshPhoto(kind: 'profile' | 'id' | 'bank', path: string | null
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)?.replace(/\/+$/, '')
     ?? 'http://127.0.0.1:8000/api/v1'
   try {
-    const res = await fetch(`${base}/me/agent/photo/${kind}`, {
+    // Cache-bust with the file path so the browser doesn't reuse a stale
+    // response after a re-upload with the same kind. Path includes a
+    // random suffix so it changes on every upload.
+    const bust = encodeURIComponent(path)
+    const res = await fetch(`${base}/me/agent/photo/${kind}?v=${bust}`, {
       headers: { Authorization: `Bearer ${token}` },
+      cache: 'no-store',
     })
-    if (!res.ok) return
+    if (!res.ok) {
+      console.warn(`[portal-profile] photo fetch failed: ${kind} → HTTP ${res.status}`)
+      return
+    }
     const blob = await res.blob()
+    if (blob.size === 0) {
+      console.warn(`[portal-profile] photo fetch returned empty blob: ${kind}`)
+      return
+    }
     photoBlobUrls[kind] = URL.createObjectURL(blob)
-  } catch { /* silent — placeholder icon renders */ }
+  } catch (e) {
+    console.warn(`[portal-profile] photo fetch error: ${kind}`, e)
+  }
 }
 function photoUrlFor(kind: 'profile' | 'id' | 'bank'): string {
   return photoBlobUrls[kind]
