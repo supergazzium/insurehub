@@ -41,6 +41,9 @@ class PolicyController extends ApiController
                 'p.app_date', 'p.effective_date', 'p.expiry_date',
                 'p.issue_date', 'p.cancel_date',
                 'p.freelook_active', 'p.premium_check',
+                // Motor columns surfaced on the list so the UI can show
+                // license plate + brand/model without an N+1 detail fetch.
+                'p.motor_license_no', 'p.motor_vehicle_brand', 'p.motor_vehicle_model',
                 'c.customer_code',
                 'c.first_name as customer_first_name',
                 'c.last_name as customer_last_name',
@@ -58,14 +61,38 @@ class PolicyController extends ApiController
         if ($search = $request->string('q')->toString()) {
             $like = "%{$search}%";
             $q->where(function ($w) use ($like): void {
+                // Identifiers
                 $w->where('p.policy_no', 'like', $like)
                     ->orWhere('p.application_no', 'like', $like)
                     ->orWhere('p.quote_no', 'like', $like)
+                    // Customer identity + contact
                     ->orWhere('c.customer_code', 'like', $like)
                     ->orWhere('c.first_name', 'like', $like)
                     ->orWhere('c.last_name', 'like', $like)
-                    ->orWhere('a.agent_code', 'like', $like);
+                    ->orWhere('c.id_card', 'like', $like)
+                    ->orWhere('c.passport', 'like', $like)
+                    ->orWhere('c.phone', 'like', $like)
+                    ->orWhere('c.tel_phone', 'like', $like)
+                    ->orWhere('c.contact_phone', 'like', $like)
+                    // Agent + motor plate
+                    ->orWhere('a.agent_code', 'like', $like)
+                    ->orWhere('p.motor_license_no', 'like', $like);
             });
+        }
+        // Customer type filter (individual / corporate / foreign)
+        if ($customerType = $request->input('customerType')) {
+            $q->where('c.customer_type', $customerType);
+        }
+        // Insurance type filter (life / non-life / tax) via the joined carrier row.
+        if ($insureType = $request->input('insureType')) {
+            $q->where('ca.insure_type', $insureType);
+        }
+        // Create date range filter (distinct from effective-date range).
+        if ($createdFrom = $request->input('createdFrom')) {
+            $q->where('p.created_at', '>=', $createdFrom.' 00:00:00');
+        }
+        if ($createdTo = $request->input('createdTo')) {
+            $q->where('p.created_at', '<=', $createdTo.' 23:59:59');
         }
         if ($status = $request->input('status')) {
             $q->where('p.status', $status);

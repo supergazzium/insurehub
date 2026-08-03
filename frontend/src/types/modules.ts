@@ -10,26 +10,30 @@ export interface ModuleDef {
   // If omitted, module is visible to admin/staff/super_admin only. Include
   // 'agent' to also expose it to logged-in agents inside their portal.
   roles?: Array<'admin' | 'super_admin' | 'staff' | 'agent'>
+  // If set, the module is only visible to users whose permission set
+  // contains this key. Wildcard roles (super_admin, admin) bypass — they
+  // always see everything. Layered on TOP of `roles` above.
+  permission?: string
 }
 
 export const MODULES: ModuleDef[] = [
+  // Unified access-control module — replaces the old `/auth` prototype
+  // AND `/admin/roles`. Tabs: Users, Roles, MFA.
   {
-    key: 'auth',
+    key: 'admin-access',
     number: 1,
-    routePath: '/auth',
-    routeName: 'auth',
+    routePath: '/admin/access',
+    routeName: 'admin-access',
     icon: 'pi pi-shield',
-    i18nKey: 'auth',
-    group: 'core',
+    i18nKey: 'adminAccessModule',
+    group: 'platform',
+    permission: 'admin.users',
     functions: [
-      'ลงทะเบียนหน่วยงาน (สมัครและสร้างบัญชีเจ้าของ)',
-      'เข้าสู่ระบบ / ออกจากระบบ / รีเฟรชโทเค็น',
-      'เชิญผู้ใช้เข้าสู่หน่วยงานพร้อมกำหนดบทบาท',
-      'ยอมรับคำเชิญ',
-      'จัดการบทบาท: ผู้ดูแล ผู้จัดการ ตัวแทน บัญชี ผู้ดู',
-      'รีเซ็ตรหัสผ่าน / เปลี่ยนรหัสผ่าน',
+      'จัดการผู้ใช้งานและกำหนดบทบาท',
+      'สร้าง / แก้ไข / ลบ บทบาท',
+      'กำหนดสิทธิ์แต่ละบทบาท (Permission)',
+      'กำหนดสิทธิ์เพิ่ม / ปฏิเสธ ระดับผู้ใช้ (Override)',
       'เปิด / ปิด ระบบยืนยันตัวตน 2 ขั้นตอน (MFA)',
-      'ยกเลิกการเข้าถึงของผู้ใช้',
     ],
   },
   {

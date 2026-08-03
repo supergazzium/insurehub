@@ -13,6 +13,9 @@ export interface AuthUser {
   name: string
   email: string
   role: string
+  roleId: string | null
+  roleLabel: { th: string; en: string } | null
+  permissions: string[]
   locale: string
   tenantId: string | null
   agentId: string | null
@@ -29,6 +32,14 @@ export const useAuthStore = defineStore('auth', () => {
   const error = ref<string | null>(null)
 
   const isAuthenticated = computed(() => user.value !== null)
+
+  // Wildcard roles bypass — matches the server-side Rbac::isWildcard() rule.
+  function hasPermission(key: string): boolean {
+    const u = user.value
+    if (u === null) return false
+    if (u.role === 'super_admin' || u.role === 'admin') return true
+    return u.permissions?.includes(key) ?? false
+  }
 
   async function login(email: string, password: string, deviceName?: string): Promise<void> {
     loading.value = true
@@ -91,5 +102,5 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  return { user, loading, error, isAuthenticated, login, logout, restore }
+  return { user, loading, error, isAuthenticated, hasPermission, login, logout, restore }
 })

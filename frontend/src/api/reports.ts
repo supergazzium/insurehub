@@ -42,13 +42,21 @@ export interface ExpiringPolicy {
   customerCode: string | null
   customerName: string
   customerEmail?: string | null
+  customerPhone?: string | null
+  customerType?: string | null
   agentCode: string | null
   agentName: string
   agentEmail?: string | null
+  carrierId?: string | null
   carrierCode: string | null
   carrierName: string | null
+  carrierInsureType?: string | null
+  productId?: string | null
   productCode: string | null
   productName: string | null
+  productType?: string | null
+  productMainRider?: string | null
+  motorLicenseNo?: string | null
   // Phase 8b — renewal action timestamps (null if never done)
   lastContactedAt?: string | null
   lastNoticeSentAt?: string | null

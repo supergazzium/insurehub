@@ -64,13 +64,23 @@ class MyAgentResource extends JsonResource
             'licenseNonLifeExpiry' => $this->license_non_life_expiry?->toDateString(),
             'licenseNumber' => $this->license_number ?? '',
             'licenseExpiry' => $this->license_expiry?->toDateString(),
+            'hasLifeLicense' => (bool) ($this->has_life_license ?? false),
+            'hasNonLifeLicense' => (bool) ($this->has_non_life_license ?? false),
 
-            // Addresses
+            // Tax invoice address (primary — always required)
             'address' => $this->address ?? '',
             'subDistrict' => $this->sub_district ?? '',
             'district' => $this->district ?? '',
             'province' => $this->province ?? '',
             'postcode' => $this->postcode ?? '',
+
+            // Document delivery address (secondary — may mirror tax address)
+            'deliverySameAsTax' => (bool) ($this->delivery_same_as_tax ?? true),
+            'deliveryAddress' => $this->delivery_address ?? '',
+            'deliverySubDistrict' => $this->delivery_sub_district ?? '',
+            'deliveryDistrict' => $this->delivery_district ?? '',
+            'deliveryProvince' => $this->delivery_province ?? '',
+            'deliveryPostcode' => $this->delivery_postcode ?? '',
 
             'active' => (bool) $this->active,
         ];

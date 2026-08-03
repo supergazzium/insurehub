@@ -277,7 +277,7 @@ function conversionRateOf(l: CustomerReferralLink) {
     </section>
 
     <!-- Generate dialog -->
-    <div v-if="showGen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40" @click.self="showGen = false">
+    <div v-if="showGen" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
       <div class="bg-white rounded-xl shadow-xl w-full max-w-md">
         <header class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 class="font-semibold text-slate-900">{{ t('customers.referral.generateLink') }}</h3>

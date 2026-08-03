@@ -232,8 +232,7 @@ const summaryTiles = computed(() => {
     </section>
 
     <!-- Triage dialog -->
-    <div v-if="activeRow" class="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4"
-      @click.self="closeTriage">
+    <div v-if="activeRow" class="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4">
       <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
         <header class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
           <div>

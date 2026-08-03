@@ -15,7 +15,7 @@ use Illuminate\Notifications\Notifiable;
 use Laravel\Sanctum\HasApiTokens;
 
 #[Fillable([
-    'tenant_id', 'name', 'email', 'password', 'role', 'agent_id', 'locale', 'active',
+    'tenant_id', 'name', 'email', 'password', 'role', 'role_id', 'agent_id', 'locale', 'active',
 ])]
 #[Hidden(['password', 'remember_token'])]
 class User extends Authenticatable
@@ -40,5 +40,15 @@ class User extends Authenticatable
     public function agent(): BelongsTo
     {
         return $this->belongsTo(Agent::class);
+    }
+
+    public function roleRel(): BelongsTo
+    {
+        return $this->belongsTo(Role::class, 'role_id');
+    }
+
+    public function overrides()
+    {
+        return $this->hasMany(UserPermissionOverride::class);
     }
 }

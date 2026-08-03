@@ -48,13 +48,13 @@ class CarrierController extends ApiController
     {
         $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];
         $carrier = Carrier::create($payload);
-        return (new CarrierResource($carrier->load('bankAccounts')->loadCount(['products', 'contracts'])))->response()->setStatusCode(201);
+        return (new CarrierResource($carrier->load(['bankAccounts', 'contacts'])->loadCount(['products', 'contracts'])))->response()->setStatusCode(201);
     }
 
     public function show(Request $request, Carrier $carrier): CarrierResource
     {
         $this->authorizeTenant($request, $carrier);
-        return new CarrierResource($carrier->load('bankAccounts')->loadCount(['products', 'contracts']));
+        return new CarrierResource($carrier->load(['bankAccounts', 'contacts'])->loadCount(['products', 'contracts']));
     }
 
     public function update(CarrierRequest $request, Carrier $carrier): CarrierResource

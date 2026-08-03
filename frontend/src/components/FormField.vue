@@ -17,6 +17,8 @@ defineProps<{
     <label class="text-xs font-medium text-slate-500 flex items-center gap-1">
       {{ label }}
       <span v-if="required" class="text-rose-500">*</span>
+      <!-- Optional slot for a badge/chip right after the label (e.g. "copied" indicator). -->
+      <slot name="label-extra" />
     </label>
     <slot />
     <div v-if="hint" class="text-[10px] text-slate-400">{{ hint }}</div>

@@ -60,6 +60,8 @@ class MeAgentController extends ApiController
             'licenseLifeExpiry' => 'license_life_expiry',
             'licenseNonLifeNo' => 'license_non_life_no',
             'licenseNonLifeExpiry' => 'license_non_life_expiry',
+            'hasLifeLicense' => 'has_life_license',
+            'hasNonLifeLicense' => 'has_non_life_license',
         ],
         'bank' => [
             'bankId' => 'bank_id',
@@ -73,6 +75,16 @@ class MeAgentController extends ApiController
             'district' => 'district',
             'province' => 'province',
             'postcode' => 'postcode',
+        ],
+        // Second address (document delivery). Includes a "same as tax" flag
+        // so the UI can present a single toggle.
+        'delivery' => [
+            'deliverySameAsTax' => 'delivery_same_as_tax',
+            'deliveryAddress' => 'delivery_address',
+            'deliverySubDistrict' => 'delivery_sub_district',
+            'deliveryDistrict' => 'delivery_district',
+            'deliveryProvince' => 'delivery_province',
+            'deliveryPostcode' => 'delivery_postcode',
         ],
     ];
 
@@ -103,6 +115,8 @@ class MeAgentController extends ApiController
             'licenseLifeExpiry' => ['sometimes', 'nullable', 'date'],
             'licenseNonLifeNo' => ['sometimes', 'nullable', 'string', 'max:32'],
             'licenseNonLifeExpiry' => ['sometimes', 'nullable', 'date'],
+            'hasLifeLicense' => ['sometimes', 'boolean'],
+            'hasNonLifeLicense' => ['sometimes', 'boolean'],
         ],
         'bank' => [
             'bankId' => ['sometimes', 'nullable', 'integer', 'exists:banks,id'],
@@ -116,6 +130,14 @@ class MeAgentController extends ApiController
             'district' => ['sometimes', 'nullable', 'string', 'max:120'],
             'province' => ['sometimes', 'nullable', 'string', 'max:120'],
             'postcode' => ['sometimes', 'nullable', 'string', 'max:16'],
+        ],
+        'delivery' => [
+            'deliverySameAsTax' => ['sometimes', 'boolean'],
+            'deliveryAddress' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'deliverySubDistrict' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'deliveryDistrict' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'deliveryProvince' => ['sometimes', 'nullable', 'string', 'max:120'],
+            'deliveryPostcode' => ['sometimes', 'nullable', 'string', 'max:16'],
         ],
     ];
 
@@ -142,6 +164,35 @@ class MeAgentController extends ApiController
     public function updateAddress(Request $request): MyAgentResource
     {
         return $this->applySection($request, 'address');
+    }
+
+    public function updateDelivery(Request $request): MyAgentResource
+    {
+        return $this->applySection($request, 'delivery');
+    }
+
+    /**
+     * Save all sections in one shot. Frontend calls this from the "Save All"
+     * button. The body is a flat object with any of the section keys; each
+     * section is validated + saved independently (partial updates allowed).
+     */
+    public function updateAll(Request $request): MyAgentResource
+    {
+        $agent = $this->currentAgent($request);
+        foreach (array_keys(self::SECTION_RULES) as $section) {
+            $rules = self::SECTION_RULES[$section];
+            $keys = array_keys($rules);
+            $incoming = $request->only($keys);
+            if ($incoming === []) continue;
+            $data = validator($incoming, $rules)->validate();
+            $map = self::SECTION_MAPS[$section];
+            $updates = [];
+            foreach ($map as $camel => $snake) {
+                if (array_key_exists($camel, $data)) $updates[$snake] = $data[$camel];
+            }
+            if ($updates !== []) $agent->update($updates);
+        }
+        return new MyAgentResource($agent->fresh());
     }
 
     // ── Photos ───────────────────────────────────────────────────────────

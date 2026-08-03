@@ -14,6 +14,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 
@@ -22,17 +23,14 @@ use Illuminate\Support\Facades\Mail;
  * inspecting per-agent audit trails, and walking the multi-level downline
  * tree across all agents in the current tenant.
  *
- * Role gate is enforced by a small helper (guardAdmin) rather than route
- * middleware — small surface, one place to update if roles evolve.
+ * Authorization is per-action via Gate::authorize('permission.key'), backed
+ * by the Rbac service and the DB-driven role/permission catalog.
  */
 class AdminAgentApprovalController extends ApiController
 {
-    /** Which user.role values may hit these endpoints. */
-    private const ADMIN_ROLES = ['admin', 'super_admin'];
-
     public function pending(Request $request): AnonymousResourceCollection
     {
-        $this->guardAdmin($request);
+        Gate::authorize('agents.view');
         $rows = Agent::query()
             ->where('tenant_id', $this->tenantId($request))
             ->where('approval_status', 'pending')
@@ -43,7 +41,7 @@ class AdminAgentApprovalController extends ApiController
 
     public function approve(Request $request, Agent $agent): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('agents.approve');
         $this->authorizeTenant($request, $agent);
 
         if ($agent->approval_status === 'approved') {
@@ -103,7 +101,7 @@ class AdminAgentApprovalController extends ApiController
 
     public function reject(Request $request, Agent $agent): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('agents.reject');
         $this->authorizeTenant($request, $agent);
 
         $data = $request->validate([
@@ -163,7 +161,7 @@ class AdminAgentApprovalController extends ApiController
 
     public function audit(Request $request, Agent $agent): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('admin.audit_log');
         $this->authorizeTenant($request, $agent);
 
         $rows = AuditEntry::query()
@@ -193,7 +191,7 @@ class AdminAgentApprovalController extends ApiController
      */
     public function downlineTree(Request $request, Agent $agent): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('agents.view');
         $this->authorizeTenant($request, $agent);
 
         $tenantId = $agent->tenant_id;
@@ -234,8 +232,11 @@ class AdminAgentApprovalController extends ApiController
 
     private function guardAdmin(Request $request): void
     {
-        $role = $request->user()->role;
-        if (! in_array($role, self::ADMIN_ROLES, true)) {
+        // Retained for backwards-compat; new code should call Gate::authorize()
+        // directly with a specific permission key. This helper now requires
+        // any admin-level permission via the `admin.roles` gate — a coarse
+        // proxy for "is a system administrator".
+        if (! $request->user()?->can('admin.roles')) {
             abort(403, 'Admin role required.');
         }
     }

@@ -38,18 +38,28 @@ export interface PolicyListRow {
   carrierName: string | null
   productCode: string | null
   productName: string | null
+  motorLicenseNo: string | null
+  motorVehicleBrand: string | null
+  motorVehicleModel: string | null
 }
 
 export interface PolicyListFilters {
   q?: string
   status?: PolicyStatus | ''
   customerId?: string
+  customerType?: 'individual' | 'corporate' | 'foreign' | ''
+  /** Insurance type filter — matches carrier.insure_type. */
+  insureType?: 'life' | 'non-life' | 'tax' | ''
   writingAgentId?: string
   carrierId?: string
   productId?: string
   newOrRenew?: NewOrRenew | ''
+  /** effective_date range (existing) */
   fromDate?: string
   toDate?: string
+  /** created_at range (new — "Create date" per spec) */
+  createdFrom?: string
+  createdTo?: string
   page?: number
   perPage?: number
 }
@@ -106,6 +116,13 @@ export async function uploadPolicyDocument(id: string, type: string, file: File)
 }
 export function deletePolicyDocument(policyId: string, docId: string) {
   return api.delete<{ message: string }>(`policies/${policyId}/documents/${docId}`)
+}
+/** Build the URL for a stored policy document. Backend streams the file
+ *  inline with the correct Content-Type after tenant/session checks. */
+export function policyDocumentDownloadUrl(policyId: string, docId: string): string {
+  const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)
+    ?? 'http://127.0.0.1:8000/api/v1'
+  return `${base.replace(/\/+$/, '')}/policies/${policyId}/documents/${docId}/download`
 }
 
 /** Phase 9c — recompute all commission accrual for a policy at current rates. */

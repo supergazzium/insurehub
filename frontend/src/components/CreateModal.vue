@@ -63,7 +63,8 @@ watch(
 </script>
 
 <template>
-  <div v-if="open" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[60] p-4" @click.self="emit('close')">
+  <!-- Close only via the X in the header — no backdrop-close, so a stray click can't lose typed data. -->
+  <div v-if="open" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[60] p-4">
     <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[92vh] overflow-hidden flex flex-col">
       <header class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
         <div class="text-lg font-semibold text-slate-900">{{ title }}</div>

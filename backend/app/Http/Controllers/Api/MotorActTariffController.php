@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Models\MotorActTariff;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Phase 9 — admin CRUD for compulsory-motor tariffs. Read is already public
@@ -14,8 +15,6 @@ use Illuminate\Http\Request;
  */
 class MotorActTariffController extends ApiController
 {
-    private const ADMIN_ROLES = ['admin', 'super_admin'];
-
     public function index(Request $request): JsonResponse
     {
         $rows = MotorActTariff::query()->orderBy('vehicle_type_code')->get();
@@ -26,7 +25,7 @@ class MotorActTariffController extends ApiController
 
     public function store(Request $request): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('motor_tariffs.manage');
         $data = $request->validate([
             'vehicleTypeCode' => ['required', 'string', 'max:8', 'unique:motor_act_tariffs,vehicle_type_code'],
             'labelTh' => ['required', 'string', 'max:128'],
@@ -46,7 +45,7 @@ class MotorActTariffController extends ApiController
 
     public function update(Request $request, MotorActTariff $tariff): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('motor_tariffs.manage');
         $data = $request->validate([
             'labelTh' => ['sometimes', 'string', 'max:128'],
             'labelEn' => ['sometimes', 'nullable', 'string', 'max:128'],
@@ -62,16 +61,9 @@ class MotorActTariffController extends ApiController
 
     public function destroy(Request $request, MotorActTariff $tariff): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('motor_tariffs.manage');
         $tariff->delete();
         return response()->json(['message' => 'Deleted.']);
-    }
-
-    private function guardAdmin(Request $request): void
-    {
-        if (! in_array($request->user()->role, self::ADMIN_ROLES, true)) {
-            abort(403, 'Admin role required.');
-        }
     }
 
     /** @return array<string, mixed> */

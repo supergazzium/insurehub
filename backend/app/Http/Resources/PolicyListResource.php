@@ -58,6 +58,11 @@ class PolicyListResource extends JsonResource
             'carrierName' => $this->carrier_name,
             'productCode' => $this->product_code,
             'productName' => $this->product_name,
+            // Motor fields — non-motor policies leave these null. The UI
+            // renders them in the "vehicle" column when present.
+            'motorLicenseNo' => $this->motor_license_no,
+            'motorVehicleBrand' => $this->motor_vehicle_brand,
+            'motorVehicleModel' => $this->motor_vehicle_model,
         ];
     }
 }

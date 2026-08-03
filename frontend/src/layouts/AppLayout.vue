@@ -53,7 +53,12 @@ const visibleModules = computed(() => {
   return MODULES.filter((m) => {
     const isAgentOnly = m.roles?.length === 1 && m.roles[0] === 'agent'
     if (isAgent) return m.roles?.includes('agent') ?? false
-    return !isAgentOnly
+    if (isAgentOnly) return false
+    // If the module declares a required permission, hide it from users
+    // whose permission set doesn't include it. Wildcard roles (admin,
+    // super_admin) pass automatically via auth.hasPermission().
+    if (m.permission) return auth.hasPermission(m.permission)
+    return true
   })
 })
 

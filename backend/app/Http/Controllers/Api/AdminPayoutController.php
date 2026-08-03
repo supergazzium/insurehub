@@ -11,6 +11,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
+use Illuminate\Support\Facades\Gate;
 use Symfony\Component\HttpFoundation\StreamedResponse;
 
 /**
@@ -19,8 +20,6 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
  */
 class AdminPayoutController extends ApiController
 {
-    private const ADMIN_ROLES = ['admin', 'super_admin'];
-
     public function __construct(private readonly PayoutService $service)
     {
     }
@@ -28,7 +27,7 @@ class AdminPayoutController extends ApiController
     /** Preview per-agent aggregation for a period — no writes. */
     public function preview(Request $request): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('payouts.preview');
         $data = $request->validate([
             'periodFrom' => ['required', 'date'],
             'periodTo' => ['required', 'date', 'after_or_equal:periodFrom'],
@@ -56,7 +55,7 @@ class AdminPayoutController extends ApiController
     /** Create draft payouts (one per agent) for the requested period. */
     public function create(Request $request): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('payouts.approve');
         $data = $request->validate([
             'periodFrom' => ['required', 'date'],
             'periodTo' => ['required', 'date', 'after_or_equal:periodFrom'],
@@ -96,7 +95,7 @@ class AdminPayoutController extends ApiController
 
     public function index(Request $request): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('payouts.view');
         $q = AgentPayout::query()
             ->where('tenant_id', $this->tenantId($request))
             ->with('agent:id,agent_code,first_name,last_name')
@@ -118,7 +117,7 @@ class AdminPayoutController extends ApiController
 
     public function show(Request $request, AgentPayout $payout): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('payouts.view');
         $this->authorizeTenant($request, $payout);
         return response()->json([
             'data' => $this->shape($payout->load('agent', 'transactions.policy'), verbose: true),
@@ -127,7 +126,7 @@ class AdminPayoutController extends ApiController
 
     public function issue(Request $request, AgentPayout $payout): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('payouts.approve');
         $this->authorizeTenant($request, $payout);
         $p = $this->service->markIssued($payout, $request->user()->id);
         AuditEntry::create([
@@ -141,7 +140,7 @@ class AdminPayoutController extends ApiController
 
     public function pay(Request $request, AgentPayout $payout): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('payouts.mark_paid');
         $this->authorizeTenant($request, $payout);
         $data = $request->validate(['bankRef' => ['required', 'string', 'max:128']]);
         $p = $this->service->markPaid($payout, $data['bankRef'], $request->user()->id);
@@ -157,7 +156,7 @@ class AdminPayoutController extends ApiController
 
     public function void(Request $request, AgentPayout $payout): JsonResponse
     {
-        $this->guardAdmin($request);
+        Gate::authorize('payouts.approve');
         $this->authorizeTenant($request, $payout);
         $data = $request->validate(['reason' => ['required', 'string', 'max:500']]);
         $p = $this->service->void($payout, $data['reason']);
@@ -173,7 +172,7 @@ class AdminPayoutController extends ApiController
 
     public function pdf(Request $request, AgentPayout $payout): Response
     {
-        $this->guardAdmin($request);
+        Gate::authorize('payouts.view');
         $this->authorizeTenant($request, $payout);
         $payout->load(['agent', 'transactions.policy']);
         $tenant = $payout->tenant ?? \App\Models\Tenant::find($payout->tenant_id);
@@ -191,12 +190,7 @@ class AdminPayoutController extends ApiController
 
     // ── Helpers ──────────────────────────────────────────────────────────
 
-    private function guardAdmin(Request $request): void
-    {
-        if (! in_array($request->user()->role, self::ADMIN_ROLES, true)) {
-            abort(403, 'Admin role required.');
-        }
-    }
+    // guardAdmin removed — authorization is per-action via Gate::authorize().
 
     private function authorizeTenant(Request $request, AgentPayout $payout): void
     {

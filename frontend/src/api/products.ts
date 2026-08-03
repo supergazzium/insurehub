@@ -45,9 +45,30 @@ export function fetchProductList(filters: ProductListFilters = {}) {
   return api.get<Paginated<ProductListRow>>(`products${buildQuery({ ...filters })}`)
 }
 
-/** Full detail (same shape as the list row for now). */
+/** Full product detail (matches ProductResource). Extends ProductListRow
+ *  with every editable field so the create-wizard can prefill from an
+ *  existing product ("duplicate from…"). */
+export interface ProductDetail extends ProductListRow {
+  summary: string
+  coverage: number
+  coverageClass: '1' | '2+' | '2' | '3+' | '3' | null
+  vehicleAgeMin: number | null
+  vehicleAgeMax: number | null
+  durationYears: number
+  payYears: number
+  premiumMode: 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'single'
+  minPremium: number
+  maxPremium: number
+  gender: 'all' | 'male' | 'female'
+  requireMedical: boolean
+  smokerAccepted: boolean
+  preexistingExcluded: boolean
+  occupationClasses: string[]
+  notes: string
+}
+
 export function fetchProduct(id: string) {
-  return api.get<{ data: ProductListRow }>(`products/${id}`)
+  return api.get<{ data: ProductDetail }>(`products/${id}`)
 }
 
 export interface CommissionRateRow {

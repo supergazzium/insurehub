@@ -17,6 +17,7 @@ export interface CarrierListRow {
   phone: string
   email: string
   website: string
+  address: string
   active: boolean
   productCount: number
   contractCount: number
@@ -48,13 +49,32 @@ export interface CarrierBankAccount {
   active: boolean
 }
 
+/** One carrier contact — matches CarrierContactResource. */
+export interface CarrierContact {
+  id: string
+  carrierId: string
+  firstName: string
+  lastName: string
+  phone: string
+  email: string
+  isPrimary: boolean
+  sortOrder: number
+  active: boolean
+}
+
 /** Full detail returned by CarrierController::show — extends the list row with nested collections. */
 export interface CarrierDetail extends CarrierListRow {
   bankAccounts: CarrierBankAccount[]
+  contacts: CarrierContact[]
 }
 
 export function fetchCarrier(id: string) {
   return api.get<{ data: CarrierDetail }>(`carriers/${id}`)
+}
+
+/** Partial update — the backend accepts `active`, `name`, `code`, etc. */
+export function updateCarrier(id: string, payload: Partial<Pick<CarrierListRow, 'active'>>) {
+  return api.patch<{ data: CarrierDetail }>(`carriers/${id}`, payload)
 }
 
 /** Sub-resource CRUD for /carriers/{id}/bank-accounts. */
@@ -70,4 +90,17 @@ export function updateCarrierBankAccount(carrierId: string, accountId: string, p
 
 export function deleteCarrierBankAccount(carrierId: string, accountId: string) {
   return api.delete<{ message: string }>(`carriers/${carrierId}/bank-accounts/${accountId}`)
+}
+
+/** Sub-resource CRUD for /carriers/{id}/contacts. */
+export type CarrierContactPayload = Partial<Omit<CarrierContact, 'id' | 'carrierId'>>
+
+export function createCarrierContact(carrierId: string, payload: CarrierContactPayload) {
+  return api.post<{ data: CarrierContact }>(`carriers/${carrierId}/contacts`, payload)
+}
+export function updateCarrierContact(carrierId: string, contactId: string, payload: CarrierContactPayload) {
+  return api.patch<{ data: CarrierContact }>(`carriers/${carrierId}/contacts/${contactId}`, payload)
+}
+export function deleteCarrierContact(carrierId: string, contactId: string) {
+  return api.delete<{ message: string }>(`carriers/${carrierId}/contacts/${contactId}`)
 }

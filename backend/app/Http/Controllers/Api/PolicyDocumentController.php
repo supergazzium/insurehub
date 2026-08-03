@@ -13,6 +13,7 @@ use Illuminate\Http\Request;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PolicyDocumentController extends ApiController
 {
@@ -93,6 +94,29 @@ class PolicyDocumentController extends ApiController
         });
 
         return (new PolicyDocumentResource($doc))->response()->setStatusCode(201);
+    }
+
+    /**
+     * Stream a stored document back to the client. Files live on the `local`
+     * disk (private), so we can't hand out plain /storage/... URLs — this
+     * route authenticates the session, checks tenant ownership, then streams
+     * the file inline for browser preview.
+     */
+    public function download(Request $request, Policy $policy, PolicyDocument $document): StreamedResponse
+    {
+        $this->authorizeTenant($request, $policy);
+        if ((int) $document->policy_id !== (int) $policy->id) {
+            abort(404);
+        }
+        if (! $document->file_path || ! Storage::disk('local')->exists($document->file_path)) {
+            abort(404, 'File missing.');
+        }
+        $mime = Storage::disk('local')->mimeType($document->file_path) ?: 'application/octet-stream';
+        $name = $document->file_name ?: basename($document->file_path);
+        return Storage::disk('local')->download($document->file_path, $name, [
+            'Content-Type' => $mime,
+            'Content-Disposition' => 'inline; filename="'.addslashes($name).'"',
+        ]);
     }
 
     public function destroy(Request $request, Policy $policy, PolicyDocument $document): JsonResponse

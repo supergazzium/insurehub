@@ -38,6 +38,7 @@ class CarrierResource extends JsonResource
             'since' => $this->since ?? '',
             'active' => (bool) $this->active,
             'bankAccounts' => CarrierBankAccountResource::collection($this->whenLoaded('bankAccounts')),
+            'contacts' => CarrierContactResource::collection($this->whenLoaded('contacts')),
         ];
     }
 }

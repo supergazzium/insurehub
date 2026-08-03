@@ -44,6 +44,8 @@ export interface MyAgent {
   licenseNonLifeExpiry: string | null
   licenseNumber: string
   licenseExpiry: string | null
+  hasLifeLicense: boolean
+  hasNonLifeLicense: boolean
 
   address: string
   subDistrict: string
@@ -51,7 +53,26 @@ export interface MyAgent {
   province: string
   postcode: string
 
+  deliverySameAsTax: boolean
+  deliveryAddress: string
+  deliverySubDistrict: string
+  deliveryDistrict: string
+  deliveryProvince: string
+  deliveryPostcode: string
+
   active: boolean
+}
+
+// Reference/lookup shapes used by the profile form.
+export interface BankOption {
+  id: string
+  nameTh: string
+  nameEn: string | null
+  code: string | null
+}
+export interface SubDistrictOption {
+  name: string
+  postcode: string
 }
 
 export interface ReferralLinkInfo {
@@ -81,6 +102,28 @@ export function patchBank(payload: Partial<MyAgent>) {
 }
 export function patchAddress(payload: Partial<MyAgent>) {
   return api.patch<{ data: MyAgent }>('me/agent/address', payload)
+}
+export function patchDelivery(payload: Partial<MyAgent>) {
+  return api.patch<{ data: MyAgent }>('me/agent/delivery', payload)
+}
+export function patchAll(payload: Partial<MyAgent>) {
+  return api.patch<{ data: MyAgent }>('me/agent', payload)
+}
+
+// Public reference lookups
+export function fetchBanks() {
+  return api.get<{ data: BankOption[] }>('public/lookup/banks')
+}
+export function fetchProvinces() {
+  return api.get<{ data: string[] }>('public/lookup/provinces')
+}
+export function fetchDistricts(province: string) {
+  return api.get<{ data: string[] }>(`public/lookup/districts?province=${encodeURIComponent(province)}`)
+}
+export function fetchSubDistricts(province: string, district: string) {
+  return api.get<{ data: SubDistrictOption[] }>(
+    `public/lookup/sub-districts?province=${encodeURIComponent(province)}&district=${encodeURIComponent(district)}`,
+  )
 }
 
 export function unmaskIdCard() {

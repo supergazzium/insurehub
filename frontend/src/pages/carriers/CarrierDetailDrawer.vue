@@ -1,15 +1,23 @@
 <script setup lang="ts">
 // Carrier detail drawer — profile + list of products under this carrier.
-import { reactive, ref, watch } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import {
   createCarrierBankAccount,
+  createCarrierContact,
   deleteCarrierBankAccount,
+  deleteCarrierContact,
   fetchCarrier,
+  updateCarrier,
   updateCarrierBankAccount,
+  updateCarrierContact,
   type CarrierBankAccount,
   type CarrierBankAccountPayload,
+  type CarrierContact,
+  type CarrierContactPayload,
   type CarrierDetail,
 } from '../../api/carriers'
+import { fetchBanks, type BankOption } from '../../api/portal'
 import { fetchProductList, type ProductListRow } from '../../api/products'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
@@ -27,11 +35,38 @@ const SUB_TYPE_OPTIONS = [
   { value: 'partner', label: 'Partner' },
 ]
 
+const { t } = useI18n()
 const carrierStore = useCarrierStore()
 const props = defineProps<{ carrierId: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
 
 const carrier = ref<CarrierDetail | null>(null)
+
+// Status dropdown (Active / Inactive) — inline PATCH with optimistic UI.
+// Also updates the row in the shared list store so the badge on the
+// carriers list page stays in sync when this drawer closes.
+const statusSaving = ref(false)
+const statusError = ref<string | null>(null)
+async function changeStatus(next: 'active' | 'inactive'): Promise<void> {
+  if (!carrier.value) return
+  const active = next === 'active'
+  if (carrier.value.active === active) return
+  const prev = carrier.value.active
+  carrier.value.active = active
+  const listRow = carrierStore.list.find((r) => r.id === carrier.value!.id)
+  if (listRow) listRow.active = active
+  statusSaving.value = true
+  statusError.value = null
+  try {
+    await updateCarrier(carrier.value.id, { active })
+  } catch (e: unknown) {
+    carrier.value.active = prev
+    if (listRow) listRow.active = prev
+    statusError.value = e instanceof ApiError ? e.message : 'Status change failed.'
+  } finally {
+    statusSaving.value = false
+  }
+}
 
 // ── Bank accounts ─────────────────────────────────────────────────────────
 const bankAccounts = ref<CarrierBankAccount[]>([])
@@ -39,11 +74,29 @@ const bankSaveError = ref<string | null>(null)
 const bankSavingId = ref<string | null>(null)
 const bankAddingNew = ref(false)
 const newBank = reactive<CarrierBankAccountPayload>({
-  bankName: '', branch: '', accountNo: '', accountName: '', isPrimary: false,
+  bankId: null, bankName: '', branch: '', accountNo: '', accountName: '', isPrimary: false,
+})
+
+// Thai bank lookup — served by /public/lookup/banks, cached 1 day server-side.
+// Loaded once when the drawer first mounts; the map is used to render the
+// bank name from bankId on read rows.
+const bankOptions = ref<BankOption[]>([])
+const bankById = computed(() => {
+  const m: Record<string, BankOption> = {}
+  for (const b of bankOptions.value) m[b.id] = b
+  return m
+})
+function bankLabel(b: BankOption): string { return b.nameEn ? `${b.nameTh} (${b.nameEn})` : b.nameTh }
+function bankLabelForRow(a: CarrierBankAccount): string {
+  if (a.bankId && bankById.value[a.bankId]) return bankLabel(bankById.value[a.bankId])
+  return a.bankName || ''
+}
+onMounted(async () => {
+  try { bankOptions.value = (await fetchBanks()).data } catch { /* silent — dropdown just empty */ }
 })
 
 function resetNewBank(): void {
-  Object.assign(newBank, { bankName: '', branch: '', accountNo: '', accountName: '', isPrimary: false })
+  Object.assign(newBank, { bankId: null, bankName: '', branch: '', accountNo: '', accountName: '', isPrimary: false })
 }
 
 async function saveBankAccount(a: CarrierBankAccount, field: keyof CarrierBankAccountPayload, value: unknown): Promise<void> {
@@ -51,7 +104,14 @@ async function saveBankAccount(a: CarrierBankAccount, field: keyof CarrierBankAc
   bankSaveError.value = null
   bankSavingId.value = a.id
   try {
-    const res = await updateCarrierBankAccount(props.carrierId, a.id, { [field]: value } as CarrierBankAccountPayload)
+    // When the dropdown picks a bankId, mirror the display name into bankName
+    // so the row still reads correctly on servers that don't join banks table.
+    const payload: CarrierBankAccountPayload = { [field]: value } as CarrierBankAccountPayload
+    if (field === 'bankId') {
+      const b = value ? bankById.value[String(value)] : null
+      ;(payload as CarrierBankAccountPayload).bankName = b ? b.nameTh : ''
+    }
+    const res = await updateCarrierBankAccount(props.carrierId, a.id, payload)
     const i = bankAccounts.value.findIndex((x) => x.id === a.id)
     if (i >= 0) bankAccounts.value[i] = res.data
     if (field === 'isPrimary' && value === true) {
@@ -69,8 +129,10 @@ async function addBankAccount(): Promise<void> {
   bankSaveError.value = null
   bankAddingNew.value = true
   try {
+    const pickedBank = newBank.bankId ? bankById.value[String(newBank.bankId)] : null
     const payload: CarrierBankAccountPayload = {
-      bankName: newBank.bankName?.trim() || undefined,
+      bankId: newBank.bankId || undefined,
+      bankName: pickedBank ? pickedBank.nameTh : (newBank.bankName?.trim() || undefined),
       branch: newBank.branch?.trim() || undefined,
       accountNo: newBank.accountNo?.trim() || undefined,
       accountName: newBank.accountName?.trim() || undefined,
@@ -108,7 +170,7 @@ const bankCopiedId = ref<string | 'all' | null>(null)
 
 function formatBankAccount(a: CarrierBankAccount): string {
   const lines = [
-    `Bank: ${a.bankName || '-'}`,
+    `Bank: ${bankLabelForRow(a) || '-'}`,
     `Branch: ${a.branch || '-'}`,
     `Account No: ${a.accountNo || '-'}`,
     `Account Name: ${a.accountName || '-'}`,
@@ -173,6 +235,126 @@ function apply(pathKey: string, v: unknown): void {
   }
   obj[parts[parts.length - 1]] = v
 }
+
+// ── Contacts ──────────────────────────────────────────────────────────────
+// Individual contact people per carrier — first name, last name, phone,
+// email. Same CRUD pattern as bank accounts: inline-editable rows, add-new
+// row, delete button. Phone + email each get a copy-to-clipboard icon.
+const contacts = ref<CarrierContact[]>([])
+const contactSaveError = ref<string | null>(null)
+const contactSavingId = ref<string | null>(null)
+const contactAddingNew = ref(false)
+const newContact = reactive<CarrierContactPayload>({
+  firstName: '', lastName: '', phone: '', email: '', isPrimary: false,
+})
+function resetNewContact(): void {
+  Object.assign(newContact, { firstName: '', lastName: '', phone: '', email: '', isPrimary: false })
+}
+const contactCopiedKey = ref<string | null>(null)
+function copyKey(id: string, field: 'phone' | 'email'): string { return `${id}:${field}` }
+async function copyToClipboard(id: string, field: 'phone' | 'email', value: string): Promise<void> {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    contactCopiedKey.value = copyKey(id, field)
+    setTimeout(() => {
+      if (contactCopiedKey.value === copyKey(id, field)) contactCopiedKey.value = null
+    }, 1500)
+  } catch {
+    contactSaveError.value = 'Clipboard copy failed'
+  }
+}
+
+// ── ข้อมูลหัก ณ ที่จ่าย (withholding tax) ─────────────────────────────
+// Read-only display block above Bank Accounts. Fields come from the
+// existing carrier record (name, address, tax_id). Each field has a
+// copy-to-clipboard button; a "Copy all" formats the block for pasting
+// into a WHT certificate form.
+type WhtField = 'companyName' | 'address' | 'taxId' | 'branch' | 'all'
+const whtCopiedKey = ref<WhtField | null>(null)
+async function copyWht(field: WhtField, value: string): Promise<void> {
+  if (!value) return
+  try {
+    await navigator.clipboard.writeText(value)
+    whtCopiedKey.value = field
+    setTimeout(() => { if (whtCopiedKey.value === field) whtCopiedKey.value = null }, 1500)
+  } catch { /* ignore — clipboard errors are non-fatal */ }
+}
+// Thai tax ID: 13 digits → X-XXXX-XXXXX-XX-X for display; raw for copy.
+function formatTaxId(raw: string | null | undefined): string {
+  const d = (raw ?? '').replace(/\D/g, '')
+  if (d.length !== 13) return raw ?? ''
+  return `${d[0]}-${d.slice(1, 5)}-${d.slice(5, 10)}-${d.slice(10, 12)}-${d[12]}`
+}
+const whtBranchLabel = computed(() => 'สำนักงานใหญ่')
+const whtCompanyName = computed(() => carrier.value?.name ?? '')
+const whtAddress = computed(() => carrier.value?.address ?? '')
+const whtTaxIdRaw = computed(() => (carrier.value?.taxId ?? '').replace(/\D/g, ''))
+const whtCopyAllText = computed(() => [
+  `ชื่อบริษัท: ${whtCompanyName.value}`,
+  `ที่อยู่: ${whtAddress.value}`,
+  `เลขประจำตัวผู้เสียภาษี: ${whtTaxIdRaw.value}`,
+  `สาขา: ${whtBranchLabel.value}`,
+].join('\n'))
+
+async function saveContact(c: CarrierContact, field: keyof CarrierContactPayload, value: unknown): Promise<void> {
+  if (!props.carrierId) return
+  contactSaveError.value = null
+  contactSavingId.value = c.id
+  try {
+    const res = await updateCarrierContact(props.carrierId, c.id, { [field]: value } as CarrierContactPayload)
+    const i = contacts.value.findIndex((x) => x.id === c.id)
+    if (i >= 0) contacts.value[i] = res.data
+    if (field === 'isPrimary' && value === true) {
+      contacts.value = contacts.value.map((x) => x.id === c.id ? x : { ...x, isPrimary: false })
+    }
+  } catch (e: unknown) {
+    contactSaveError.value = e instanceof ApiError ? e.message : 'Save failed'
+  } finally {
+    contactSavingId.value = null
+  }
+}
+
+async function addContact(): Promise<void> {
+  if (!props.carrierId) return
+  contactSaveError.value = null
+  contactAddingNew.value = true
+  try {
+    const payload: CarrierContactPayload = {
+      firstName: newContact.firstName?.trim() || undefined,
+      lastName: newContact.lastName?.trim() || undefined,
+      phone: newContact.phone?.trim() || undefined,
+      email: newContact.email?.trim() || undefined,
+      isPrimary: !!newContact.isPrimary,
+    }
+    const res = await createCarrierContact(props.carrierId, payload)
+    if (res.data.isPrimary) {
+      contacts.value = contacts.value.map((x) => ({ ...x, isPrimary: false }))
+    }
+    contacts.value.push(res.data)
+    resetNewContact()
+  } catch (e: unknown) {
+    contactSaveError.value = e instanceof ApiError ? e.message : 'Create failed'
+  } finally {
+    contactAddingNew.value = false
+  }
+}
+
+async function removeContact(c: CarrierContact): Promise<void> {
+  if (!props.carrierId) return
+  if (!window.confirm('Delete this contact?')) return
+  contactSaveError.value = null
+  contactSavingId.value = c.id
+  try {
+    await deleteCarrierContact(props.carrierId, c.id)
+    contacts.value = contacts.value.filter((x) => x.id !== c.id)
+  } catch (e: unknown) {
+    contactSaveError.value = e instanceof ApiError ? e.message : 'Delete failed'
+  } finally {
+    contactSavingId.value = null
+  }
+}
+
 const products = ref<ProductListRow[]>([])
 const productsMeta = ref<{ total: number; lastPage: number } | null>(null)
 const loading = ref(false)
@@ -187,7 +369,9 @@ watch(
       products.value = []
       productsMeta.value = null
       bankAccounts.value = []
+      contacts.value = []
       resetNewBank()
+      resetNewContact()
       return
     }
     loading.value = true
@@ -196,7 +380,9 @@ watch(
       const car = await fetchCarrier(id)
       carrier.value = car.data
       bankAccounts.value = car.data.bankAccounts ?? []
+      contacts.value = car.data.contacts ?? []
       resetNewBank()
+      resetNewContact()
       productsLoading.value = true
       const prods = await fetchProductList({ carrierId: id, perPage: 100 })
       products.value = prods.data
@@ -277,9 +463,93 @@ function typeBadge(insureType: string): string {
             <div><div class="text-xs text-slate-400">Products</div><div class="font-medium text-slate-900">{{ carrier.productCount.toLocaleString() }}</div></div>
             <div><div class="text-xs text-slate-400">Contracts</div><div class="font-medium text-slate-900">{{ carrier.contractCount.toLocaleString() }}</div></div>
             <div><div class="text-xs text-slate-400">Status</div>
-              <span v-if="carrier.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">active</span>
-              <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">inactive</span>
+              <div class="flex items-center gap-2">
+                <select
+                  :value="carrier.active ? 'active' : 'inactive'"
+                  :disabled="statusSaving"
+                  :class="[
+                    'px-2 py-0.5 rounded-md text-xs font-medium border focus:outline-none focus:ring-2 focus:ring-brand-100',
+                    carrier.active
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-slate-100 text-slate-600 border-slate-200',
+                  ]"
+                  @change="e => changeStatus((e.target as HTMLSelectElement).value as 'active' | 'inactive')">
+                  <option value="active">{{ t('carriers.list.statusActive') }}</option>
+                  <option value="inactive">{{ t('carriers.list.statusInactive') }}</option>
+                </select>
+                <i v-if="statusSaving" class="pi pi-spin pi-spinner text-brand-500 text-xs" />
+              </div>
+              <div v-if="statusError" class="mt-1 text-xs text-rose-600">{{ statusError }}</div>
             </div>
+          </div>
+        </section>
+
+        <!-- ข้อมูลหัก ณ ที่จ่าย (Withholding tax) -->
+        <section>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs uppercase tracking-wider text-slate-400">ข้อมูลหัก ณ ที่จ่าย</h3>
+            <button type="button"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-md border border-slate-200 text-xs text-slate-600 hover:bg-slate-50 hover:text-brand-600 disabled:opacity-40 disabled:cursor-not-allowed"
+              :disabled="!whtCompanyName && !whtAddress && !whtTaxIdRaw"
+              :title="whtCopiedKey === 'all' ? 'Copied!' : 'Copy all withholding-tax info'"
+              @click="copyWht('all', whtCopyAllText)">
+              <i :class="whtCopiedKey === 'all' ? 'pi pi-check text-emerald-600' : 'pi pi-copy'" class="text-[10px]" />
+              <span>{{ whtCopiedKey === 'all' ? 'Copied' : 'Copy all' }}</span>
+            </button>
+          </div>
+          <div class="card p-4">
+            <dl class="grid grid-cols-1 sm:grid-cols-12 gap-y-3 text-sm">
+              <dt class="sm:col-span-3 text-xs text-slate-400">ชื่อบริษัท</dt>
+              <dd class="sm:col-span-9 flex items-start gap-2">
+                <span class="flex-1 text-slate-900">{{ whtCompanyName || '—' }}</span>
+                <button type="button"
+                  class="text-slate-400 hover:text-brand-600 p-1 shrink-0"
+                  :title="whtCopiedKey === 'companyName' ? 'Copied!' : 'Copy company name'"
+                  :disabled="!whtCompanyName"
+                  @click="copyWht('companyName', whtCompanyName)">
+                  <i :class="whtCopiedKey === 'companyName' ? 'pi pi-check text-emerald-600' : 'pi pi-copy'" class="text-xs" />
+                </button>
+              </dd>
+
+              <dt class="sm:col-span-3 text-xs text-slate-400">ที่อยู่</dt>
+              <dd class="sm:col-span-9 flex items-start gap-2">
+                <span class="flex-1 text-slate-900 whitespace-pre-line">{{ whtAddress || '—' }}</span>
+                <button type="button"
+                  class="text-slate-400 hover:text-brand-600 p-1 shrink-0"
+                  :title="whtCopiedKey === 'address' ? 'Copied!' : 'Copy address'"
+                  :disabled="!whtAddress"
+                  @click="copyWht('address', whtAddress)">
+                  <i :class="whtCopiedKey === 'address' ? 'pi pi-check text-emerald-600' : 'pi pi-copy'" class="text-xs" />
+                </button>
+              </dd>
+
+              <dt class="sm:col-span-3 text-xs text-slate-400">เลขประจำตัวผู้เสียภาษี</dt>
+              <dd class="sm:col-span-9 flex items-start gap-2">
+                <span class="flex-1 text-slate-900 font-mono">{{ whtTaxIdRaw ? formatTaxId(whtTaxIdRaw) : '—' }}</span>
+                <button type="button"
+                  class="text-slate-400 hover:text-brand-600 p-1 shrink-0"
+                  :title="whtCopiedKey === 'taxId' ? 'Copied raw digits!' : 'Copy tax ID (raw 13 digits)'"
+                  :disabled="!whtTaxIdRaw"
+                  @click="copyWht('taxId', whtTaxIdRaw)">
+                  <i :class="whtCopiedKey === 'taxId' ? 'pi pi-check text-emerald-600' : 'pi pi-copy'" class="text-xs" />
+                </button>
+              </dd>
+
+              <dt class="sm:col-span-3 text-xs text-slate-400">สาขา</dt>
+              <dd class="sm:col-span-9 flex items-start gap-2">
+                <span class="flex-1 text-slate-900">{{ whtBranchLabel }}</span>
+                <button type="button"
+                  class="text-slate-400 hover:text-brand-600 p-1 shrink-0"
+                  :title="whtCopiedKey === 'branch' ? 'Copied!' : 'Copy branch'"
+                  @click="copyWht('branch', whtBranchLabel)">
+                  <i :class="whtCopiedKey === 'branch' ? 'pi pi-check text-emerald-600' : 'pi pi-copy'" class="text-xs" />
+                </button>
+              </dd>
+            </dl>
+            <p class="text-[11px] text-slate-400 mt-3">
+              <i class="pi pi-info-circle mr-1" />
+              แก้ไขข้อมูลได้จากส่วน Profile ด้านบน (ชื่อบริษัท / ที่อยู่ / Tax ID)
+            </p>
           </div>
         </section>
 
@@ -320,8 +590,15 @@ function typeBadge(insureType: string): string {
                 </tr>
                 <tr v-for="a in bankAccounts" :key="a.id" :class="{ 'opacity-60': bankSavingId === a.id }">
                   <td class="px-3 py-2">
-                    <input :value="a.bankName" @change="e => saveBankAccount(a, 'bankName', (e.target as HTMLInputElement).value)"
-                      class="w-full border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
+                    <select :value="a.bankId ?? ''"
+                      @change="e => saveBankAccount(a, 'bankId', (e.target as HTMLSelectElement).value || null)"
+                      class="w-full border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm bg-white focus:outline-none">
+                      <option value="">— เลือกธนาคาร —</option>
+                      <option v-for="b in bankOptions" :key="b.id" :value="b.id">{{ bankLabel(b) }}</option>
+                      <option v-if="a.bankId === null && a.bankName" :value="a.bankName" disabled>
+                        {{ a.bankName }} (legacy)
+                      </option>
+                    </select>
                   </td>
                   <td class="px-3 py-2">
                     <input :value="a.branch" @change="e => saveBankAccount(a, 'branch', (e.target as HTMLInputElement).value)"
@@ -354,8 +631,11 @@ function typeBadge(insureType: string): string {
                 </tr>
                 <tr class="bg-slate-50/50">
                   <td class="px-3 py-2">
-                    <input v-model.trim="newBank.bankName" placeholder="กสิกรไทย"
-                      class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
+                    <select v-model="newBank.bankId"
+                      class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm bg-white focus:outline-none">
+                      <option :value="null">— เลือกธนาคาร —</option>
+                      <option v-for="b in bankOptions" :key="b.id" :value="b.id">{{ bankLabel(b) }}</option>
+                    </select>
                   </td>
                   <td class="px-3 py-2">
                     <input v-model.trim="newBank.branch" placeholder="สีลม"
@@ -376,8 +656,115 @@ function typeBadge(insureType: string): string {
                   <td class="px-3 py-2 text-right">
                     <button type="button"
                       class="px-2 py-1 rounded bg-brand-600 text-white hover:bg-brand-700 text-xs disabled:opacity-50 flex items-center gap-1"
-                      :disabled="bankAddingNew || (!newBank.bankName && !newBank.accountNo)"
+                      :disabled="bankAddingNew || (!newBank.bankId && !newBank.accountNo)"
                       @click="addBankAccount">
+                      <i class="pi pi-plus text-[10px]" /> Add
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <!-- Contacts -->
+        <section>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs uppercase tracking-wider text-slate-400">
+              Contacts <span class="text-slate-500 normal-case">({{ contacts.length }})</span>
+            </h3>
+          </div>
+          <div v-if="contactSaveError" class="card p-3 bg-rose-50 border-rose-200 text-rose-700 text-sm mb-2">
+            {{ contactSaveError }}
+          </div>
+          <div class="card overflow-hidden">
+            <table class="min-w-full text-sm">
+              <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                <tr>
+                  <th class="px-3 py-2 text-left">First name</th>
+                  <th class="px-3 py-2 text-left">Last name</th>
+                  <th class="px-3 py-2 text-left">Phone</th>
+                  <th class="px-3 py-2 text-left">Email</th>
+                  <th class="px-3 py-2 text-center">Primary</th>
+                  <th class="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-if="!contacts.length && !contactAddingNew">
+                  <td class="px-3 py-3 text-slate-500 text-xs" colspan="6">No contacts yet — add one below.</td>
+                </tr>
+                <tr v-for="c in contacts" :key="c.id" :class="{ 'opacity-60': contactSavingId === c.id }">
+                  <td class="px-3 py-2">
+                    <input :value="c.firstName" lang="th"
+                      @change="e => saveContact(c, 'firstName', (e.target as HTMLInputElement).value)"
+                      class="w-full border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td class="px-3 py-2">
+                    <input :value="c.lastName" lang="th"
+                      @change="e => saveContact(c, 'lastName', (e.target as HTMLInputElement).value)"
+                      class="w-full border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td class="px-3 py-2">
+                    <div class="flex items-center gap-1">
+                      <input :value="c.phone" type="tel" inputmode="tel"
+                        @change="e => saveContact(c, 'phone', (e.target as HTMLInputElement).value)"
+                        class="flex-1 border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none font-mono" />
+                      <button type="button" class="text-slate-400 hover:text-brand-600 p-1 shrink-0"
+                        :title="contactCopiedKey === copyKey(c.id, 'phone') ? 'Copied!' : 'Copy phone'"
+                        :disabled="!c.phone"
+                        @click="copyToClipboard(c.id, 'phone', c.phone)">
+                        <i :class="contactCopiedKey === copyKey(c.id, 'phone') ? 'pi pi-check text-emerald-600' : 'pi pi-copy'" class="text-xs" />
+                      </button>
+                    </div>
+                  </td>
+                  <td class="px-3 py-2">
+                    <div class="flex items-center gap-1">
+                      <input :value="c.email" type="email"
+                        @change="e => saveContact(c, 'email', (e.target as HTMLInputElement).value)"
+                        class="flex-1 border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
+                      <button type="button" class="text-slate-400 hover:text-brand-600 p-1 shrink-0"
+                        :title="contactCopiedKey === copyKey(c.id, 'email') ? 'Copied!' : 'Copy email'"
+                        :disabled="!c.email"
+                        @click="copyToClipboard(c.id, 'email', c.email)">
+                        <i :class="contactCopiedKey === copyKey(c.id, 'email') ? 'pi pi-check text-emerald-600' : 'pi pi-copy'" class="text-xs" />
+                      </button>
+                    </div>
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <input type="checkbox" :checked="c.isPrimary"
+                      @change="e => saveContact(c, 'isPrimary', (e.target as HTMLInputElement).checked)" />
+                  </td>
+                  <td class="px-3 py-2 text-right">
+                    <button class="text-slate-400 hover:text-rose-600 p-1" title="Delete" @click="removeContact(c)">
+                      <i class="pi pi-trash text-xs" />
+                    </button>
+                  </td>
+                </tr>
+                <tr class="bg-slate-50/50">
+                  <td class="px-3 py-2">
+                    <input v-model.trim="newContact.firstName" placeholder="ชื่อ" lang="th"
+                      class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td class="px-3 py-2">
+                    <input v-model.trim="newContact.lastName" placeholder="นามสกุล" lang="th"
+                      class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td class="px-3 py-2">
+                    <input v-model.trim="newContact.phone" placeholder="08x-xxx-xxxx" type="tel" inputmode="tel"
+                      class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none font-mono" />
+                  </td>
+                  <td class="px-3 py-2">
+                    <input v-model.trim="newContact.email" placeholder="name@example.com" type="email"
+                      class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
+                  </td>
+                  <td class="px-3 py-2 text-center">
+                    <input v-model="newContact.isPrimary" type="checkbox" />
+                  </td>
+                  <td class="px-3 py-2 text-right">
+                    <button type="button"
+                      class="px-2 py-1 rounded bg-brand-600 text-white hover:bg-brand-700 text-xs disabled:opacity-50 flex items-center gap-1"
+                      :disabled="contactAddingNew || (!newContact.firstName && !newContact.email && !newContact.phone)"
+                      @click="addContact">
                       <i class="pi pi-plus text-[10px]" /> Add
                     </button>
                   </td>

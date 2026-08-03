@@ -4,6 +4,7 @@ import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useProductStore } from '../../stores/products'
+import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import ProductDetailDrawer from './ProductDetailDrawer.vue'
 import ProductCreateModal from './ProductCreateModal.vue'
 
@@ -17,6 +18,23 @@ const detailId = ref<string | null>(null)
 // pre-set to open the product form.
 const openedForNew = route.query.new === '1'
 const showCreate = ref(openedForNew)
+
+// Row-context ⋯ menu — one open at a time. `copyFromId` gets set when the
+// user clicks "Copy to new" and is passed into ProductCreateModal so it
+// pre-fills from that product.
+const openMenuId = ref<string | null>(null)
+const copyFromId = ref<string | null>(null)
+function toggleMenu(rowId: string, e: Event): void {
+  e.stopPropagation()
+  openMenuId.value = openMenuId.value === rowId ? null : rowId
+}
+function closeMenus(): void { openMenuId.value = null }
+function copyRow(rowId: string, e: Event): void {
+  e.stopPropagation()
+  copyFromId.value = rowId
+  showCreate.value = true
+  openMenuId.value = null
+}
 
 /** Broadcast a newly-created product to the parent tab (the policy wizard) and
  *  close ourselves. Only fires when we were opened via ?new=1 — regular
@@ -39,6 +57,7 @@ function handleCreated(row: Record<string, unknown>): void {
 
 const filters = reactive({
   q: '',
+  carrierId: '',
   type: '',
   mainRider: '',
   activeOnly: false,
@@ -47,9 +66,21 @@ const filters = reactive({
 
 const page = ref(1)
 
+// Full carrier list for the filter dropdown — loaded once on mount, cached
+// for the page's lifetime. `activeOnly` so users don't filter by a carrier
+// they've since deactivated.
+const carriers = ref<CarrierListRow[]>([])
+async function loadCarriers(): Promise<void> {
+  try {
+    const res = await fetchCarrierList({ perPage: 200, activeOnly: true })
+    carriers.value = res.data
+  } catch { /* silent — dropdown just empty */ }
+}
+
 async function load(): Promise<void> {
   await productStore.loadPage({
     q: filters.q || undefined,
+    carrierId: filters.carrierId || undefined,
     type: filters.type || undefined,
     mainRider: filters.mainRider || undefined,
     activeOnly: filters.activeOnly || undefined,
@@ -58,7 +89,7 @@ async function load(): Promise<void> {
   })
 }
 
-onMounted(load)
+onMounted(() => { void loadCarriers(); void load() })
 
 let debounceTimer: number | undefined
 watch(
@@ -69,7 +100,7 @@ watch(
   },
 )
 watch(
-  () => [filters.type, filters.mainRider, filters.activeOnly, filters.perPage],
+  () => [filters.carrierId, filters.type, filters.mainRider, filters.activeOnly, filters.perPage],
   () => { page.value = 1; void load() },
 )
 
@@ -115,7 +146,7 @@ function fmtBaht(n: number | null): string {
 </script>
 
 <template>
-  <div class="space-y-6">
+  <div class="space-y-6" @click="closeMenus">
     <header class="flex items-center justify-between gap-4 flex-wrap">
       <div>
         <h1 class="text-2xl font-semibold text-slate-900">{{ t('modules.products.name') }}</h1>
@@ -131,7 +162,7 @@ function fmtBaht(n: number | null): string {
       </div>
     </header>
 
-    <section class="card p-4 grid grid-cols-1 md:grid-cols-5 gap-3 items-end">
+    <section class="card p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
       <div class="md:col-span-2">
         <label class="text-xs font-medium text-slate-500 mb-1 block">ค้นหา (code / ชื่อ / commission code / บริษัท)</label>
         <div class="relative">
@@ -139,6 +170,15 @@ function fmtBaht(n: number | null): string {
           <input v-model.trim="filters.q" placeholder="PDAIA0001, AIA, สุขภาพ, ..."
             class="w-full border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-sm bg-white" />
         </div>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-500 mb-1 block">บริษัทประกัน</label>
+        <select v-model="filters.carrierId" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+          <option value="">ทั้งหมด</option>
+          <option v-for="c in carriers" :key="c.id" :value="c.id">
+            {{ c.code }} — {{ c.nicknameTh || c.name }}
+          </option>
+        </select>
       </div>
       <div>
         <label class="text-xs font-medium text-slate-500 mb-1 block">ประเภท</label>
@@ -190,6 +230,7 @@ function fmtBaht(n: number | null): string {
               <th class="px-4 py-2 text-right">อายุ</th>
               <th class="px-4 py-2 text-right">Sum assured</th>
               <th class="px-4 py-2 text-left">Status</th>
+              <th class="px-4 py-2 text-right w-8"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -230,12 +271,27 @@ function fmtBaht(n: number | null): string {
                 <span v-if="p.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">active</span>
                 <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">inactive</span>
               </td>
+              <td class="px-2 py-2 text-right relative" @click.stop>
+                <button type="button" @click="(e) => toggleMenu(p.id, e)"
+                  class="w-7 h-7 rounded-md text-slate-400 hover:text-slate-800 hover:bg-slate-100 flex items-center justify-center"
+                  :title="'Actions'">
+                  <i class="pi pi-ellipsis-v text-sm" />
+                </button>
+                <div v-if="openMenuId === p.id"
+                  class="absolute right-2 top-9 z-30 min-w-[160px] rounded-lg border border-slate-200 bg-white shadow-lg py-1">
+                  <button type="button" @click="(e) => copyRow(p.id, e)"
+                    class="w-full text-left px-3 py-1.5 text-sm text-slate-700 hover:bg-slate-50 flex items-center gap-2">
+                    <i class="pi pi-clone text-brand-500 text-xs" />
+                    Copy to new
+                  </button>
+                </div>
+              </td>
             </tr>
             <tr v-if="!productStore.listLoading && productStore.list.length === 0">
-              <td colspan="9" class="px-4 py-6 text-center text-slate-500">ไม่พบผลิตภัณฑ์</td>
+              <td colspan="10" class="px-4 py-6 text-center text-slate-500">ไม่พบผลิตภัณฑ์</td>
             </tr>
             <tr v-if="productStore.listLoading && productStore.list.length === 0">
-              <td colspan="9" class="px-4 py-6 text-center text-slate-500">Loading…</td>
+              <td colspan="10" class="px-4 py-6 text-center text-slate-500">Loading…</td>
             </tr>
           </tbody>
         </table>
@@ -259,6 +315,8 @@ function fmtBaht(n: number | null): string {
     </section>
 
     <ProductDetailDrawer :product-id="detailId" @close="detailId = null" />
-    <ProductCreateModal :open="showCreate" @close="showCreate = false" @created="handleCreated" />
+    <ProductCreateModal :open="showCreate" :copy-from-id="copyFromId"
+      @close="() => { showCreate = false; copyFromId = null }"
+      @created="handleCreated" />
   </div>
 </template>

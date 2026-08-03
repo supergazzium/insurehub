@@ -69,6 +69,12 @@ php artisan event:cache  || true
 # subsequent deploy is a no-op unless a new migration was added.
 php artisan migrate --force --no-interaction
 
+# Idempotent RBAC catalog upsert. Reads app/Rbac/PermissionCatalog::all()
+# and syncs the `permissions` table + grants wildcard-equivalent full set
+# to admin/super_admin. Safe to run on every start; adds new permissions
+# as they ship with new controllers.
+php artisan db:seed --class=Database\\Seeders\\RbacPermissionSeeder --force --no-interaction || true
+
 # Storage symlink (public/storage → storage/app/public). Idempotent.
 php artisan storage:link || true
 

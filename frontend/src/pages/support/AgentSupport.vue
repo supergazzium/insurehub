@@ -4301,7 +4301,6 @@ onMounted(() => {
       <div
         v-if="showNewCase"
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40"
-        @click.self="showNewCase = false"
       >
         <div class="bg-white rounded-xl shadow-xl w-full max-w-lg">
           <header class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
@@ -4413,7 +4412,6 @@ onMounted(() => {
       <div
         v-if="showEmail && emailCase"
         class="fixed inset-0 z-[60] flex items-center justify-center p-4 bg-slate-900/50"
-        @click.self="closeEmail"
       >
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col">
           <!-- Header -->
@@ -5354,7 +5352,6 @@ onMounted(() => {
       <div
         v-if="showQuotation"
         class="fixed inset-0 z-[70] flex items-center justify-center p-4 bg-slate-900/50"
-        @click.self="closeQuotationBuilder"
       >
         <div class="bg-white rounded-xl shadow-2xl w-full max-w-3xl max-h-[92vh] flex flex-col">
           <!-- Header -->

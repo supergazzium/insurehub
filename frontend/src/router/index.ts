@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory, type RouteRecordRaw } from 'vue-router'
 import AppLayout from '../layouts/AppLayout.vue'
 import AuthLayout from '../layouts/AuthLayout.vue'
+import PortalLayout from '../layouts/PortalLayout.vue'
 import PublicLayout from '../layouts/PublicLayout.vue'
 import Dashboard from '../pages/Dashboard.vue'
 import ModulePlaceholder from '../pages/ModulePlaceholder.vue'
@@ -29,8 +30,8 @@ import QuoteList from '../pages/quotes/QuoteList.vue'
 import QuoteEdit from '../pages/quotes/QuoteEdit.vue'
 import QuoteDetail from '../pages/quotes/QuoteDetail.vue'
 import PolicyEdit from '../pages/policies/PolicyEdit.vue'
-import AuthModule from '../pages/auth/AuthModule.vue'
 import MfaSetup from '../pages/auth/MfaSetup.vue'
+import AccessControl from '../pages/admin/AccessControl.vue'
 import TenantSettings from '../pages/settings/TenantSettings.vue'
 import UserAccount from '../pages/settings/UserAccount.vue'
 import CarrierManagement from '../pages/carriers/CarrierManagementV2.vue'
@@ -53,7 +54,7 @@ import AgentOperationSupport from '../pages/support/AgentOperationSupport.vue'
 import { MODULES } from '../types/modules'
 
 const IMPLEMENTED_MODULES = new Set([
-  'auth', 'tenant-settings', 'carriers', 'products', 'contracts',
+  'tenant-settings', 'carriers', 'products', 'contracts',
   'agents', 'customers', 'policies', 'renewal-pipeline',
   'commission-engine', 'commission-ledger', 'rebate-reconciliation',
   'import-failures',
@@ -61,7 +62,7 @@ const IMPLEMENTED_MODULES = new Set([
   // Phase 2 (agent portal)
   'portal-dashboard', 'portal-profile', 'portal-referral', 'portal-settings', 'portal-earnings',
   // Phase 4 (admin agent oversight)
-  'admin-agent-approvals', 'admin-downline-tree',
+  'admin-agent-approvals', 'admin-downline-tree', 'admin-access',
   // Phase 7b (admin payout cycles)
   'admin-payouts',
   // Phase 9 (motor tariff admin)
@@ -130,8 +131,10 @@ const routes: RouteRecordRaw[] = [
       // matches the first record whose path fits, which was breaking the
       // post-login render on `/`).
       { path: 'dashboard', name: 'dashboard', component: Dashboard },
-      { path: 'auth', name: 'auth', component: AuthModule, meta: { moduleKey: 'auth' } },
-      { path: 'auth/mfa', name: 'auth-mfa', component: MfaSetup, meta: { moduleKey: 'auth' } },
+      // Old /auth prototype has been folded into /admin/access. Redirect
+      // preserves any bookmarks / hardcoded links.
+      { path: 'auth', redirect: { name: 'admin-access' } },
+      { path: 'auth/mfa', name: 'auth-mfa', component: MfaSetup, meta: { moduleKey: 'admin-access' } },
       { path: 'settings', name: 'tenant-settings', component: TenantSettings, meta: { moduleKey: 'tenant-settings' } },
       { path: 'account', name: 'user-account', component: UserAccount },
       { path: 'carriers', name: 'carriers', component: CarrierManagement, meta: { moduleKey: 'carriers' } },
@@ -150,14 +153,12 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings/import-failures', name: 'settings-import-failures', component: ImportFailures, meta: { moduleKey: 'import-failures' } },
       { path: 'support', name: 'agent-support', component: AgentSupport, meta: { moduleKey: 'agent-support' } },
       { path: 'ops', name: 'agent-operation-support', component: AgentOperationSupport, meta: { moduleKey: 'agent-operation-support' } },
-      // Agent Portal (Phase 2) — role-guarded in the router beforeEach.
-      { path: 'portal', name: 'portal-dashboard', component: PortalDashboard, meta: { moduleKey: 'portal-dashboard' } },
-      { path: 'portal/profile', name: 'portal-profile', component: PortalProfile, meta: { moduleKey: 'portal-profile' } },
-      { path: 'portal/referral', name: 'portal-referral', component: PortalReferral, meta: { moduleKey: 'portal-referral' } },
-      { path: 'portal/settings', name: 'portal-settings', component: PortalSettings, meta: { moduleKey: 'portal-settings' } },
-      { path: 'portal/earnings', name: 'portal-earnings', component: PortalEarnings, meta: { moduleKey: 'portal-earnings' } },
+      // Portal routes moved to their own PortalLayout branch below (own shell).
       // Admin approval + oversight (Phase 4). Role gate lives on backend.
       { path: 'admin/agent-approvals', name: 'admin-agent-approvals', component: AdminAgentApprovals, meta: { moduleKey: 'admin-agent-approvals' } },
+      { path: 'admin/access', name: 'admin-access', component: AccessControl, meta: { moduleKey: 'admin-access' } },
+      // Legacy /admin/roles URL keeps working.
+      { path: 'admin/roles', redirect: { name: 'admin-access', query: { tab: 'roles' } } },
       { path: 'admin/downline-tree', name: 'admin-downline-tree', component: AdminDownlineTree, meta: { moduleKey: 'admin-downline-tree' } },
       { path: 'admin/payouts', name: 'admin-payouts', component: AdminPayouts, meta: { moduleKey: 'admin-payouts' } },
       { path: 'admin/motor-tariffs', name: 'admin-motor-tariffs', component: AdminMotorTariffs, meta: { moduleKey: 'admin-motor-tariffs' } },
@@ -174,6 +175,19 @@ const routes: RouteRecordRaw[] = [
       // Phase 6 — Policy sectioned edit
       { path: 'policies/:id/edit', name: 'policy-edit', component: PolicyEdit, meta: { moduleKey: 'policies' } },
       ...moduleRoutes,
+    ],
+  },
+  // Agent portal — separate shell (no back-office sidebar). Only the router
+  // guard's role check reaches here; back-office users get redirected away.
+  {
+    path: '/',
+    component: PortalLayout,
+    children: [
+      { path: 'portal', name: 'portal-dashboard', component: PortalDashboard, meta: { moduleKey: 'portal-dashboard' } },
+      { path: 'portal/profile', name: 'portal-profile', component: PortalProfile, meta: { moduleKey: 'portal-profile' } },
+      { path: 'portal/referral', name: 'portal-referral', component: PortalReferral, meta: { moduleKey: 'portal-referral' } },
+      { path: 'portal/settings', name: 'portal-settings', component: PortalSettings, meta: { moduleKey: 'portal-settings' } },
+      { path: 'portal/earnings', name: 'portal-earnings', component: PortalEarnings, meta: { moduleKey: 'portal-earnings' } },
     ],
   },
 ]
@@ -214,6 +228,15 @@ router.beforeEach(async (to) => {
   // Agents land on their portal instead of the admin dashboard.
   if (isAgent && to.name === 'dashboard') {
     return { name: 'portal-dashboard' }
+  }
+  // Agents cannot visit back-office routes — anything not portal-* or
+  // account/support gets kicked back to the portal home.
+  if (isAgent && typeof to.name === 'string') {
+    const isPortalRoute = to.name.startsWith('portal-')
+    const allowedShared = new Set(['user-account', 'auth-mfa'])
+    if (!isPortalRoute && !allowedShared.has(to.name) && !isPublic) {
+      return { name: 'portal-dashboard' }
+    }
   }
 })
 

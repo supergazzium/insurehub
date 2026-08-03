@@ -615,7 +615,6 @@ function relativeDays(thaiDate: string): string {
       <div
         v-if="reviewTarget"
         class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40"
-        @click.self="closeReview"
       >
         <div class="bg-white rounded-xl shadow-xl w-full max-w-lg">
           <header class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">

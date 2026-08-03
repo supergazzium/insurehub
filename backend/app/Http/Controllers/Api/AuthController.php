@@ -15,6 +15,7 @@ use App\Models\EmailVerificationToken;
 use App\Models\RecruitmentLink;
 use App\Models\Tenant;
 use App\Models\User;
+use App\Rbac\Rbac;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -118,6 +119,7 @@ class AuthController extends Controller
                 'doc_status' => false,
             ]);
 
+            $agentRoleId = \App\Models\Role::query()->where('key', 'agent')->value('id');
             $user = User::create([
                 'tenant_id' => $tenantId,
                 'agent_id' => $agent->id,
@@ -125,6 +127,7 @@ class AuthController extends Controller
                 'email' => $data['email'],
                 'password' => Hash::make($data['password']),
                 'role' => 'agent',
+                'role_id' => $agentRoleId,
                 'active' => false,
                 'locale' => 'th',
             ]);
@@ -245,11 +248,20 @@ class AuthController extends Controller
     /** @return array<string,mixed> */
     private function userPayload(User $user): array
     {
+        $roleRel = $user->roleRel;
+        $rbac = app(Rbac::class);
         return [
             'id' => (string) $user->id,
             'name' => $user->name,
             'email' => $user->email,
-            'role' => $user->role,
+            // Legacy string role (kept for frontend backwards-compat).
+            'role' => $roleRel?->key ?? $user->role,
+            'roleId' => $user->role_id !== null ? (string) $user->role_id : null,
+            'roleLabel' => $roleRel !== null
+                ? ['th' => $roleRel->name_th, 'en' => $roleRel->name_en]
+                : null,
+            // Full set of permission keys the frontend uses to hide/show UI.
+            'permissions' => $rbac->userPermissions($user),
             'locale' => $user->locale,
             'tenantId' => $user->tenant_id !== null ? (string) $user->tenant_id : null,
             'agentId' => $user->agent_id !== null ? (string) $user->agent_id : null,

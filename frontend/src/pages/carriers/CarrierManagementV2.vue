@@ -3,6 +3,8 @@
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useCarrierStore } from '../../stores/carriers'
+import { updateCarrier } from '../../api/carriers'
+import { ApiError } from '../../api/client'
 import CarrierDetailDrawer from './CarrierDetailDrawer.vue'
 import CarrierCreateModal from './CarrierCreateModal.vue'
 
@@ -70,6 +72,26 @@ function typeBadge(insureType: string): string {
     tax: 'bg-violet-50 text-violet-700',
   }[insureType] ?? 'bg-slate-100 text-slate-600'
 }
+
+// In-place status change via dropdown — PATCHes carriers/{id} then updates
+// the row in the local store list so the badge flips without a full reload.
+const statusSavingId = ref<string | null>(null)
+async function changeStatus(carrierId: string, next: 'active' | 'inactive'): Promise<void> {
+  const active = next === 'active'
+  const row = carrierStore.list.find((c) => c.id === carrierId)
+  if (!row || row.active === active) return
+  statusSavingId.value = carrierId
+  const prev = row.active
+  row.active = active // optimistic
+  try {
+    await updateCarrier(carrierId, { active })
+  } catch (e: unknown) {
+    row.active = prev // rollback
+    carrierStore.listError = e instanceof ApiError ? e.message : 'Status change failed.'
+  } finally {
+    statusSavingId.value = null
+  }
+}
 </script>
 
 <template>
@@ -84,7 +106,7 @@ function typeBadge(insureType: string): string {
         <button type="button"
           class="px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm flex items-center gap-1.5"
           @click="showCreate = true">
-          <i class="pi pi-plus text-xs" /> New Carrier
+          <i class="pi pi-plus text-xs" /> {{ t('carriers.list.addNew') }}
         </button>
       </div>
     </header>
@@ -158,9 +180,21 @@ function typeBadge(insureType: string): string {
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ c.taxId || '—' }}</td>
               <td class="px-4 py-2 text-right text-slate-900">{{ c.productCount.toLocaleString() }}</td>
               <td class="px-4 py-2 text-right text-slate-900">{{ c.contractCount.toLocaleString() }}</td>
-              <td class="px-4 py-2">
-                <span v-if="c.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">active</span>
-                <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">inactive</span>
+              <td class="px-4 py-2" @click.stop>
+                <select
+                  :value="c.active ? 'active' : 'inactive'"
+                  :disabled="statusSavingId === c.id"
+                  :class="[
+                    'px-2 py-1 rounded-md text-xs font-medium border focus:outline-none focus:ring-2 focus:ring-brand-100',
+                    c.active
+                      ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                      : 'bg-slate-100 text-slate-600 border-slate-200',
+                  ]"
+                  @change="e => changeStatus(c.id, (e.target as HTMLSelectElement).value as 'active' | 'inactive')">
+                  <option value="active">{{ t('carriers.list.statusActive') }}</option>
+                  <option value="inactive">{{ t('carriers.list.statusInactive') }}</option>
+                </select>
+                <i v-if="statusSavingId === c.id" class="pi pi-spin pi-spinner text-brand-500 ml-1 text-xs" />
               </td>
             </tr>
             <tr v-if="!carrierStore.listLoading && carrierStore.list.length === 0">

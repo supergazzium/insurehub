@@ -595,7 +595,7 @@ function agentNameById(id: string | null) {
     </div>
 
     <!-- Create / edit dialog -->
-    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40" @click.self="showForm = false">
+    <div v-if="showForm" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
       <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[92vh] flex flex-col">
         <header class="px-5 py-4 border-b border-slate-100 flex items-center justify-between shrink-0">
           <h3 class="font-semibold text-slate-900">
@@ -992,7 +992,7 @@ function agentNameById(id: string | null) {
     </div>
 
     <!-- Merge dialog -->
-    <div v-if="showMerge" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40" @click.self="showMerge = false">
+    <div v-if="showMerge" class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/40">
       <div class="bg-white rounded-xl shadow-xl w-full max-w-lg">
         <header class="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
           <h3 class="font-semibold text-slate-900">{{ t('customers.merge.title') }}</h3>

@@ -49,8 +49,12 @@ Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('auth/reset-password', [AuthController::class, 'resetPassword']);
 
-// Unauthenticated public data (recruitment-link preview, etc.)
+// Unauthenticated public data (recruitment-link preview, lookups, etc.)
 Route::get('public/recruit/{token}', [PublicController::class, 'recruitLink']);
+Route::get('public/lookup/banks', [PublicController::class, 'banks']);
+Route::get('public/lookup/provinces', [PublicController::class, 'provinces']);
+Route::get('public/lookup/districts', [PublicController::class, 'districts']);
+Route::get('public/lookup/sub-districts', [PublicController::class, 'subDistricts']);
 
 Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('auth/logout', [AuthController::class, 'logout']);
@@ -65,6 +69,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::patch('me/agent/license', [MeAgentController::class, 'updateLicense']);
     Route::patch('me/agent/bank', [MeAgentController::class, 'updateBank']);
     Route::patch('me/agent/address', [MeAgentController::class, 'updateAddress']);
+    Route::patch('me/agent/delivery', [MeAgentController::class, 'updateDelivery']);
+    Route::patch('me/agent', [MeAgentController::class, 'updateAll']);
     Route::post('me/agent/profile-photo', [MeAgentController::class, 'uploadProfilePhoto']);
     Route::post('me/agent/id-photo', [MeAgentController::class, 'uploadIdPhoto']);
     Route::post('me/agent/bank-book-photo', [MeAgentController::class, 'uploadBankBookPhoto']);
@@ -72,6 +78,20 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('me/agent/referral-link', [MeAgentController::class, 'referralLink']);
     Route::get('me/agent/downline', [MeAgentController::class, 'downline']);
     Route::get('me/agent/earnings', [MeAgentController::class, 'earnings']);
+
+    // RBAC admin — roles, permissions catalog, user role assignment.
+    Route::get('admin/roles', [\App\Http\Controllers\Api\AdminRoleController::class, 'index']);
+    Route::post('admin/roles', [\App\Http\Controllers\Api\AdminRoleController::class, 'store']);
+    Route::get('admin/roles/{role}', [\App\Http\Controllers\Api\AdminRoleController::class, 'show']);
+    Route::patch('admin/roles/{role}', [\App\Http\Controllers\Api\AdminRoleController::class, 'update']);
+    Route::put('admin/roles/{role}/permissions', [\App\Http\Controllers\Api\AdminRoleController::class, 'setPermissions']);
+    Route::delete('admin/roles/{role}', [\App\Http\Controllers\Api\AdminRoleController::class, 'destroy']);
+    Route::get('admin/permissions', [\App\Http\Controllers\Api\AdminRoleController::class, 'permissions']);
+    Route::get('admin/users', [\App\Http\Controllers\Api\AdminUserController::class, 'index']);
+    Route::get('admin/users/{user}', [\App\Http\Controllers\Api\AdminUserController::class, 'show']);
+    Route::patch('admin/users/{user}/role', [\App\Http\Controllers\Api\AdminUserController::class, 'setRole']);
+    Route::post('admin/users/{user}/overrides', [\App\Http\Controllers\Api\AdminUserController::class, 'addOverride']);
+    Route::delete('admin/users/{user}/overrides/{overrideId}', [\App\Http\Controllers\Api\AdminUserController::class, 'removeOverride']);
 
     // Admin approval + oversight (role-gated inside the controller).
     Route::get('admin/agents/pending', [AdminAgentApprovalController::class, 'pending']);
@@ -100,6 +120,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::apiResource('carriers', CarrierController::class);
     Route::apiResource('carriers.bank-accounts', CarrierBankAccountController::class)
         ->parameters(['bank-accounts' => 'bankAccount'])
+        ->only(['index', 'store', 'update', 'destroy']);
+    Route::apiResource('carriers.contacts', \App\Http\Controllers\Api\CarrierContactController::class)
         ->only(['index', 'store', 'update', 'destroy']);
     Route::apiResource('products', ProductController::class);
     Route::get('products/{product}/commission-rates', [ProductController::class, 'commissionRates']);
@@ -138,6 +160,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::put('policies/{policy}/beneficiaries', [PolicyController::class, 'syncBeneficiaries']);
     // Phase 6b — multipart doc upload (in addition to the existing JSON store).
     Route::post('policies/{policy}/documents/upload', [PolicyDocumentController::class, 'upload']);
+    Route::get('policies/{policy}/documents/{document}/download', [PolicyDocumentController::class, 'download']);
 
     // Carrier contact groups + email templates.
     Route::apiResource('carrier-contact-groups', CarrierContactGroupController::class)
