@@ -183,7 +183,24 @@ export default {
       verified: 'Email verified successfully.',
       verifiedBadge: 'Verified',
       wrongWithRemaining: 'Incorrect code. {n} attempt(s) remaining.',
+      errors: {
+        emailTaken: 'This email is already registered. Please sign in instead.',
+        cooldown: 'Please wait before requesting another code.',
+        emailHourlyLimit: 'Too many verification requests for this email. Try again in an hour.',
+        ipHourlyLimit: 'Too many verification requests from this network. Try again in an hour.',
+        expired: 'The verification code has expired or was not sent. Please request a new one.',
+        tooManyAttempts: 'Too many incorrect attempts. Please request a new code.',
+        incorrect: 'Incorrect code.',
+        sendFailed: 'Failed to send verification code.',
+        verifyFailed: 'Verification failed.',
+      },
     },
+    availability: {
+      emailTaken: 'This email is already registered.',
+      idCardTaken: 'This national ID is already registered.',
+      idCardInvalidFormat: 'National ID must be 13 digits.',
+    },
+    submitFailed: 'Registration failed. Please try again.',
   },
 
   modules: {
@@ -410,6 +427,7 @@ export default {
     kind: {
       motor: 'Motor',
       life: 'Life / PA',
+      travel: 'Travel',
       property: 'Property / Fire',
       health: 'Health / Non-Motor',
       other: 'Other',
@@ -448,7 +466,7 @@ export default {
       driverType: 'Driver type',
       vehicleType: 'Vehicle type',
       passengerCount: 'Passenger count',
-      notes: 'Notes',
+      notes: 'Vehicle notes',
     },
     property: {
       title: 'Property details',

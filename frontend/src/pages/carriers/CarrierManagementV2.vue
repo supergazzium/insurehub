@@ -2,6 +2,7 @@
 // Server-paginated carrier list.
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useCarrierStore } from '../../stores/carriers'
 import { updateCarrier } from '../../api/carriers'
 import { ApiError } from '../../api/client'
@@ -9,6 +10,7 @@ import CarrierDetailDrawer from './CarrierDetailDrawer.vue'
 import CarrierCreateModal from './CarrierCreateModal.vue'
 
 const { t } = useI18n()
+const route = useRoute()
 const carrierStore = useCarrierStore()
 
 const detailId = ref<string | null>(null)
@@ -33,7 +35,14 @@ async function load(): Promise<void> {
   })
 }
 
-onMounted(load)
+onMounted(async () => {
+  await load()
+  // Cross-page deep-link — /carriers?open=<id> opens that carrier's drawer.
+  const openId = route.query.open
+  if (typeof openId === 'string' && openId.trim() !== '') {
+    detailId.value = openId.trim()
+  }
+})
 
 let debounceTimer: number | undefined
 watch(

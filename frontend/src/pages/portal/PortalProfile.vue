@@ -23,6 +23,8 @@ import {
 } from '../../api/portal'
 import { ApiError } from '../../api/client'
 import { isThaiName, isThaiId13, isThaiMobile } from '../../utils/thaiValidation'
+import DateInput from '../../components/DateInput.vue'
+import { toIsoDate } from '../../util/dateFormat'
 
 const { t, locale } = useI18n()
 
@@ -449,8 +451,7 @@ watch(bank, () => { dirty.bank = true }, { deep: true })
         </div>
         <div>
           <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ t('portalProfile.personal.birthDate') }} *</label>
-          <input v-model="personal.birthDate" type="date"
-            class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500" />
+          <DateInput v-model="personal.birthDate" :max="toIsoDate(new Date())" />
         </div>
         <div class="sm:col-span-2">
           <label class="block text-sm font-medium text-slate-700 mb-1.5">

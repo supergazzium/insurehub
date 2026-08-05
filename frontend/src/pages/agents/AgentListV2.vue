@@ -2,9 +2,11 @@
 // Server-side paginated agent list.
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRoute } from 'vue-router'
 import { useAgentStore } from '../../stores/agents'
 
 const { t } = useI18n()
+const route = useRoute()
 const agentStore = useAgentStore()
 
 const filters = reactive({
@@ -30,7 +32,13 @@ async function load(): Promise<void> {
   })
 }
 
-onMounted(load)
+// Prefill the search from ?q= so cross-page links (e.g. "click agent code
+// in customer detail") land on this list already scoped to that agent.
+onMounted(() => {
+  const q = route.query.q
+  if (typeof q === 'string' && q.trim() !== '') filters.q = q.trim()
+  void load()
+})
 
 let debounceTimer: number | undefined
 watch(

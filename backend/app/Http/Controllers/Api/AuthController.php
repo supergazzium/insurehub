@@ -168,6 +168,52 @@ class AuthController extends Controller
         ], 201);
     }
 
+    /**
+     * Public availability probe for the agent-registration form. Lets the
+     * frontend disable the "send OTP" button (and show inline errors) when
+     * the email or national ID is already taken, rather than burning an OTP
+     * quota only to reject at final submit.
+     *
+     * Request: { field: 'email' | 'idCard', value: string }
+     * Response: { available: bool, message?: string }
+     */
+    public function checkAvailability(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'field' => ['required', 'in:email,idCard'],
+            'value' => ['required', 'string', 'max:255'],
+        ]);
+        $field = $data['field'];
+        $value = trim($data['value']);
+
+        if ($field === 'email') {
+            $normalized = strtolower($value);
+            $taken = User::query()->where('email', $normalized)->exists();
+            return response()->json([
+                'available' => ! $taken,
+                'code' => $taken ? 'email_taken' : null,
+            ]);
+        }
+
+        // idCard: must be 13 digits before we bother scanning encrypted rows.
+        if (preg_match('/^\d{13}$/', $value) !== 1) {
+            return response()->json([
+                'available' => false,
+                'code' => 'id_card_invalid_format',
+            ]);
+        }
+        $tenantId = $this->defaultTenantId();
+        $taken = Agent::query()
+            ->where('tenant_id', $tenantId)
+            ->whereNotNull('id_card')
+            ->get(['id', 'id_card'])
+            ->contains(fn (Agent $a) => (string) $a->id_card === $value);
+        return response()->json([
+            'available' => ! $taken,
+            'code' => $taken ? 'id_card_taken' : null,
+        ]);
+    }
+
     public function forgotPassword(ForgotPasswordRequest $request): JsonResponse
     {
         $email = $request->validated()['email'];

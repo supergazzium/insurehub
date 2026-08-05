@@ -23,20 +23,112 @@ use Illuminate\Support\Facades\DB;
 class ReportController extends ApiController
 {
     /**
-     * Renewal pipeline queue — policies expiring in the next N days
-     * (default 60). Analogue of `v_expiring_soon`.
+     * Renewal pipeline queue — policies expiring in a date window.
+     *
+     * Filters (all optional, all server-applied):
+     *   from, to       — expiry_date range (YYYY-MM-DD). Missing bounds
+     *                    default to today / today+days.
+     *   days           — legacy shorthand for a rolling window; used only
+     *                    when `from` AND `to` are both absent.
+     *   carrierId, productId, productType, insureType — exact match filters
+     *   q              — free-text across name/policyNo/applicationNo/
+     *                    plate/customerCode + phone (digits-only)
+     *   page, perPage  — server pagination (default 50, cap 500)
+     *
+     * The `summary` block reflects the filtered set (not the page), so
+     * "total in window" and "urgent (≤7 days)" are correct KPIs.
      */
     public function expiringSoon(Request $request): JsonResponse
     {
-        $days = max(1, min(365, (int) ($request->input('days') ?? 60)));
-        $today = Carbon::today()->toDateString();
-        $until = Carbon::today()->addDays($days)->toDateString();
         $tenantId = $this->tenantId($request);
+        [$from, $to, $days] = $this->resolveExpiryWindow($request);
 
-        // Sub-queries for the latest renewal-event timestamps per policy.
-        // A LEFT JOIN of an aggregation is cheap given the small pipeline
-        // window (usually <500 rows). Keeps the "contacted 3 days ago" UI
-        // widget in one round trip.
+        // Base query — same joins as before, plus the renewal-event
+        // sub-selects used by the UI's "contacted / notice sent / started"
+        // status chips.
+        $base = $this->expiringSoonBaseQuery($tenantId, $from, $to);
+        $this->applyExpiringSoonFilters($base, $request);
+
+        // Summary is computed against the FILTERED query (before pagination).
+        // We clone and REPLACE the SELECT list — otherwise the base's row-
+        // columns get mixed with the aggregate and MySQL's only_full_group_by
+        // rejects the query.
+        $summaryQ = clone $base;
+        $summaryQ->columns = null;
+        $summary = $summaryQ
+            ->selectRaw('COUNT(*) as total, SUM(CASE WHEN DATEDIFF(p.expiry_date, CURDATE()) <= 7 THEN 1 ELSE 0 END) as urgent')
+            ->first();
+
+        // Sortable columns — whitelisted so callers can't order by arbitrary
+        // SQL. Default is expiry-date ascending (soonest first).
+        $sortMap = [
+            'expiryDate' => 'p.expiry_date',
+            'annualPremium' => 'p.annual_premium',
+            'customerName' => 'c.first_name',
+        ];
+        $sortBy = $sortMap[$request->input('sortBy', 'expiryDate')] ?? 'p.expiry_date';
+        $sortDir = strtolower((string) $request->input('sortDir', 'asc')) === 'desc' ? 'desc' : 'asc';
+
+        $perPage = $this->perPage($request, 50, 500);
+        $paginator = $base
+            ->orderBy($sortBy, $sortDir)
+            ->orderBy('p.id') // deterministic tiebreak within equal sort values
+            ->paginate($perPage);
+
+        $items = collect($paginator->items())->map(fn ($r) => [
+            'policyId' => (string) $r->id,
+            'applicationNo' => $r->application_no,
+            'policyNo' => $r->policy_no,
+            'expiryDate' => $r->expiry_date,
+            'daysRemaining' => (int) $r->days_remaining,
+            'annualPremium' => (float) $r->annual_premium,
+            'customerCode' => $r->customer_code,
+            'customerName' => $r->customer_name,
+            'customerEmail' => $r->customer_email,
+            'customerPhone' => $r->customer_phone,
+            'customerType' => $r->customer_type,
+            'agentCode' => $r->agent_code,
+            'agentName' => $r->agent_name,
+            'agentEmail' => $r->agent_email,
+            'carrierId' => $r->carrier_id_out !== null ? (string) $r->carrier_id_out : null,
+            'carrierCode' => $r->carrier_code,
+            'carrierName' => $r->carrier_name,
+            'carrierInsureType' => $r->carrier_insure_type,
+            'productId' => $r->product_id_out !== null ? (string) $r->product_id_out : null,
+            'productCode' => $r->product_code,
+            'productName' => $r->product_name,
+            'productType' => $r->product_type,
+            'productMainRider' => $r->product_main_rider,
+            'motorLicenseNo' => $r->motor_license_no,
+            'lastContactedAt' => $r->last_contacted_at,
+            'lastNoticeSentAt' => $r->last_notice_sent_at,
+            'renewalStartedAt' => $r->renewal_started_at,
+        ]);
+
+        return response()->json([
+            'data' => $items,
+            'meta' => [
+                'days' => $days,
+                'from' => $from,
+                'to' => $to,
+                'currentPage' => $paginator->currentPage(),
+                'perPage' => $paginator->perPage(),
+                'total' => $paginator->total(),
+                'lastPage' => $paginator->lastPage(),
+            ],
+            'summary' => [
+                'totalInWindow' => (int) ($summary->total ?? 0),
+                'urgentCount' => (int) ($summary->urgent ?? 0),
+            ],
+        ]);
+    }
+
+    /**
+     * Build the base joined query for the renewal-pipeline endpoints. Keeps
+     * the FROM/JOIN chain identical between the JSON and PDF exports.
+     */
+    private function expiringSoonBaseQuery(int $tenantId, string $from, string $to): \Illuminate\Database\Query\Builder
+    {
         $latestContacted = DB::table('policy_events')
             ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
             ->where('type', 'renewalContacted')
@@ -50,7 +142,7 @@ class ReportController extends ApiController
             ->where('type', 'renewalStarted')
             ->groupBy('policy_id');
 
-        $rows = DB::table('policies as p')
+        return DB::table('policies as p')
             ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
             ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
             ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
@@ -61,76 +153,88 @@ class ReportController extends ApiController
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->where('p.status', 'active')
-            ->whereBetween('p.expiry_date', [$today, $until])
-            ->orderBy('p.expiry_date')
-            ->limit($this->perPage($request, 100, 500))
-            ->get([
-                'p.id',
-                'p.application_no',
-                'p.policy_no',
-                'p.expiry_date',
-                'p.annual_premium',
-                'p.customer_id', 'p.product_id', 'p.carrier_id', 'p.writing_agent_id',
+            ->whereBetween('p.expiry_date', [$from, $to])
+            ->select([
+                'p.id', 'p.application_no', 'p.policy_no',
+                'p.expiry_date', 'p.annual_premium',
+                'p.motor_license_no', 'p.motor_vehicle_brand', 'p.motor_vehicle_model',
                 DB::raw('DATEDIFF(p.expiry_date, CURDATE()) as days_remaining'),
-                // Customer identifiers + contact used by the client-side filters.
                 'c.customer_code', 'c.email as customer_email',
                 'c.phone as customer_phone', 'c.customer_type',
                 DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
                 'a.agent_code', 'a.email as agent_email',
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
-                'ca.id as carrier_id_out',
-                'ca.code as carrier_code',
-                'ca.name as carrier_name',
-                'ca.insure_type as carrier_insure_type',
-                'pr.id as product_id_out',
-                'pr.code as product_code',
-                'pr.name as product_name',
-                'pr.type as product_type',
+                'ca.id as carrier_id_out', 'ca.code as carrier_code',
+                'ca.name as carrier_name', 'ca.insure_type as carrier_insure_type',
+                'pr.id as product_id_out', 'pr.code as product_code',
+                'pr.name as product_name', 'pr.type as product_type',
                 'pr.main_rider as product_main_rider',
-                // Motor plate for the search index.
-                'p.motor_license_no',
                 'ev_c.latest as last_contacted_at',
                 'ev_n.latest as last_notice_sent_at',
                 'ev_r.latest as renewal_started_at',
             ]);
+    }
 
-        return response()->json([
-            'data' => $rows->map(fn ($r) => [
-                'policyId' => (string) $r->id,
-                'applicationNo' => $r->application_no,
-                'policyNo' => $r->policy_no,
-                'expiryDate' => $r->expiry_date,
-                'daysRemaining' => (int) $r->days_remaining,
-                'annualPremium' => (float) $r->annual_premium,
-                'customerCode' => $r->customer_code,
-                'customerName' => $r->customer_name,
-                'customerEmail' => $r->customer_email,
-                'customerPhone' => $r->customer_phone,
-                'customerType' => $r->customer_type,
-                'agentCode' => $r->agent_code,
-                'agentName' => $r->agent_name,
-                'agentEmail' => $r->agent_email,
-                'carrierId' => $r->carrier_id_out !== null ? (string) $r->carrier_id_out : null,
-                'carrierCode' => $r->carrier_code,
-                'carrierName' => $r->carrier_name,
-                'carrierInsureType' => $r->carrier_insure_type,
-                'productId' => $r->product_id_out !== null ? (string) $r->product_id_out : null,
-                'productCode' => $r->product_code,
-                'productName' => $r->product_name,
-                'productType' => $r->product_type,
-                'productMainRider' => $r->product_main_rider,
-                'motorLicenseNo' => $r->motor_license_no,
-                'lastContactedAt' => $r->last_contacted_at,
-                'lastNoticeSentAt' => $r->last_notice_sent_at,
-                'renewalStartedAt' => $r->renewal_started_at,
-            ]),
-            'meta' => [
-                'days' => $days,
-                'from' => $today,
-                'to' => $until,
-                'total' => $rows->count(),
-            ],
-        ]);
+    /**
+     * Apply the shared filter set (carrier/product/type/insureType/q) to a
+     * base query. Mutates the builder in place; also used by the PDF export.
+     */
+    private function applyExpiringSoonFilters(\Illuminate\Database\Query\Builder $q, Request $request): void
+    {
+        if ($carrierId = $request->input('carrierId')) {
+            $q->where('p.carrier_id', $carrierId);
+        }
+        if ($productId = $request->input('productId')) {
+            $q->where('p.product_id', $productId);
+        }
+        if ($productType = $request->input('productType')) {
+            $q->where('pr.type', $productType);
+        }
+        if ($insureType = $request->input('insureType')) {
+            $q->where('ca.insure_type', $insureType);
+        }
+        $search = trim((string) $request->input('q', ''));
+        if ($search !== '') {
+            $like = "%{$search}%";
+            $digits = preg_replace('/\D/', '', $search) ?? '';
+            $q->where(function ($w) use ($like, $digits, $search): void {
+                $w->where('c.first_name', 'like', $like)
+                    ->orWhere('c.last_name', 'like', $like)
+                    ->orWhereRaw("CONCAT_WS(' ', c.first_name, c.last_name) LIKE ?", [$like])
+                    ->orWhere('c.customer_code', 'like', $like)
+                    ->orWhere('p.policy_no', 'like', $like)
+                    ->orWhere('p.application_no', 'like', $like)
+                    ->orWhere('p.motor_license_no', 'like', $like);
+                // Phone match — 4+ digit substring on the digit-only phone.
+                if (strlen($digits) >= 4) {
+                    $w->orWhereRaw("REGEXP_REPLACE(COALESCE(c.phone, ''), '[^0-9]', '') LIKE ?", ["%{$digits}%"]);
+                }
+                // Also let the raw string hit the phone as-typed (covers
+                // stored formats that already include separators).
+                $w->orWhere('c.phone', 'like', $like);
+            });
+        }
+    }
+
+    /**
+     * Resolve the expiry-date window from request inputs. Returns
+     * [$from, $to, $days] where $days is the effective width (for the meta
+     * block only). from/to override; days is fallback.
+     */
+    private function resolveExpiryWindow(Request $request): array
+    {
+        $from = (string) $request->input('from', '');
+        $to = (string) $request->input('to', '');
+        if ($from === '' && $to === '') {
+            $days = max(1, min(3650, (int) ($request->input('days') ?? 60)));
+            $from = Carbon::today()->toDateString();
+            $to = Carbon::today()->addDays($days)->toDateString();
+        } else {
+            if ($from === '') $from = Carbon::today()->toDateString();
+            if ($to === '') $to = Carbon::parse($from)->addDays(60)->toDateString();
+            $days = (int) Carbon::parse($from)->diffInDays(Carbon::parse($to));
+        }
+        return [$from, $to, $days];
     }
 
     /**
@@ -143,100 +247,39 @@ class ReportController extends ApiController
     public function expiringSoonPdf(Request $request): Response
     {
         // dompdf's Cellmap can be memory-heavy on wide tables; bump the
-        // per-request limit so 500-row PDFs render reliably.
+        // per-request limit so large PDFs render reliably.
         ini_set('memory_limit', '512M');
-        $days = max(1, min(365, (int) ($request->input('days') ?? 60)));
-        $today = Carbon::today()->toDateString();
-        $until = Carbon::today()->addDays($days)->toDateString();
         $tenantId = $this->tenantId($request);
+        [$from, $to, $days] = $this->resolveExpiryWindow($request);
 
-        // Reuse the same SELECT as expiringSoon() so the PDF has all the
-        // columns we need for the agent-contact template.
-        $rows = DB::table('policies as p')
-            ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
-            ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
-            ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
-            ->leftJoin('products as pr', 'pr.id', '=', 'p.product_id')
-            ->where('p.tenant_id', $tenantId)
-            ->whereNull('p.deleted_at')
-            ->where('p.status', 'active')
-            ->whereBetween('p.expiry_date', [$today, $until])
-            ->orderBy('p.expiry_date')
-            ->limit(500)
-            ->get([
-                'p.id', 'p.application_no', 'p.policy_no',
-                'p.expiry_date', 'p.annual_premium',
-                'p.motor_license_no',
-                'p.motor_vehicle_brand', 'p.motor_vehicle_model',
-                DB::raw('DATEDIFF(p.expiry_date, CURDATE()) as days_remaining'),
-                'c.customer_code', 'c.email as customer_email', 'c.phone as customer_phone',
-                'c.customer_type',
-                DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
-                'a.agent_code', 'a.email as agent_email',
-                DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
-                'ca.id as carrier_id_out', 'ca.code as carrier_code',
-                'ca.name as carrier_name', 'ca.insure_type as carrier_insure_type',
-                'pr.id as product_id_out', 'pr.code as product_code',
-                'pr.name as product_name', 'pr.type as product_type',
-            ]);
+        // Same base query + filter chain as the JSON endpoint — the PDF is
+        // guaranteed to match what the user just saw on screen.
+        $q = $this->expiringSoonBaseQuery($tenantId, $from, $to);
+        $this->applyExpiringSoonFilters($q, $request);
+        $rows = $q->orderBy('p.expiry_date')->limit(2000)->get();
 
-        // Echo the filter set from the client for the header + filename. We
-        // do the actual filtering here so the PDF matches what the user
-        // saw on screen exactly.
-        $qStr = trim((string) $request->input('q', ''));
-        $fromDate = (string) $request->input('fromDate', '');
-        $toDate = (string) $request->input('toDate', '');
-        $carrierId = (string) $request->input('carrierId', '');
-        $productId = (string) $request->input('productId', '');
-        $productType = (string) $request->input('productType', '');
-        $insureType = (string) $request->input('insureType', '');
-
-        $filtered = $rows->filter(function ($r) use ($qStr, $fromDate, $toDate, $carrierId, $productId, $productType, $insureType) {
-            if ($fromDate !== '' && $r->expiry_date < $fromDate) return false;
-            if ($toDate !== '' && $r->expiry_date > $toDate) return false;
-            if ($carrierId !== '' && (string) $r->carrier_id_out !== $carrierId) return false;
-            if ($productId !== '' && (string) $r->product_id_out !== $productId) return false;
-            if ($productType !== '' && (string) $r->product_type !== $productType) return false;
-            if ($insureType !== '' && (string) $r->carrier_insure_type !== $insureType) return false;
-            if ($qStr === '') return true;
-            $qLower = mb_strtolower($qStr);
-            $qDigits = preg_replace('/\D/', '', $qStr) ?? '';
-            $hay = mb_strtolower(implode(' ', array_filter([
-                $r->customer_name, $r->policy_no, $r->application_no,
-                $r->motor_license_no, $r->customer_code,
-            ])));
-            if (str_contains($hay, $qLower)) return true;
-            if ($qDigits !== '' && strlen($qDigits) >= 4) {
-                $phone = preg_replace('/\D/', '', $r->customer_phone ?? '') ?? '';
-                if (str_contains($phone, $qDigits)) return true;
-            }
-            return false;
-        })->values();
-
-        // Filename per spec — includes the actual visible range where possible.
-        $labelFrom = $fromDate !== '' ? $fromDate : $today;
-        $labelTo = $toDate !== '' ? $toDate : $until;
-        $filename = "Renewals-{$days}d-{$labelFrom}-to-{$labelTo}.pdf";
+        // Filename per spec — always includes the effective window.
+        $filename = "Renewals-{$days}d-{$from}-to-{$to}.pdf";
 
         $pdf = Pdf::loadView('pdf.renewals', [
-            'rows' => $filtered,
+            'rows' => $rows,
             'meta' => [
                 'days' => $days,
-                'windowFrom' => $today,
-                'windowTo' => $until,
-                'rangeFrom' => $labelFrom,
-                'rangeTo' => $labelTo,
+                'windowFrom' => $from,
+                'windowTo' => $to,
+                'rangeFrom' => $from,
+                'rangeTo' => $to,
                 'totalWindow' => $rows->count(),
-                'filteredCount' => $filtered->count(),
+                'filteredCount' => $rows->count(),
                 'generatedAt' => Carbon::now()->format('Y-m-d H:i'),
                 'urgent' => $rows->filter(fn ($r) => (int) $r->days_remaining <= 7)->count(),
                 'filters' => array_filter([
-                    'ค้นหา' => $qStr !== '' ? $qStr : null,
-                    'ช่วงวันหมดอายุ' => ($fromDate !== '' || $toDate !== '') ? ("{$labelFrom} → {$labelTo}") : null,
-                    'บริษัท' => $carrierId !== '' ? $carrierId : null,
-                    'แผน' => $productId !== '' ? $productId : null,
-                    'ประเภทผลิตภัณฑ์' => $productType !== '' ? $productType : null,
-                    'ประเภทประกัน' => $insureType !== '' ? $insureType : null,
+                    'ค้นหา' => $request->input('q') ?: null,
+                    'ช่วงวันหมดอายุ' => "{$from} → {$to}",
+                    'บริษัท' => $request->input('carrierId') ?: null,
+                    'แผน' => $request->input('productId') ?: null,
+                    'ประเภทผลิตภัณฑ์' => $request->input('productType') ?: null,
+                    'ประเภทประกัน' => $request->input('insureType') ?: null,
                 ]),
             ],
         ])->setPaper('a4', 'landscape');

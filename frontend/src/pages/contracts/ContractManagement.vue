@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import DateInput from '../../components/DateInput.vue'
 
 const { t } = useI18n()
 
@@ -517,11 +518,9 @@ function toggleExpand(id: string) {
                 <label class="block text-sm font-medium text-slate-700 mb-1.5">
                   {{ t('contracts.fields.effectiveFrom') }} <span class="text-rose-500">*</span>
                 </label>
-                <input
+                <DateInput
                   v-model="form.effectiveFrom"
-                  type="date"
-                  required
-                  class="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+                  :max="form.effectiveTo || undefined"
                 />
               </div>
               <div>
@@ -529,12 +528,13 @@ function toggleExpand(id: string) {
                   {{ t('contracts.fields.effectiveTo') }}
                 </label>
                 <div class="flex items-center gap-3">
-                  <input
-                    v-model="form.effectiveTo"
-                    type="date"
-                    :disabled="noEndDate"
-                    class="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100 disabled:bg-slate-50 disabled:text-slate-400"
-                  />
+                  <div class="flex-1">
+                    <DateInput
+                      v-model="form.effectiveTo"
+                      :min="form.effectiveFrom || undefined"
+                      :disabled="noEndDate"
+                    />
+                  </div>
                   <label class="inline-flex items-center gap-2 whitespace-nowrap">
                     <input
                       v-model="noEndDate"

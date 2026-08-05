@@ -99,12 +99,37 @@ export interface ExpiringSoonMeta {
   days: number
   from: string
   to: string
+  currentPage: number
+  perPage: number
   total: number
+  lastPage: number
 }
 
-export function fetchExpiringSoon(days = 60, perPage = 100): Promise<ApiList<ExpiringPolicy> & { meta: ExpiringSoonMeta }> {
-  return api.get<ApiList<ExpiringPolicy> & { meta: ExpiringSoonMeta }>(
-    `reports/expiring-soon${buildQuery({ days, perPage })}`,
+export interface ExpiringSoonSummary {
+  totalInWindow: number
+  urgentCount: number
+}
+
+export interface ExpiringSoonQuery {
+  from?: string
+  to?: string
+  days?: number
+  q?: string
+  carrierId?: string
+  productId?: string
+  productType?: string
+  insureType?: string
+  page?: number
+  perPage?: number
+  sortBy?: 'expiryDate' | 'annualPremium' | 'customerName'
+  sortDir?: 'asc' | 'desc'
+}
+
+export function fetchExpiringSoon(
+  params: ExpiringSoonQuery = {},
+): Promise<ApiList<ExpiringPolicy> & { meta: ExpiringSoonMeta; summary: ExpiringSoonSummary }> {
+  return api.get<ApiList<ExpiringPolicy> & { meta: ExpiringSoonMeta; summary: ExpiringSoonSummary }>(
+    `reports/expiring-soon${buildQuery(params as Record<string, unknown>)}`,
   )
 }
 

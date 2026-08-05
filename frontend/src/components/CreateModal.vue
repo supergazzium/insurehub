@@ -4,7 +4,7 @@
 // policy, etc.) is a thin wrapper that fills in the slot + emits the
 // payload via `submit(payload)`.
 
-import { ref, watch } from 'vue'
+import { onBeforeUnmount, ref, watch } from 'vue'
 import { api, ApiError } from '../api/client'
 
 const props = defineProps<{
@@ -27,17 +27,26 @@ const emit = defineEmits<{
 
 const saving = ref(false)
 const error = ref<string | null>(null)
+const flash = ref<string | null>(null)
 const fieldErrors = ref<Record<string, string[]>>({})
 
-async function submit(): Promise<void> {
+async function submit(keepOpen = false): Promise<void> {
   if (!props.canSubmit || saving.value) return
   saving.value = true
   error.value = null
+  flash.value = null
   fieldErrors.value = {}
   try {
     const res = await api.post<{ data: Record<string, unknown> }>(props.entity, props.payload)
     emit('created', res.data ?? res)
-    emit('close')
+    if (keepOpen) {
+      // Show a short confirmation and leave the modal open so the parent
+      // can reset just the fields it wants and the user can keep typing.
+      flash.value = 'บันทึกแล้ว — เพิ่มรายการถัดไปได้เลย'
+      setTimeout(() => { flash.value = null }, 2200)
+    } else {
+      emit('close')
+    }
   } catch (e: unknown) {
     if (e instanceof ApiError) {
       error.value = e.body?.message ?? `HTTP ${e.status}`
@@ -50,12 +59,28 @@ async function submit(): Promise<void> {
   }
 }
 
+// Enter submits (unless a textarea is focused so line breaks still work);
+// Esc closes. Only bound while the modal is open.
+function onKey(e: KeyboardEvent): void {
+  if (!props.open) return
+  if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
+    e.preventDefault()
+    void submit(false)
+  } else if (e.key === 'Escape') {
+    e.preventDefault()
+    emit('close')
+  }
+}
+window.addEventListener('keydown', onKey)
+onBeforeUnmount(() => window.removeEventListener('keydown', onKey))
+
 // Reset error state when opening.
 watch(
   () => props.open,
   (v) => {
     if (v) {
       error.value = null
+      flash.value = null
       fieldErrors.value = {}
     }
   },
@@ -76,6 +101,10 @@ watch(
       <div class="flex-1 overflow-y-auto p-5">
         <!-- Slot receives fieldErrors so the child can surface per-field messages. -->
         <slot :fieldErrors="fieldErrors" />
+        <div v-if="flash"
+          class="mt-3 p-3 bg-emerald-50 border border-emerald-200 rounded-lg text-emerald-700 text-sm flex items-center gap-2">
+          <i class="pi pi-check-circle" /> {{ flash }}
+        </div>
         <div v-if="error && Object.keys(fieldErrors).length === 0"
           class="mt-3 p-3 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
           {{ error }}
@@ -93,8 +122,15 @@ watch(
             Cancel
           </button>
           <button type="button"
+            class="px-3 py-1.5 rounded-lg border border-brand-500 text-brand-600 hover:bg-brand-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
+            :disabled="!canSubmit || saving" @click="submit(true)"
+            title="บันทึกแล้วเปิดฟอร์มใหม่โดยคงประเภทประกันและบริษัทไว้">
+            <i class="pi pi-plus text-xs" />
+            บันทึกและเพิ่มอีก
+          </button>
+          <button type="button"
             class="px-4 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
-            :disabled="!canSubmit || saving" @click="submit">
+            :disabled="!canSubmit || saving" @click="submit(false)">
             <i class="pi pi-check text-xs" v-if="!saving" />
             <i class="pi pi-spin pi-spinner text-xs" v-else />
             {{ saving ? 'Saving…' : 'Create' }}

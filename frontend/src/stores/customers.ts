@@ -102,6 +102,8 @@ export interface Customer {
   contactPerson: CorporateContact
   createdByAgentId: string | null
   assignedAgentId: string | null
+  assignedAgentCode: string | null
+  assignedAgentName: string | null
   registeredAt: string
   lastContact: string | null
   notes: string

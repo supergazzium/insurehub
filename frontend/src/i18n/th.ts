@@ -1515,6 +1515,7 @@ export default {
     kind: {
       motor: 'ประกันภัยรถยนต์',
       life: 'ประกันชีวิต / PA',
+      travel: 'ประกันการเดินทาง',
       property: 'ประกันอัคคีภัย / ทรัพย์สิน',
       health: 'ประกันสุขภาพ / เบ็ดเตล็ด',
       other: 'อื่นๆ',
@@ -1553,7 +1554,7 @@ export default {
       driverType: 'ประเภทผู้ขับขี่',
       vehicleType: 'ประเภทรถ',
       passengerCount: 'จำนวนที่นั่ง',
-      notes: 'หมายเหตุ',
+      notes: 'หมายเหตุเกี่ยวกับรถ',
     },
     property: {
       title: 'รายละเอียดทรัพย์สิน',
@@ -1894,7 +1895,25 @@ export default {
       verified: 'ยืนยันอีเมลสำเร็จ',
       verifiedBadge: 'ยืนยันแล้ว',
       wrongWithRemaining: 'รหัสไม่ถูกต้อง เหลืออีก {n} ครั้ง',
+      // Server-issued error codes (from EmailOtpController) mapped to Thai.
+      errors: {
+        emailTaken: 'อีเมลนี้ถูกใช้ลงทะเบียนแล้ว กรุณาเข้าสู่ระบบแทน',
+        cooldown: 'กรุณารอสักครู่ก่อนขอรหัสใหม่',
+        emailHourlyLimit: 'ขอรหัสยืนยันสำหรับอีเมลนี้เกินจำนวนที่กำหนด กรุณาลองใหม่ในอีก 1 ชั่วโมง',
+        ipHourlyLimit: 'ขอรหัสยืนยันจากเครือข่ายนี้เกินจำนวนที่กำหนด กรุณาลองใหม่ในอีก 1 ชั่วโมง',
+        expired: 'รหัสยืนยันหมดอายุหรือยังไม่ได้ส่ง กรุณาขอรหัสใหม่',
+        tooManyAttempts: 'กรอกรหัสผิดหลายครั้ง กรุณาขอรหัสใหม่',
+        incorrect: 'รหัสไม่ถูกต้อง',
+        sendFailed: 'ไม่สามารถส่งรหัสยืนยันได้ กรุณาลองใหม่',
+        verifyFailed: 'การยืนยันไม่สำเร็จ กรุณาลองใหม่',
+      },
     },
+    availability: {
+      emailTaken: 'อีเมลนี้ถูกใช้ลงทะเบียนแล้ว',
+      idCardTaken: 'เลขบัตรประชาชนนี้ถูกใช้ลงทะเบียนแล้ว',
+      idCardInvalidFormat: 'เลขบัตรประชาชนต้องเป็นเลข 13 หลัก',
+    },
+    submitFailed: 'ส่งใบสมัครไม่สำเร็จ กรุณาลองใหม่',
   },
   portalProfile: {
     loading: 'กำลังโหลด...',

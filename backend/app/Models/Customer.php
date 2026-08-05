@@ -75,4 +75,21 @@ class Customer extends Model
     {
         return $this->hasMany(Policy::class);
     }
+
+    /**
+     * Live policy count — the customers table has denormalized
+     * active_policy_count/total_policy_count columns that were never
+     * kept in sync (see customer C9901503 with 2 policies but stored 0/0).
+     * Reads straight from the policies table to guarantee accuracy.
+     *
+     * @param 'all'|'active' $scope
+     */
+    public function livePolicyCount(string $scope = 'all'): int
+    {
+        $q = $this->policies()->whereNull('deleted_at');
+        if ($scope === 'active') {
+            $q->where('status', 'active');
+        }
+        return $q->count();
+    }
 }

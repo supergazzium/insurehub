@@ -66,11 +66,20 @@ class CustomerResource extends JsonResource
             ],
             'createdByAgentId' => $this->created_by_agent_id !== null ? (string) $this->created_by_agent_id : null,
             'assignedAgentId' => $this->assigned_agent_id !== null ? (string) $this->assigned_agent_id : null,
+            // Denormalized agent code/name so the drawer can render a
+            // clickable link without a second request.
+            'assignedAgentCode' => $this->assignedAgent?->agent_code,
+            'assignedAgentName' => $this->assignedAgent
+                ? trim(($this->assignedAgent->first_name ?? '') . ' ' . ($this->assignedAgent->last_name ?? ''))
+                : null,
             'registeredAt' => $this->registered_at?->toIso8601String() ?? '',
             'lastContact' => $this->last_contact?->toIso8601String(),
             'notes' => $this->notes ?? '',
-            'activePolicyCount' => (int) $this->active_policy_count,
-            'totalPolicyCount' => (int) $this->total_policy_count,
+            // Live policy counts — the denormalized columns on the
+            // customers table drift out of sync, so we query straight from
+            // the policies table via a model helper.
+            'activePolicyCount' => $this->livePolicyCount('active'),
+            'totalPolicyCount' => $this->livePolicyCount('all'),
             'kycDocs' => CustomerKycDocResource::collection($this->whenLoaded('kycDocs')),
             'assignmentHistory' => CustomerAssignmentHistoryResource::collection($this->whenLoaded('assignmentHistory')),
             'active' => (bool) $this->active,

@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Mail\EmailOtpMail;
 use App\Models\EmailOtp;
 use App\Models\EmailVerificationToken;
+use App\Models\User;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -15,6 +16,7 @@ use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 class EmailOtpController extends Controller
 {
@@ -33,6 +35,17 @@ class EmailOtpController extends Controller
         $email = strtolower(trim($data['email']));
         $ip = (string) $request->ip();
 
+        // Reject OTP requests for emails that already have a user account —
+        // no point burning an OTP quota + Zoho send on an address that can't
+        // complete registration. Frontend maps `code` to a localized message.
+        if (User::query()->where('email', $email)->exists()) {
+            return response()->json([
+                'message' => 'This email is already registered.',
+                'code' => 'email_taken',
+                'errors' => ['email' => ['email_taken']],
+            ], 422);
+        }
+
         // Cooldown check: last active OTP < 60s old is a resend abuse attempt.
         $latest = EmailOtp::query()
             ->where('email', $email)
@@ -45,6 +58,7 @@ class EmailOtpController extends Controller
                 $retryAfter = self::RESEND_COOLDOWN_SECONDS - (int) $ageSeconds;
                 return response()->json([
                     'message' => 'Please wait before requesting another code.',
+                    'code' => 'otp_cooldown',
                     'retryAfter' => $retryAfter,
                 ], 429);
             }
@@ -58,6 +72,7 @@ class EmailOtpController extends Controller
         if ($sendsThisHourEmail >= self::MAX_SENDS_PER_EMAIL_PER_HOUR) {
             return response()->json([
                 'message' => 'Too many verification requests for this email. Try again in an hour.',
+                'code' => 'otp_email_hourly_limit',
             ], 429);
         }
 
@@ -69,6 +84,7 @@ class EmailOtpController extends Controller
         if ($sendsThisHourIp >= self::MAX_SENDS_PER_IP_PER_HOUR) {
             return response()->json([
                 'message' => 'Too many verification requests from this network. Try again in an hour.',
+                'code' => 'otp_ip_hourly_limit',
             ], 429);
         }
 
@@ -129,6 +145,7 @@ class EmailOtpController extends Controller
         if ($otp === null) {
             return response()->json([
                 'message' => 'The verification code has expired or was not sent. Please request a new one.',
+                'code' => 'otp_expired',
             ], 422);
         }
 
@@ -137,6 +154,7 @@ class EmailOtpController extends Controller
             $otp->save();
             return response()->json([
                 'message' => 'Too many incorrect attempts. Please request a new code.',
+                'code' => 'otp_too_many_attempts',
             ], 429);
         }
 
@@ -147,6 +165,7 @@ class EmailOtpController extends Controller
             $remaining = self::MAX_ATTEMPTS - $otp->attempts;
             return response()->json([
                 'message' => 'Incorrect code.',
+                'code' => 'otp_incorrect',
                 'attemptsRemaining' => max(0, $remaining),
             ], 422);
         }

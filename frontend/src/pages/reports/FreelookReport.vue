@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { fetchFreelook, type FreelookRow } from '../../api/opsReports'
 import { toCsv, downloadCsv } from '../../util/csvExport'
 import { ApiError } from '../../api/client'
+import { fmtDate } from '../../util/dateFormat'
 
 const { t } = useI18n()
 const days = ref(30)
@@ -88,7 +89,7 @@ function exportCsv(): void {
           <tr v-for="r in rows" :key="r.policyId">
             <td class="px-3 py-2 font-mono text-xs">{{ r.applicationNo }}</td>
             <td class="px-3 py-2 font-mono text-xs">{{ r.policyNo || '—' }}</td>
-            <td class="px-3 py-2 text-xs">{{ r.effectiveDate }}</td>
+            <td class="px-3 py-2 text-xs">{{ fmtDate(r.effectiveDate) }}</td>
             <td class="px-3 py-2 text-right font-mono text-xs">{{ r.daysSinceEffective }}</td>
             <td class="px-3 py-2 truncate max-w-xs">{{ r.customerName }}</td>
             <td class="px-3 py-2 text-xs">{{ r.agentCode }}</td>

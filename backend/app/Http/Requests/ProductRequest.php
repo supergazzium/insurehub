@@ -61,6 +61,11 @@ class ProductRequest extends FormRequest
             'occupationClasses.*' => ['string', 'in:class1,class2,class3,class4'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'active' => ['sometimes', 'boolean'],
+            // Shorthand: seed a product_commission_rates row where every
+            // year (com_rate_yr_1..10 + _11up) is set to this percent.
+            // Consumed by ProductController::store — NOT persisted onto
+            // the products table itself.
+            'commissionPercent' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
         ];
     }
 

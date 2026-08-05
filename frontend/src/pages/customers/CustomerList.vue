@@ -144,6 +144,8 @@ const defaultForm = (): Omit<Customer, 'id' | 'customerCode' | 'kycDocs' | 'assi
   contactPerson: { name: '', phone: '', email: '', position: '' },
   createdByAgentId: CURRENT_AGENT_ID,
   assignedAgentId: CURRENT_AGENT_ID,
+  assignedAgentCode: null,
+  assignedAgentName: null,
   registeredAt: '2569-06-05',
   lastContact: null,
   notes: '',

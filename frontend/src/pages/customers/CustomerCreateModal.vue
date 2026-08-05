@@ -2,6 +2,8 @@
 import { computed, reactive, watch } from 'vue'
 import CreateModal from '../../components/CreateModal.vue'
 import FormField from '../../components/FormField.vue'
+import DateInput from '../../components/DateInput.vue'
+import { toIsoDate } from '../../util/dateFormat'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
@@ -120,8 +122,7 @@ watch(
           </select>
         </FormField>
         <FormField label="Birth date" error-key="birthDate" :errors="fieldErrors">
-          <input v-model="form.birthDate" type="date"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <DateInput v-model="form.birthDate" :max="toIsoDate(new Date())" />
         </FormField>
         <FormField label="Phone" error-key="phone" :errors="fieldErrors">
           <input v-model.trim="form.phone"

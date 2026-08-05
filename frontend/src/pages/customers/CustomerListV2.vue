@@ -1,14 +1,15 @@
 <script setup lang="ts">
 // Server-side paginated customer list.
-import { onMounted, reactive, ref, watch, computed } from 'vue'
+import { onBeforeUnmount, onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useCustomerStore } from '../../stores/customers'
 import CustomerDetailDrawer from './CustomerDetailDrawer.vue'
 import CustomerCreateModal from './CustomerCreateModal.vue'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const customerStore = useCustomerStore()
 
 const detailId = ref<string | null>(null)
@@ -49,6 +50,22 @@ const filters = reactive({
 })
 
 const page = ref(1)
+type SortCol = 'customerCode' | 'firstName' | 'lastName' | 'province' | 'registeredAt' | 'newest'
+const sortBy = ref<SortCol>('newest')
+const sortDir = ref<'asc' | 'desc'>('desc')
+
+// Column header click → toggle direction, or switch column (asc default,
+// desc for "newest" so freshly-registered rows land on page 1).
+function toggleSort(col: SortCol): void {
+  if (sortBy.value === col) {
+    sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
+  } else {
+    sortBy.value = col
+    sortDir.value = col === 'newest' || col === 'registeredAt' ? 'desc' : 'asc'
+  }
+  page.value = 1
+  void load()
+}
 
 async function load(): Promise<void> {
   await customerStore.loadPage({
@@ -59,10 +76,52 @@ async function load(): Promise<void> {
     active: filters.active === '' ? undefined : filters.active === 'true',
     page: page.value,
     perPage: filters.perPage,
+    sortBy: sortBy.value,
+    sortDir: sortDir.value,
   })
 }
 
-onMounted(load)
+// ── Deep-linked detail drawer ───────────────────────────────────────────
+// Sync `detailId` ↔ ?open=<id> in the URL so the drawer is bookmarkable
+// and the browser back/forward buttons close/reopen it. Also hydrate on
+// mount so /customers?open=42 lands with that drawer already open.
+watch(detailId, (id) => {
+  const currentOpen = route.query.open
+  const want = id ?? undefined
+  if ((currentOpen ?? undefined) === (want ?? undefined)) return
+  const nextQuery = { ...route.query }
+  if (want === undefined) delete nextQuery.open
+  else nextQuery.open = want
+  router.replace({ query: nextQuery })
+})
+watch(() => route.query.open, (openId) => {
+  const next = typeof openId === 'string' && openId.trim() !== '' ? openId.trim() : null
+  if (detailId.value !== next) detailId.value = next
+})
+
+onMounted(() => {
+  const openId = route.query.open
+  if (typeof openId === 'string' && openId.trim() !== '') detailId.value = openId.trim()
+  void load()
+})
+
+// ── Esc closes the drawer ────────────────────────────────────────────────
+// Guarded so it doesn't fire while an EditableField input/textarea is in
+// edit mode — EditableField uses Esc to cancel that specific edit and
+// re-uses the same key. Checking the active element keeps both flows
+// working: Esc in an editable input cancels the edit; Esc anywhere else
+// closes the drawer.
+function onEscape(e: KeyboardEvent): void {
+  if (e.key !== 'Escape') return
+  if (!detailId.value) return
+  const active = document.activeElement
+  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+    return
+  }
+  detailId.value = null
+}
+window.addEventListener('keydown', onEscape)
+onBeforeUnmount(() => window.removeEventListener('keydown', onEscape))
 
 let debounceTimer: number | undefined
 watch(
@@ -170,12 +229,33 @@ function initials(first: string, last: string): string {
         <table class="min-w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
             <tr>
-              <th class="px-4 py-2 text-left">Code</th>
-              <th class="px-4 py-2 text-left">ชื่อลูกค้า</th>
+              <th class="px-4 py-2 text-left cursor-pointer select-none hover:text-slate-800"
+                @click="toggleSort('customerCode')">
+                Code
+                <i v-if="sortBy === 'customerCode'"
+                  :class="sortDir === 'asc' ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'"
+                  class="pi text-[10px] ml-1" />
+                <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
+              </th>
+              <th class="px-4 py-2 text-left cursor-pointer select-none hover:text-slate-800"
+                @click="toggleSort('firstName')">
+                ชื่อลูกค้า
+                <i v-if="sortBy === 'firstName'"
+                  :class="sortDir === 'asc' ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'"
+                  class="pi text-[10px] ml-1" />
+                <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
+              </th>
               <th class="px-4 py-2 text-left">ประเภท</th>
               <th class="px-4 py-2 text-left">ID card</th>
               <th class="px-4 py-2 text-left">โทรศัพท์</th>
-              <th class="px-4 py-2 text-left">จังหวัด</th>
+              <th class="px-4 py-2 text-left cursor-pointer select-none hover:text-slate-800"
+                @click="toggleSort('province')">
+                จังหวัด
+                <i v-if="sortBy === 'province'"
+                  :class="sortDir === 'asc' ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'"
+                  class="pi text-[10px] ml-1" />
+                <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
+              </th>
               <th class="px-4 py-2 text-left">ตัวแทน</th>
               <th class="px-4 py-2 text-right">Policies</th>
               <th class="px-4 py-2 text-left">Status</th>

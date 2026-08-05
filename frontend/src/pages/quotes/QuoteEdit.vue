@@ -11,6 +11,7 @@ import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError } from '../../api/client'
+import DateInput from '../../components/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -201,11 +202,11 @@ async function submit(): Promise<void> {
         </div>
         <div>
           <label class="text-xs text-slate-500 mb-1 block">{{ t('quotes.field.effectiveDate') }}</label>
-          <input v-model="form.effectiveDate" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+          <DateInput v-model="form.effectiveDate" :max="form.expiryDate || undefined" />
         </div>
         <div>
           <label class="text-xs text-slate-500 mb-1 block">{{ t('quotes.field.expiryDate') }}</label>
-          <input v-model="form.expiryDate" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+          <DateInput v-model="form.expiryDate" :min="form.effectiveDate || undefined" />
         </div>
         <div>
           <label class="text-xs text-slate-500 mb-1 block">{{ t('quotes.field.writingAgent') }}</label>

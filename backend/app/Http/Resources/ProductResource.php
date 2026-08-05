@@ -32,7 +32,7 @@ class ProductResource extends JsonResource
             'subCategory' => $this->sub_category ?? '',
             'subCategory2' => $this->sub_category_2 ?? '',
             'mainRider' => $this->main_rider ?? '',
-            'productKind' => ProductKind::derive($this->type ?? '', $this->category ?? '', $this->sub_category_2 ?? ''),
+            'productKind' => ProductKind::derive($this->type ?? '', $this->category ?? '', $this->sub_category_2 ?? '', $this->sub_category ?? ''),
             'validStart' => $this->valid_start?->toDateString(),
             'validEnd' => $this->valid_end?->toDateString(),
             'summary' => $this->summary ?? '',

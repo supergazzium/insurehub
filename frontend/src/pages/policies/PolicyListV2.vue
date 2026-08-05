@@ -14,6 +14,7 @@ import { getToken } from '../../api/client'
 import PolicyDetailDrawer from './PolicyDetailDrawer.vue'
 import PolicyCreateWizard from './PolicyCreateWizard.vue'
 import AgentPicker from '../../components/AgentPicker.vue'
+import DateInput from '../../components/DateInput.vue'
 
 const { t } = useI18n()
 const policyStore = usePolicyStore()
@@ -188,6 +189,12 @@ onMounted(async () => {
   await loadCarriers()
   if (filters.carrierId) await loadProducts(filters.carrierId)
   await load()
+  // Cross-page deep-link — /policies?open=<id> opens that policy's drawer
+  // automatically. Used by the customer detail drawer to link to a policy.
+  const openId = route.query.open
+  if (typeof openId === 'string' && openId.trim() !== '') {
+    detailId.value = openId.trim()
+  }
 })
 
 let debounceTimer: number | undefined
@@ -496,11 +503,13 @@ const rangeText = computed(() => {
           <div class="md:col-span-6">
             <label class="text-xs font-medium text-slate-500 mb-1 block">วันที่สร้างข้อมูล (Create date)</label>
             <div class="flex items-center gap-2">
-              <input v-model="filters.createdFrom" type="date"
-                class="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400" />
+              <div class="flex-1">
+                <DateInput v-model="filters.createdFrom" :max="filters.createdTo || undefined" />
+              </div>
               <span class="text-slate-400 text-xs">ถึง</span>
-              <input v-model="filters.createdTo" type="date"
-                class="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400" />
+              <div class="flex-1">
+                <DateInput v-model="filters.createdTo" :min="filters.createdFrom || undefined" />
+              </div>
             </div>
             <div class="flex items-center gap-1 mt-1.5 flex-wrap">
               <button type="button" @click="setCreatePreset('today')"
@@ -551,6 +560,7 @@ const rangeText = computed(() => {
         <table class="min-w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
             <tr>
+              <th class="px-4 py-2 text-left">ใบคำขอ</th>
               <th class="px-4 py-2 text-left">ชื่อ-สกุล</th>
               <th class="px-4 py-2 text-left">ชื่อผลิตภัณฑ์</th>
               <th class="px-4 py-2 text-left">เลขทะเบียนรถ</th>
@@ -564,6 +574,10 @@ const rangeText = computed(() => {
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-for="p in policyStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer" @click="detailId = p.id">
+              <td class="px-4 py-2 font-mono text-xs text-slate-700">
+                <div>{{ p.applicationNo ?? '—' }}</div>
+                <div v-if="p.policyNo" class="text-[10px] text-slate-400">{{ p.policyNo }}</div>
+              </td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ p.customerName || p.customerCode }}</div>
                 <div class="text-xs text-slate-500">{{ p.customerCode }}</div>
@@ -612,10 +626,10 @@ const rangeText = computed(() => {
               </td>
             </tr>
             <tr v-if="!policyStore.listLoading && policyStore.list.length === 0">
-              <td colspan="9" class="px-4 py-6 text-center text-slate-500">ไม่พบกรมธรรม์</td>
+              <td colspan="10" class="px-4 py-6 text-center text-slate-500">ไม่พบกรมธรรม์</td>
             </tr>
             <tr v-if="policyStore.listLoading && policyStore.list.length === 0">
-              <td colspan="9" class="px-4 py-6 text-center text-slate-500">Loading…</td>
+              <td colspan="10" class="px-4 py-6 text-center text-slate-500">Loading…</td>
             </tr>
           </tbody>
         </table>

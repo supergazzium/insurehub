@@ -33,7 +33,7 @@ class ProductListResource extends JsonResource
             'subCategory' => $this->sub_category ?? '',
             'subCategory2' => $this->sub_category_2 ?? '',
             'mainRider' => $this->main_rider ?? '',
-            'productKind' => ProductKind::derive($this->type ?? '', $this->category ?? '', $this->sub_category_2 ?? ''),
+            'productKind' => ProductKind::derive($this->type ?? '', $this->category ?? '', $this->sub_category_2 ?? '', $this->sub_category ?? ''),
             'minAge' => (int) $this->min_age,
             'maxAge' => (int) $this->max_age,
             'minSumAssure' => $this->min_sum_assure !== null ? (float) $this->min_sum_assure : null,

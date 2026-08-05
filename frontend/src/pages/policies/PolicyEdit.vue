@@ -11,6 +11,7 @@ import { fetchPolicy, patchPolicySection, syncPolicyRiders, syncPolicyBeneficiar
   type PolicySection, type RiderInput, type BeneficiaryInput } from '../../api/policies'
 import { fetchEndorsements, createEndorsement, type Endorsement } from '../../api/endorsements'
 import { ApiError } from '../../api/client'
+import DateInput from '../../components/DateInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -522,30 +523,28 @@ async function removeDoc(id: string): Promise<void> {
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.effectiveDate') }}
               <i v-if="isLocked" class="pi pi-lock text-[9px] text-amber-500 ml-1" /></label>
-            <input v-model="dates.effectiveDate" type="date" :disabled="isLocked"
-              class="w-full border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-50 disabled:text-slate-500" />
+            <DateInput v-model="dates.effectiveDate" :max="dates.expiryDate || undefined" :disabled="isLocked" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.expiryDate') }}
               <i v-if="isLocked" class="pi pi-lock text-[9px] text-amber-500 ml-1" /></label>
-            <input v-model="dates.expiryDate" type="date" :disabled="isLocked"
-              class="w-full border border-slate-200 rounded-lg px-3 py-2 disabled:bg-slate-50 disabled:text-slate-500" />
+            <DateInput v-model="dates.expiryDate" :min="dates.effectiveDate || undefined" :disabled="isLocked" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.policyEnd') }}</label>
-            <input v-model="dates.policyEnd" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+            <DateInput v-model="dates.policyEnd" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.periodPaidEnd') }}</label>
-            <input v-model="dates.periodPaidEnd" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+            <DateInput v-model="dates.periodPaidEnd" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.mailingDate') }}</label>
-            <input v-model="dates.mailingDate" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+            <DateInput v-model="dates.mailingDate" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.appDate') }}</label>
-            <input v-model="dates.appDate" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+            <DateInput v-model="dates.appDate" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.policyYear') }}</label>
@@ -661,11 +660,11 @@ async function removeDoc(id: string): Promise<void> {
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.firstDueInstDate') }}</label>
-            <input v-model="payment.firstDueInstDate" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+            <DateInput v-model="payment.firstDueInstDate" :max="payment.lastDueInstDate || undefined" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.lastDueInstDate') }}</label>
-            <input v-model="payment.lastDueInstDate" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+            <DateInput v-model="payment.lastDueInstDate" :min="payment.firstDueInstDate || undefined" />
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.subsidiseFromAgent') }}</label>
@@ -1030,7 +1029,7 @@ async function removeDoc(id: string): Promise<void> {
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.endorsements.effectiveDate') }}</label>
-            <input v-model="endorsementForm.effectiveDate" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+            <DateInput v-model="endorsementForm.effectiveDate" />
           </div>
           <div class="flex items-end">
             <button type="button"

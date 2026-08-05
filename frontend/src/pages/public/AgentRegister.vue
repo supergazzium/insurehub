@@ -13,6 +13,8 @@ import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { api, ApiError } from '../../api/client'
 import { isThaiName, isThaiId13, isThaiMobile } from '../../utils/thaiValidation'
+import DateInput from '../../components/DateInput.vue'
+import { toIsoDate } from '../../util/dateFormat'
 
 interface RecruitLinkInfo {
   valid: boolean
@@ -74,6 +76,97 @@ const otpCooldown = ref(0) // seconds until user may resend
 const otpDevCode = ref<string | null>(null) // shown only in local dev
 let cooldownTimer: number | null = null
 
+// ── Uniqueness checks (email + national ID) ─────────────────────────────
+// Debounced probes against POST /auth/check-availability. Result is:
+//   null    → not checked yet (or value changed since last check)
+//   true    → available, safe to proceed
+//   { message } → taken; message renders inline like any other field error
+// Kept as a per-value cache so re-checking the same value is free.
+type Availability = { available: true } | { available: false; message: string } | null
+const emailAvailability = ref<Availability>(null)
+const idCardAvailability = ref<Availability>(null)
+let emailCheckTimer: number | null = null
+let idCardCheckTimer: number | null = null
+let lastEmailChecked = ''
+let lastIdCardChecked = ''
+
+// Known server-issued messages from AuthController::register mapped to
+// Thai. Anything not matched is passed through unchanged — better an
+// English fallback than a mistranslation.
+function translateServerFieldError(field: string, message: string): string {
+  const m = message.trim()
+  if (field === 'email' && (m === 'email_taken' || /already been taken/i.test(m) || /already registered/i.test(m))) {
+    return t('agentRegister.availability.emailTaken')
+  }
+  if (field === 'idCard') {
+    if (/already registered/i.test(m)) return t('agentRegister.availability.idCardTaken')
+    if (/13 digits/i.test(m)) return t('agentRegister.availability.idCardInvalidFormat')
+    if (/valid 13-digit/i.test(m)) return t('agentRegister.availability.idCardInvalidFormat')
+  }
+  if (field === 'emailOtpToken' && /invalid or has expired/i.test(m)) {
+    return t('agentRegister.otp.errors.expired')
+  }
+  return m
+}
+
+// Server code → Thai/English i18n key under agentRegister.availability.
+function availabilityMessage(code: string | null | undefined): string {
+  switch (code) {
+    case 'email_taken': return t('agentRegister.availability.emailTaken')
+    case 'id_card_taken': return t('agentRegister.availability.idCardTaken')
+    case 'id_card_invalid_format': return t('agentRegister.availability.idCardInvalidFormat')
+    default: return t('agentRegister.availability.emailTaken')
+  }
+}
+
+async function runAvailabilityCheck(field: 'email' | 'idCard', value: string): Promise<void> {
+  try {
+    const res = await api.post<{ available: boolean; code?: string | null }>(
+      'auth/check-availability',
+      { field, value },
+    )
+    const result: Availability = res.available
+      ? { available: true }
+      : { available: false, message: availabilityMessage(res.code) }
+    if (field === 'email' && value === form.email.trim().toLowerCase()) {
+      emailAvailability.value = result
+    } else if (field === 'idCard' && value === form.idCard.trim()) {
+      idCardAvailability.value = result
+    }
+  } catch {
+    // Network / server error — leave the availability unknown so the
+    // user can still try, and the backend will reject on final submit.
+  }
+}
+
+function scheduleEmailCheck(): void {
+  if (emailCheckTimer !== null) window.clearTimeout(emailCheckTimer)
+  const raw = form.email.trim().toLowerCase()
+  // Reset state whenever the value changes so stale results don't linger.
+  emailAvailability.value = null
+  if (raw === '' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(raw)) return
+  if (raw === lastEmailChecked) return
+  emailCheckTimer = window.setTimeout(() => {
+    lastEmailChecked = raw
+    void runAvailabilityCheck('email', raw)
+  }, 400)
+}
+
+function scheduleIdCardCheck(): void {
+  if (idCardCheckTimer !== null) window.clearTimeout(idCardCheckTimer)
+  const raw = form.idCard.trim()
+  idCardAvailability.value = null
+  if (!isThaiId13(raw)) return
+  if (raw === lastIdCardChecked) return
+  idCardCheckTimer = window.setTimeout(() => {
+    lastIdCardChecked = raw
+    void runAvailabilityCheck('idCard', raw)
+  }, 400)
+}
+
+watch(() => form.email, scheduleEmailCheck)
+watch(() => form.idCard, scheduleIdCardCheck)
+
 function startCooldown(seconds: number): void {
   otpCooldown.value = seconds
   if (cooldownTimer !== null) window.clearInterval(cooldownTimer)
@@ -84,6 +177,20 @@ function startCooldown(seconds: number): void {
       cooldownTimer = null
     }
   }, 1000)
+}
+
+// Server-issued OTP error codes → localized message.
+function otpErrorMessage(code: string | null | undefined, fallbackKey: 'sendFailed' | 'verifyFailed'): string {
+  switch (code) {
+    case 'email_taken': return t('agentRegister.otp.errors.emailTaken')
+    case 'otp_cooldown': return t('agentRegister.otp.errors.cooldown')
+    case 'otp_email_hourly_limit': return t('agentRegister.otp.errors.emailHourlyLimit')
+    case 'otp_ip_hourly_limit': return t('agentRegister.otp.errors.ipHourlyLimit')
+    case 'otp_expired': return t('agentRegister.otp.errors.expired')
+    case 'otp_too_many_attempts': return t('agentRegister.otp.errors.tooManyAttempts')
+    case 'otp_incorrect': return t('agentRegister.otp.errors.incorrect')
+    default: return t(`agentRegister.otp.errors.${fallbackKey}`)
+  }
 }
 
 async function sendOtp(): Promise<void> {
@@ -104,11 +211,24 @@ async function sendOtp(): Promise<void> {
     otpCode.value = ''
   } catch (e: unknown) {
     if (e instanceof ApiError) {
-      const retry = e.body && typeof e.body === 'object' && 'retryAfter' in e.body ? Number((e.body as { retryAfter?: number }).retryAfter) : 0
+      const body = (e.body && typeof e.body === 'object' ? e.body : {}) as {
+        retryAfter?: number
+        code?: string
+        errors?: Record<string, string[]>
+      }
+      const retry = Number(body.retryAfter ?? 0)
       if (retry > 0) startCooldown(retry)
-      otpError.value = e.message
+      const localized = otpErrorMessage(body.code, 'sendFailed')
+      // Laravel validation errors (e.g. "email already registered") — bind
+      // them to the field so the inline UI renders them beside the input.
+      if (body.errors && body.errors.email && body.errors.email.length > 0) {
+        fieldErrors.value = { ...fieldErrors.value, email: [localized] }
+        otpError.value = null
+      } else {
+        otpError.value = localized
+      }
     } else {
-      otpError.value = e instanceof Error ? e.message : 'Failed to send verification code.'
+      otpError.value = t('agentRegister.otp.errors.sendFailed')
     }
   } finally {
     otpSending.value = false
@@ -131,14 +251,18 @@ async function verifyOtp(): Promise<void> {
     otpDevCode.value = null
   } catch (e: unknown) {
     if (e instanceof ApiError) {
-      const remaining = e.body && typeof e.body === 'object' && 'attemptsRemaining' in e.body
-        ? Number((e.body as { attemptsRemaining?: number }).attemptsRemaining)
-        : null
-      otpError.value = remaining !== null
-        ? t('agentRegister.otp.wrongWithRemaining', { n: remaining })
-        : e.message
+      const body = (e.body && typeof e.body === 'object' ? e.body : {}) as {
+        code?: string
+        attemptsRemaining?: number
+      }
+      // "Incorrect code" specifically gets the remaining-attempts variant.
+      if (body.code === 'otp_incorrect' && typeof body.attemptsRemaining === 'number') {
+        otpError.value = t('agentRegister.otp.wrongWithRemaining', { n: body.attemptsRemaining })
+      } else {
+        otpError.value = otpErrorMessage(body.code, 'verifyFailed')
+      }
     } else {
-      otpError.value = e instanceof Error ? e.message : 'Verification failed.'
+      otpError.value = t('agentRegister.otp.errors.verifyFailed')
     }
     otpCode.value = ''
   } finally {
@@ -252,6 +376,9 @@ const lastNameError = computed<string | null>(() => {
 const emailError = computed<string | null>(() => {
   if (form.email.trim() === '') return t('agentRegister.missing.email')
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(form.email)) return t('agentRegister.missing.email')
+  if (emailAvailability.value && emailAvailability.value.available === false) {
+    return emailAvailability.value.message
+  }
   return null
 })
 
@@ -276,6 +403,9 @@ const idCardError = computed<string | null>(() => {
     return form.signupType === 'corporate'
       ? t('agentRegister.missing.taxIdInvalid')
       : t('agentRegister.missing.idCardInvalid')
+  }
+  if (idCardAvailability.value && idCardAvailability.value.available === false) {
+    return idCardAvailability.value.message
   }
   return null
 })
@@ -342,7 +472,6 @@ const passwordConfirmationValid = computed(() =>
   isValid('passwordConfirmation', passwordConfirmationError.value, form.passwordConfirmation.length > 0),
 )
 const idCardValid = computed(() => isValid('idCard', idCardError.value, form.idCard.trim() !== ''))
-const birthDateValid = computed(() => isValid('birthDate', birthDateError.value, form.birthDate !== ''))
 const phoneValid = computed(() => isValid('phone', phoneError.value, form.phone.trim() !== ''))
 
 // Overall submit-ability: all validators must pass AND email must be OTP-verified.
@@ -415,10 +544,16 @@ async function submit(): Promise<void> {
     setTimeout(() => router.push('/login'), 3500)
   } catch (e: unknown) {
     if (e instanceof ApiError && e.body?.errors) {
-      fieldErrors.value = e.body.errors
-      error.value = e.message
+      // Best-effort translation for known server messages so the field-
+      // level errors show in Thai. Unknown messages pass through unchanged.
+      const localized: Record<string, string[]> = {}
+      for (const [field, messages] of Object.entries(e.body.errors as Record<string, string[]>)) {
+        localized[field] = messages.map((m) => translateServerFieldError(field, m))
+      }
+      fieldErrors.value = localized
+      error.value = t('agentRegister.submitFailed')
     } else {
-      error.value = e instanceof Error ? e.message : 'Registration failed.'
+      error.value = t('agentRegister.submitFailed')
     }
     // Form data is preserved — the user only needs to fix the flagged fields.
   } finally {
@@ -613,10 +748,9 @@ async function submit(): Promise<void> {
         <div class="grid grid-cols-2 gap-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ t('agentRegister.birthDate') }} <span class="text-rose-500">*</span></label>
-            <input v-model="form.birthDate" type="date"
-              :class="inputClass(birthDateDisplay, birthDateValid)"
-              @blur="markTouched('birthDate')"
-              @input="clearServerError('birthDate')" />
+            <DateInput v-model="form.birthDate"
+              :max="toIsoDate(new Date())"
+              @update:model-value="() => { markTouched('birthDate'); clearServerError('birthDate') }" />
             <p v-if="birthDateDisplay" class="text-xs text-rose-600 mt-1">{{ birthDateDisplay }}</p>
           </div>
           <div>

@@ -25,6 +25,13 @@ class CustomerController extends ApiController
     {
         $tenantId = $this->tenantId($request);
 
+        // Live policy counts via correlated subqueries. The customers table
+        // *does* store denormalized `active_policy_count` / `total_policy_count`
+        // fields, but they were never backfilled and drift out of sync — see
+        // customer C9901503 which had 2 policies but stored 0/0. Computing
+        // here on every list read is O(N) subqueries per page (25–100 rows)
+        // and the customers/policies indexes make each subquery ~1ms, so the
+        // simpler approach beats a stale denormalized counter.
         $q = DB::table('customers as c')
             ->leftJoin('agents as a', 'a.id', '=', 'c.assigned_agent_id')
             ->where('c.tenant_id', $tenantId)
@@ -32,11 +39,13 @@ class CustomerController extends ApiController
             ->select([
                 'c.id', 'c.customer_code', 'c.customer_type', 'c.first_name', 'c.last_name',
                 'c.nickname', 'c.id_card', 'c.phone', 'c.email', 'c.province',
-                'c.assigned_agent_id', 'c.active_policy_count', 'c.total_policy_count',
+                'c.assigned_agent_id',
                 'c.active', 'c.registered_at',
                 'a.agent_code as assigned_agent_code',
                 'a.first_name as assigned_agent_first_name',
                 'a.last_name as assigned_agent_last_name',
+                DB::raw("(SELECT COUNT(*) FROM policies p WHERE p.customer_id = c.id AND p.deleted_at IS NULL) AS total_policy_count"),
+                DB::raw("(SELECT COUNT(*) FROM policies p WHERE p.customer_id = c.id AND p.deleted_at IS NULL AND p.status = 'active') AS active_policy_count"),
             ]);
 
         if ($search = $request->string('q')->toString()) {
@@ -60,15 +69,36 @@ class CustomerController extends ApiController
             $q->where('c.active', $request->boolean('active'));
         }
         if ($request->boolean('withPolicies')) {
-            $q->where('c.active_policy_count', '>', 0);
+            // Real check — the denormalized counter is unreliable (see the
+            // subquery above), so we probe the policies table directly.
+            $q->whereExists(function ($sub) {
+                $sub->select(DB::raw(1))
+                    ->from('policies')
+                    ->whereColumn('policies.customer_id', 'c.id')
+                    ->whereNull('policies.deleted_at');
+            });
         }
         if ($ctype = $request->input('customerType')) {
             $q->where('c.customer_type', $ctype);
         }
 
-        // Order by id desc so newly-created rows land at the top of page 1,
-        // where users expect to see them after clicking "+ New Customer".
-        $paginator = $q->orderBy('c.id', 'desc')->paginate($this->perPage($request));
+        // Sortable columns — whitelisted so callers can't order by arbitrary
+        // SQL. Default preserves the "newly-created rows on page 1" behavior.
+        $sortMap = [
+            'customerCode' => 'c.customer_code',
+            'firstName' => 'c.first_name',
+            'lastName' => 'c.last_name',
+            'province' => 'c.province',
+            'registeredAt' => 'c.registered_at',
+            'newest' => 'c.id',
+        ];
+        $sortBy = $sortMap[$request->input('sortBy', 'newest')] ?? 'c.id';
+        $defaultDir = $sortBy === 'c.id' ? 'desc' : 'asc';
+        $sortDir = strtolower((string) $request->input('sortDir', $defaultDir)) === 'desc' ? 'desc' : 'asc';
+
+        $paginator = $q->orderBy($sortBy, $sortDir)
+            ->orderBy('c.id', 'desc') // deterministic tiebreak
+            ->paginate($this->perPage($request));
 
         return CustomerListResource::collection($paginator);
     }
@@ -86,7 +116,7 @@ class CustomerController extends ApiController
     public function show(Request $request, Customer $customer): CustomerResource
     {
         $this->authorizeTenant($request, $customer);
-        return new CustomerResource($customer->load(['kycDocs', 'assignmentHistory']));
+        return new CustomerResource($customer->load(['kycDocs', 'assignmentHistory', 'assignedAgent']));
     }
 
     public function update(CustomerRequest $request, Customer $customer): CustomerResource

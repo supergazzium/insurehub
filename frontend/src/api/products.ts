@@ -20,7 +20,7 @@ export interface ProductListRow {
   mainRider: string
   /** UI-facing bucket derived from type/category/subCategory2. Drives the
    *  create-wizard's conditional block. */
-  productKind: 'motor' | 'life' | 'property' | 'health' | 'other'
+  productKind: 'motor' | 'life' | 'travel' | 'property' | 'health' | 'other'
   minAge: number
   maxAge: number
   minSumAssure: number | null

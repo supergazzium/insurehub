@@ -10,6 +10,7 @@ import {
   type PayoutPreview, type Payout,
 } from '../../api/adminPayouts'
 import { ApiError } from '../../api/client'
+import DateRangeInput from '../../components/DateRangeInput.vue'
 
 const { t } = useI18n()
 
@@ -155,13 +156,14 @@ const canCreate = computed(() => preview.value && preview.value.groups.length > 
     <section class="card p-5 space-y-4">
       <h2 class="text-sm font-semibold text-slate-600">{{ t('adminPayouts.newBatch') }}</h2>
       <div class="grid grid-cols-1 md:grid-cols-4 gap-3 items-end">
-        <div>
-          <label class="text-xs text-slate-500 mb-1 block">{{ t('adminPayouts.periodFrom') }}</label>
-          <input v-model="range.from" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
-        </div>
-        <div>
-          <label class="text-xs text-slate-500 mb-1 block">{{ t('adminPayouts.periodTo') }}</label>
-          <input v-model="range.to" type="date" class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <div class="md:col-span-2">
+          <label class="text-xs text-slate-500 mb-1 block">{{ t('adminPayouts.periodFrom') }} — {{ t('adminPayouts.periodTo') }}</label>
+          <DateRangeInput
+            :from="range.from"
+            :to="range.to"
+            @update:from="v => range.from = v"
+            @update:to="v => range.to = v"
+          />
         </div>
         <div class="md:col-span-2 flex gap-2">
           <button type="button" class="px-3 py-2 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50"

@@ -5,6 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { fetchMailingPipeline, type MailingRow } from '../../api/opsReports'
 import { toCsv, downloadCsv } from '../../util/csvExport'
 import { ApiError } from '../../api/client'
+import DateInput from '../../components/DateInput.vue'
+import { fmtDate } from '../../util/dateFormat'
 
 const { t } = useI18n()
 
@@ -61,11 +63,11 @@ function exportCsv(): void {
     <section class="card p-4 flex items-end gap-3">
       <div>
         <label class="text-xs text-slate-500 mb-1 block">{{ t('reports.from') }}</label>
-        <input v-model="range.from" type="date" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <DateInput v-model="range.from" :max="range.to || undefined" />
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">{{ t('reports.to') }}</label>
-        <input v-model="range.to" type="date" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <DateInput v-model="range.to" :min="range.from || undefined" />
       </div>
       <button type="button" class="px-3 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
         :disabled="loading" @click="load">
@@ -92,7 +94,7 @@ function exportCsv(): void {
         <tbody class="divide-y divide-slate-100">
           <tr v-if="!rows.length && !loading"><td colspan="6" class="text-center py-8 text-slate-400 text-xs">{{ t('reports.empty') }}</td></tr>
           <tr v-for="r in rows" :key="r.policyId">
-            <td class="px-3 py-2 text-xs font-mono">{{ r.mailingDate || '—' }}</td>
+            <td class="px-3 py-2 text-xs font-mono">{{ r.mailingDate ? fmtDate(r.mailingDate) : '—' }}</td>
             <td class="px-3 py-2 font-mono text-xs">{{ r.applicationNo }}</td>
             <td class="px-3 py-2 truncate max-w-xs">{{ r.customerName }}</td>
             <td class="px-3 py-2 text-xs text-slate-600 truncate max-w-md">{{ r.mailingAddress || '—' }}</td>

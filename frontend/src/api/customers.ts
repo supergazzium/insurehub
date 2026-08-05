@@ -33,6 +33,8 @@ export interface CustomerListFilters {
   customerType?: string
   page?: number
   perPage?: number
+  sortBy?: 'customerCode' | 'firstName' | 'lastName' | 'province' | 'registeredAt' | 'newest'
+  sortDir?: 'asc' | 'desc'
 }
 
 export function fetchCustomerList(filters: CustomerListFilters = {}) {

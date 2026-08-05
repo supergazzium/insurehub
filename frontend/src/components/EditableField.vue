@@ -12,6 +12,8 @@
 
 import { computed, nextTick, ref, watch } from 'vue'
 import { api, ApiError } from '../api/client'
+import DateInput from './DateInput.vue'
+import { fmtDate } from '../util/dateFormat'
 
 export type EditableType = 'text' | 'number' | 'currency' | 'date' | 'select' | 'textarea'
 
@@ -71,6 +73,10 @@ const displayValue = computed<string>(() => {
   if (props.type === 'select') {
     const opt = props.options.find((o) => o.value === String(props.value))
     return opt ? opt.label : String(props.value)
+  }
+  if (props.type === 'date') {
+    // Display DD/MM/YYYY regardless of what the API returns.
+    return fmtDate(String(props.value))
   }
   return String(props.value)
 })
@@ -194,11 +200,17 @@ const isEmpty = computed(() => props.value === null || props.value === undefined
         <option value="">—</option>
         <option v-for="o in options" :key="o.value" :value="o.value">{{ o.label }}</option>
       </select>
+      <DateInput
+        v-else-if="type === 'date'"
+        v-model="draft"
+        :disabled="saving"
+        @update:model-value="save"
+      />
       <input
         v-else
         ref="inputEl"
         v-model="draft"
-        :type="type === 'date' ? 'date' : type === 'number' || type === 'currency' ? 'text' : 'text'"
+        :type="type === 'number' || type === 'currency' ? 'text' : 'text'"
         :inputmode="type === 'number' || type === 'currency' ? 'decimal' : undefined"
         :class="[
           'w-full border border-brand-400 rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200',

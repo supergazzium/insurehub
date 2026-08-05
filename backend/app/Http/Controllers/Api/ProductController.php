@@ -9,6 +9,7 @@ use App\Http\Resources\ProductListResource;
 use App\Http\Resources\ProductResource;
 use App\Models\Carrier;
 use App\Models\Product;
+use App\Models\ProductCommissionRate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -75,6 +76,20 @@ class ProductController extends ApiController
     {
         $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];
         $product = Product::create($payload);
+
+        // If the caller passed `commissionPercent`, seed a single
+        // product_commission_rates row where every year's com_rate slot is
+        // set to that percent. Agent/insurer split (`ag_rate_*`, `in_rate_*`)
+        // is left null — the commission engine or a later edit can populate.
+        $percent = $request->input('commissionPercent');
+        if ($percent !== null && $percent !== '') {
+            $rateRow = ['product_id' => $product->id];
+            foreach ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, '11up'] as $year) {
+                $rateRow["com_rate_yr_{$year}"] = $percent;
+            }
+            ProductCommissionRate::create($rateRow);
+        }
+
         return (new ProductResource($product))->response()->setStatusCode(201);
     }
 

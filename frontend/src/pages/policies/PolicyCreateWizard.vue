@@ -18,6 +18,7 @@ import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRouter } from 'vue-router'
 import FormField from '../../components/FormField.vue'
+import DateInput from '../../components/DateInput.vue'
 import { api, ApiError } from '../../api/client'
 import { fetchCustomerList, type CustomerListRow } from '../../api/customers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
@@ -239,7 +240,9 @@ const form = reactive({
   mainComAmtInh: 0,
   mainComRateAg: 0,
   mainComAmtAg: 0,
-  status: 'application' as 'quote' | 'application' | 'submitted' | 'issued' | 'active',
+  // Default assumes non-motor (safe pick — "รอพิจารณา"); the `kind` watcher
+  // switches to "application" once the operator picks a motor product.
+  status: 'submitted' as 'quote' | 'application' | 'submitted' | 'issued' | 'active',
   notes: '',
   // Step 3 — motor
   motorTypeDriver: '',
@@ -262,6 +265,22 @@ const form = reactive({
   propertyOtherDetail: '',
   propertyNotes: '',
   propertyPhone: '',
+  // Step 3 — travel (Phase B-2)
+  tripDestination: '',
+  tripStart: '',
+  tripEnd: '',
+  travelerCount: 1,
+  travelerPassport: '',
+  // Step 3 — life / health insured person + coverage
+  insuredPersonName: '',
+  insuredPersonIdCard: '',
+  insuredPersonBirthDate: '',
+  sumAssured: 0,
+  premiumPayingTerm: 0,
+  healthDeclaration: '',
+  // Step 3 — health-only single beneficiary (life uses the beneficiaries array)
+  healthBeneficiaryName: '',
+  healthBeneficiaryRelation: '',
   // Step 3 — riders + beneficiaries. Access reserves 5 rider slots and 4
   // beneficiary slots; we preallocate the same shape so the operator sees a
   // grid, not an empty list they have to "add row" into. Empty rows are
@@ -426,7 +445,17 @@ function pickProduct(p: ProductListRow): void {
 function pickAgent(a: AgentListRow): void {
   agentPicked.value = a
   form.writingAgentId = a.id
-  agentSearch.value = `${a.agentCode} · ${a.firstName} ${a.lastName}`.trim()
+  // Clear the search field — the picked agent renders as a pill so the
+  // operator can immediately type a new search (by Thai name / phone /
+  // code) without deleting the prior "IN12345 · Last First" combo string
+  // that would otherwise poison the next backend lookup.
+  agentSearch.value = ''
+  agentResults.value = []
+}
+function clearAgent(): void {
+  agentPicked.value = null
+  form.writingAgentId = ''
+  agentSearch.value = ''
   agentResults.value = []
 }
 
@@ -513,6 +542,13 @@ const autoRecalcPremium = ref(true)
 function computeDutyStamp(net: number): number { return Math.ceil((net * 0.004) * 100) / 100 }
 function computeVat(net: number, duty: number): number { return Math.round((net + duty) * 0.07 * 100) / 100 }
 
+// Track whether the operator has manually edited mainPremium / annualPremium.
+// Without these flags the netPremium watcher would only sync them on the FIRST
+// keystroke (when they're still 0) and then get stuck — e.g. typing "10000"
+// character-by-character syncs mainPremium=1 on the first keystroke, then the
+// "if === 0" guard becomes false and mainPremium stays at 1 forever.
+const mainPremiumTouched = ref(false)
+const annualPremiumTouched = ref(false)
 watch(() => form.netPremium, (n) => {
   if (!autoRecalcPremium.value) return
   const net = Number(n) || 0
@@ -522,8 +558,9 @@ watch(() => form.netPremium, (n) => {
   form.vat = vat
   form.totalPremiumPaid = Math.round((net + duty + vat) * 100) / 100
   form.netCustomerPaid = Math.round((form.totalPremiumPaid - (Number(form.whtAmt) || 0)) * 100) / 100
-  if (!form.annualPremium || form.annualPremium === 0) form.annualPremium = net
-  if (!form.mainPremium || form.mainPremium === 0) form.mainPremium = net
+  // Mirror net into main/annual unless the operator has taken control.
+  if (!annualPremiumTouched.value) form.annualPremium = net
+  if (!mainPremiumTouched.value) form.mainPremium = net
 })
 watch(() => form.whtAmt, (w) => {
   form.netCustomerPaid = Math.round(((Number(form.totalPremiumPaid) || 0) - (Number(w) || 0)) * 100) / 100
@@ -551,13 +588,27 @@ const beneficiaryShareTotal = computed(() =>
 )
 
 // ── Step gating ──────────────────────────────────────────────────────────
-const canNextStep1 = computed(() =>
-  form.customerId !== '' && form.insureType !== '' && form.carrierId !== ''
-  && form.productId !== '' && form.writingAgentId !== '',
-)
-const canNextStep2 = computed(() =>
-  !!form.effectiveDate && !!form.expiryDate && (Number(form.netPremium) > 0 || Number(form.annualPremium) > 0),
-)
+// Each step gate lists the specific fields it needs so the UI can tell the
+// operator exactly what's missing when the Next button is disabled — no
+// more silently-greyed buttons that leave you guessing.
+const blockersStep1 = computed<string[]>(() => {
+  const missing: string[] = []
+  if (form.customerId === '') missing.push('ลูกค้า')
+  if (form.insureType === '') missing.push('ประเภทประกัน')
+  if (form.carrierId === '') missing.push('บริษัทประกัน')
+  if (form.productId === '') missing.push('แผน/ผลิตภัณฑ์')
+  if (form.writingAgentId === '') missing.push('ตัวแทน')
+  return missing
+})
+const blockersStep2 = computed<string[]>(() => {
+  const missing: string[] = []
+  if (!form.effectiveDate) missing.push('วันเริ่มคุ้มครอง')
+  if (!form.expiryDate) missing.push('วันสิ้นสุดคุ้มครอง')
+  if (!(Number(form.netPremium) > 0 || Number(form.annualPremium) > 0)) missing.push('เบี้ยประกัน')
+  return missing
+})
+const canNextStep1 = computed(() => blockersStep1.value.length === 0)
+const canNextStep2 = computed(() => blockersStep2.value.length === 0)
 const canSubmit = computed(() => {
   if (!canNextStep1.value || !canNextStep2.value) return false
   // Life products: if beneficiaries are provided, their shares must sum to 100.
@@ -568,6 +619,62 @@ const canSubmit = computed(() => {
 })
 
 const kind = computed(() => productPicked.value?.productKind ?? 'other')
+
+// Type-ahead state for the product picker. `productSearch` (already
+// declared above for the BroadcastChannel new-product flow) is reused as
+// the filter input; `filteredProducts` narrows the carrier's product list
+// case-insensitively across code + name. Blur is delayed via mousedown on
+// the option buttons so a click doesn't close the menu before selection.
+const productMenuOpen = ref(false)
+const filteredProducts = computed(() => {
+  const q = productSearch.value.trim().toLowerCase()
+  if (q === '') return products.value.slice(0, 100) // cap render for perf
+  return products.value.filter((p) => {
+    const hay = `${p.code ?? ''} ${p.name ?? ''}`.toLowerCase()
+    return hay.includes(q)
+  }).slice(0, 100)
+})
+function closeProductMenu(): void {
+  // Small delay so a mousedown on a dropdown item lands before blur closes.
+  window.setTimeout(() => { productMenuOpen.value = false }, 150)
+}
+
+// Status default follows the product kind: motor gets "รอตรวจรถ" (vehicle
+// inspection), everything else gets "รอพิจารณา". Only auto-adjusts while
+// the operator hasn't manually touched the status.
+const statusTouched = ref(false)
+watch(kind, (k) => {
+  if (statusTouched.value) return
+  form.status = k === 'motor' ? 'application' : 'submitted'
+}, { immediate: false })
+
+// Insured person defaults to the policy's customer for life/health flows —
+// covers the common "self-insured" case. Operator can override the fields
+// (parent-buys-for-child, etc.). Tracked with a touched flag so re-picking
+// the customer doesn't clobber a manual override.
+const insuredPersonTouched = ref(false)
+watch(() => [customerPicked.value, kind.value] as const, ([c, k]) => {
+  if (insuredPersonTouched.value) return
+  if (!c || (k !== 'life' && k !== 'health')) return
+  form.insuredPersonName = `${c.firstName ?? ''} ${c.lastName ?? ''}`.trim()
+  form.insuredPersonIdCard = c.idCard ?? ''
+  // Customer birth date isn't on the list row; leave for operator to fill
+  // or a follow-up fetch. Not filling is safer than filling with junk.
+})
+
+// Smart end-date: when the operator picks an effective date and hasn't
+// touched the expiry yet, default expiry to effective + 1 year less 1 day
+// (Thai annual convention). Once the operator overrides, we stop auto-
+// adjusting so a later effective change won't clobber their custom expiry.
+const expiryTouched = ref(false)
+watch(() => form.effectiveDate, (eff) => {
+  if (!eff || expiryTouched.value || form.expiryDate) return
+  const d = new Date(eff)
+  if (Number.isNaN(d.getTime())) return
+  d.setFullYear(d.getFullYear() + 1)
+  d.setDate(d.getDate() - 1)
+  form.expiryDate = d.toISOString().slice(0, 10)
+})
 
 // ── Payload construction ─────────────────────────────────────────────────
 function trim<T>(v: T): T | null {
@@ -674,6 +781,34 @@ const payload = computed(() => {
         slot: b.slot ?? i + 1,
       }))
   }
+  // Travel block — only sent for travel products.
+  if (kind.value === 'travel') {
+    Object.assign(base, {
+      tripDestination: trim(form.tripDestination),
+      tripStart: form.tripStart || null,
+      tripEnd: form.tripEnd || null,
+      travelerCount: form.travelerCount || null,
+      travelerPassport: trim(form.travelerPassport),
+    })
+  }
+  // Life + Health share the insured-person + sum-assured block.
+  if (kind.value === 'life' || kind.value === 'health') {
+    Object.assign(base, {
+      insuredPersonName: trim(form.insuredPersonName),
+      insuredPersonIdCard: trim(form.insuredPersonIdCard),
+      insuredPersonBirthDate: form.insuredPersonBirthDate || null,
+      sumAssured: form.sumAssured || null,
+      premiumPayingTerm: form.premiumPayingTerm || null,
+      healthDeclaration: trim(form.healthDeclaration),
+    })
+  }
+  // Health-only single beneficiary — life uses the beneficiaries array above.
+  if (kind.value === 'health') {
+    Object.assign(base, {
+      healthBeneficiaryName: trim(form.healthBeneficiaryName),
+      healthBeneficiaryRelation: trim(form.healthBeneficiaryRelation),
+    })
+  }
   return base
 })
 
@@ -727,7 +862,7 @@ watch(() => props.open, (v) => {
     premiumMode: 'annual', installmentTerm: '',
     firstDueInst: 0, firstDueInstDate: '', nextDueInst: 0, lastDueInstDate: '',
     mainComRateInh: 0, mainComAmtInh: 0, mainComRateAg: 0, mainComAmtAg: 0,
-    status: 'application', notes: '',
+    status: 'submitted', notes: '',
     motorTypeDriver: '', motorTypeVehicle: '',
     motorVehicleBrand: '', motorVehicleModel: '', motorLicenseNo: '',
     motorEngineNo: '', motorChassisNo: '', motorRegisterYear: '',
@@ -735,12 +870,23 @@ watch(() => props.open, (v) => {
     propertyInsuredName: '', propertyInsuredAddress: '',
     propertyBuildingCov: 0, propertyFurnitureCov: 0, propertyStockCov: 0,
     propertyOtherCov: 0, propertyOtherDetail: '', propertyNotes: '', propertyPhone: '',
+    // Phase B-2 fresh defaults.
+    tripDestination: '', tripStart: '', tripEnd: '',
+    travelerCount: 1, travelerPassport: '',
+    insuredPersonName: '', insuredPersonIdCard: '', insuredPersonBirthDate: '',
+    sumAssured: 0, premiumPayingTerm: 0, healthDeclaration: '',
+    healthBeneficiaryName: '', healthBeneficiaryRelation: '',
     riders: makeEmptyRiders(), beneficiaries: [],
   })
   customerSearch.value = ''; productSearch.value = ''; agentSearch.value = ''; renewalSearch.value = ''
   customerPicked.value = null; productPicked.value = null; agentPicked.value = null; renewalPicked.value = null
   carrierPicked.value = null; carriers.value = []; products.value = []
   customerResults.value = []; productResults.value = []; agentResults.value = []; renewalResults.value = []
+  mainPremiumTouched.value = false; annualPremiumTouched.value = false
+  statusTouched.value = false
+  expiryTouched.value = false
+  insuredPersonTouched.value = false
+  productSearch.value = ''; productMenuOpen.value = false
 })
 
 function next(): void {
@@ -908,17 +1054,36 @@ function back(): void {
                     ? t('policyCreate.productLoading')
                     : (products.length === 0 ? t('policyCreate.productEmpty') : undefined))">
               <div class="flex gap-2">
-                <select :value="form.productId"
-                  :disabled="!form.carrierId || productsLoading || products.length === 0"
-                  class="flex-1 border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400 disabled:bg-slate-50 disabled:text-slate-400"
-                  @change="selectProductById(($event.target as HTMLSelectElement).value)">
-                  <option value="">
-                    {{ form.carrierId ? t('policyCreate.productPlaceholder') : t('policyCreate.productBlockedPlaceholder') }}
-                  </option>
-                  <option v-for="p in products" :key="p.id" :value="p.id">
-                    {{ p.code }} — {{ p.name }}
-                  </option>
-                </select>
+                <div class="flex-1 relative">
+                  <!-- Type-ahead searchable picker — carriers with 80+ products
+                       can't be scrolled through comfortably. -->
+                  <input type="text"
+                    v-model="productSearch"
+                    :disabled="!form.carrierId || productsLoading"
+                    :placeholder="productPicked
+                      ? `${productPicked.code} — ${productPicked.name}`
+                      : (form.carrierId ? t('policyCreate.productPlaceholder') : t('policyCreate.productBlockedPlaceholder'))"
+                    @focus="productMenuOpen = true"
+                    @blur="closeProductMenu"
+                    class="w-full border border-slate-200 rounded-lg pl-3 pr-9 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400 disabled:bg-slate-50 disabled:text-slate-400" />
+                  <i v-if="productPicked && !productSearch"
+                    class="pi pi-check text-emerald-500 text-xs absolute right-3 top-1/2 -translate-y-1/2" />
+                  <i v-else-if="productSearch"
+                    class="pi pi-times text-slate-400 text-xs absolute right-3 top-1/2 -translate-y-1/2 cursor-pointer"
+                    @mousedown.prevent="productSearch = ''" />
+                  <div v-if="productMenuOpen && form.carrierId && filteredProducts.length > 0"
+                    class="absolute z-30 left-0 right-0 mt-1 max-h-64 overflow-y-auto rounded-lg border border-slate-200 bg-white shadow-lg">
+                    <button v-for="p in filteredProducts" :key="p.id" type="button"
+                      @mousedown.prevent="() => { selectProductById(p.id); productSearch = ''; productMenuOpen = false }"
+                      class="w-full text-left px-3 py-2 text-sm hover:bg-brand-50">
+                      <span class="font-mono text-xs text-slate-500">{{ p.code }}</span> — {{ p.name }}
+                    </button>
+                  </div>
+                  <div v-else-if="productMenuOpen && form.carrierId && productSearch && filteredProducts.length === 0"
+                    class="absolute z-30 left-0 right-0 mt-1 rounded-lg border border-slate-200 bg-white shadow-lg px-3 py-2 text-sm text-slate-500">
+                    ไม่พบผลิตภัณฑ์
+                  </div>
+                </div>
                 <button type="button"
                   class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm inline-flex items-center gap-1 shrink-0"
                   :title="t('policyCreate.newProductHint')"
@@ -934,8 +1099,19 @@ function back(): void {
             </FormField>
             <!-- Agent -->
             <FormField :label="t('policyCreate.agent')" required class="col-span-2 relative" error-key="writingAgentId" :errors="fieldErrors">
+              <!-- Picked agent as a pill; input stays empty for fresh searches. -->
+              <div v-if="agentPicked" class="flex items-center gap-2 mb-2">
+                <span class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-brand-50 border border-brand-200 text-sm">
+                  <span class="font-mono text-xs text-brand-700">{{ agentPicked.agentCode }}</span>
+                  <span class="text-slate-900">{{ agentPicked.firstName }} {{ agentPicked.lastName }}</span>
+                  <button type="button" @click="clearAgent"
+                    class="text-slate-400 hover:text-rose-600" title="Clear">
+                    <i class="pi pi-times text-xs" />
+                  </button>
+                </span>
+              </div>
               <input v-model="agentSearch"
-                :placeholder="t('policyCreate.agentPlaceholder')"
+                :placeholder="agentPicked ? t('policyCreate.agentPlaceholder') : t('policyCreate.agentPlaceholder')"
                 class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
               <div v-if="agentResults.length"
                 class="absolute left-0 right-0 top-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-auto z-10">
@@ -968,20 +1144,23 @@ function back(): void {
         <section v-show="step === 2" class="space-y-4">
           <div class="grid grid-cols-2 gap-4">
             <FormField :label="t('policyCreate.appDate')" error-key="appDate" :errors="fieldErrors">
-              <input v-model="form.appDate" type="date"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <DateInput v-model="form.appDate" />
             </FormField>
             <FormField :label="t('policyCreate.coverage')" error-key="coverage" :errors="fieldErrors">
               <input v-model.number="form.coverage" type="number" min="0"
                 class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 text-right" />
             </FormField>
             <FormField :label="t('policyCreate.effectiveDate')" required error-key="effectiveDate" :errors="fieldErrors">
-              <input v-model="form.effectiveDate" type="date"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <DateInput v-model="form.effectiveDate" :max="form.expiryDate || undefined" />
             </FormField>
             <FormField :label="t('policyCreate.expiryDate')" required error-key="expiryDate" :errors="fieldErrors">
-              <input v-model="form.expiryDate" type="date"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <!-- start-date opens the calendar on the effective-date's month
+                   when the operator hasn't picked an expiry yet — avoids
+                   the "opens on January regardless of what I typed" confusion. -->
+              <DateInput v-model="form.expiryDate"
+                :min="form.effectiveDate || undefined"
+                :start-date="form.expiryDate ? undefined : (form.effectiveDate || undefined)"
+                @update:model-value="expiryTouched = true" />
             </FormField>
             <FormField :label="t('policyCreate.policyYear')" error-key="policyYear" :errors="fieldErrors">
               <input v-model.number="form.policyYear" type="number" min="1"
@@ -1011,6 +1190,7 @@ function back(): void {
               </FormField>
               <FormField :label="t('policyCreate.mainPremium')" error-key="mainPremium" :errors="fieldErrors">
                 <input v-model.number="form.mainPremium" type="number" min="0" step="0.01"
+                  @input="mainPremiumTouched = true"
                   class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 text-right" />
               </FormField>
               <FormField :label="t('policyCreate.dutyStamp')" error-key="dutyStamp" :errors="fieldErrors">
@@ -1061,16 +1241,14 @@ function back(): void {
                   class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 text-right" />
               </FormField>
               <FormField :label="t('policyCreate.firstDueInstDate')" error-key="firstDueInstDate" :errors="fieldErrors">
-                <input v-model="form.firstDueInstDate" type="date"
-                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+                <DateInput v-model="form.firstDueInstDate" :max="form.lastDueInstDate || undefined" />
               </FormField>
               <FormField :label="t('policyCreate.nextDueInst')" error-key="nextDueInst" :errors="fieldErrors">
                 <input v-model.number="form.nextDueInst" type="number" min="0" step="0.01"
                   class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 text-right" />
               </FormField>
               <FormField :label="t('policyCreate.lastDueInstDate')" error-key="lastDueInstDate" :errors="fieldErrors">
-                <input v-model="form.lastDueInstDate" type="date"
-                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+                <DateInput v-model="form.lastDueInstDate" :min="form.firstDueInstDate || undefined" />
               </FormField>
             </div>
           </div>
@@ -1168,6 +1346,98 @@ function back(): void {
               </FormField>
               <FormField :label="t('policyCreate.property.otherDetail')" error-key="propertyOtherDetail" :errors="fieldErrors" class="col-span-2">
                 <textarea v-model="form.propertyOtherDetail" rows="2"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+          </div>
+
+          <!-- Travel block — Phase B-2 -->
+          <div v-if="kind === 'travel'">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              รายละเอียดการเดินทาง
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <FormField label="ปลายทาง" error-key="tripDestination" :errors="fieldErrors" class="col-span-2">
+                <input v-model.trim="form.tripDestination" placeholder="เช่น ญี่ปุ่น, ทั่วโลก"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField label="วันเริ่มเดินทาง" error-key="tripStart" :errors="fieldErrors">
+                <DateInput v-model="form.tripStart" :max="form.tripEnd || undefined" />
+              </FormField>
+              <FormField label="วันสิ้นสุดเดินทาง" error-key="tripEnd" :errors="fieldErrors">
+                <DateInput v-model="form.tripEnd" :min="form.tripStart || undefined"
+                  :start-date="form.tripEnd ? undefined : (form.tripStart || undefined)" />
+              </FormField>
+              <FormField label="จำนวนผู้เดินทาง" error-key="travelerCount" :errors="fieldErrors">
+                <input v-model.number="form.travelerCount" type="number" min="1" max="9999"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 text-right" />
+              </FormField>
+              <FormField label="เลขที่พาสปอร์ต" error-key="travelerPassport" :errors="fieldErrors">
+                <input v-model.trim="form.travelerPassport"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 font-mono" />
+              </FormField>
+            </div>
+          </div>
+
+          <!-- Insured person + coverage — Phase B-2 (life + health share this block) -->
+          <div v-if="kind === 'life' || kind === 'health'">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">
+              ผู้เอาประกัน
+              <span class="normal-case text-[10px] text-slate-400 ml-1">
+                (auto-filled from customer — override if different)
+              </span>
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <FormField label="ชื่อ-สกุลผู้เอาประกัน" error-key="insuredPersonName" :errors="fieldErrors" class="col-span-2">
+                <input v-model.trim="form.insuredPersonName"
+                  @input="insuredPersonTouched = true"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField label="เลขบัตรประชาชน" error-key="insuredPersonIdCard" :errors="fieldErrors">
+                <input v-model.trim="form.insuredPersonIdCard"
+                  @input="insuredPersonTouched = true"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 font-mono" />
+              </FormField>
+              <FormField label="วันเกิด" error-key="insuredPersonBirthDate" :errors="fieldErrors">
+                <DateInput v-model="form.insuredPersonBirthDate"
+                  :max="new Date().toISOString().slice(0, 10)" />
+              </FormField>
+              <FormField label="ทุนประกัน (บาท)" error-key="sumAssured" :errors="fieldErrors">
+                <input v-model.number="form.sumAssured" type="number" min="0" step="1000"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 text-right" />
+              </FormField>
+              <FormField label="ระยะเวลาชำระเบี้ย (ปี)" error-key="premiumPayingTerm" :errors="fieldErrors">
+                <select v-model.number="form.premiumPayingTerm"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+                  <option :value="0">— เลือก —</option>
+                  <option :value="1">ชำระครั้งเดียว</option>
+                  <option :value="5">5 ปี</option>
+                  <option :value="10">10 ปี</option>
+                  <option :value="15">15 ปี</option>
+                  <option :value="20">20 ปี</option>
+                  <option :value="99">ตลอดชีพ</option>
+                </select>
+              </FormField>
+              <FormField label="แถลงสุขภาพ" error-key="healthDeclaration" :errors="fieldErrors" class="col-span-2"
+                hint="สรุปคำตอบสำคัญจากใบแถลงสุขภาพ (เช่น โรคประจำตัว, การผ่าตัด)">
+                <textarea v-model="form.healthDeclaration" rows="2"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+          </div>
+
+          <!-- Health single-beneficiary — Phase B-2 (life uses the multi-row table below) -->
+          <div v-if="kind === 'health'">
+            <div class="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2 mt-4">
+              ผู้รับผลประโยชน์
+            </div>
+            <div class="grid grid-cols-2 gap-4">
+              <FormField label="ชื่อ-สกุลผู้รับผลประโยชน์" error-key="healthBeneficiaryName" :errors="fieldErrors">
+                <input v-model.trim="form.healthBeneficiaryName"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField label="ความสัมพันธ์" error-key="healthBeneficiaryRelation" :errors="fieldErrors">
+                <input v-model.trim="form.healthBeneficiaryRelation" placeholder="เช่น คู่สมรส, บุตร"
                   class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
               </FormField>
             </div>
@@ -1274,10 +1544,10 @@ function back(): void {
           <!-- Status + notes -->
           <div class="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-4">
             <FormField :label="t('policyCreate.status')" error-key="status" :errors="fieldErrors" class="col-span-2">
-              <select v-model="form.status"
+              <select v-model="form.status" @change="statusTouched = true"
                 class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
                 <option value="quote">ใบเสนอราคา</option>
-                <option value="application">รอตรวจรถ</option>
+                <option v-if="kind === 'motor'" value="application">รอตรวจรถ</option>
                 <option value="submitted">รอพิจารณา</option>
                 <option value="issued">ออกกรมธรรม์แล้ว</option>
                 <option value="active">อนุมัติแล้ว</option>
@@ -1298,9 +1568,19 @@ function back(): void {
       </div>
 
       <!-- Footer: back / next / create -->
-      <footer class="px-5 py-3 border-t border-slate-200 flex items-center justify-between">
-        <div class="text-xs text-slate-400">
-          {{ t('policyCreate.footerHint') }}
+      <footer class="px-5 py-3 border-t border-slate-200 flex items-center justify-between gap-3">
+        <div class="text-xs text-slate-400 flex-1 min-w-0">
+          <!-- When Next is disabled, tell the operator exactly what's missing
+               instead of leaving them to guess at a greyed-out button. -->
+          <div v-if="step === 1 && blockersStep1.length > 0" class="text-amber-700 truncate">
+            <i class="pi pi-info-circle text-[10px] mr-1" />
+            ยังกรอกไม่ครบ: {{ blockersStep1.join(', ') }}
+          </div>
+          <div v-else-if="step === 2 && blockersStep2.length > 0" class="text-amber-700 truncate">
+            <i class="pi pi-info-circle text-[10px] mr-1" />
+            ยังกรอกไม่ครบ: {{ blockersStep2.join(', ') }}
+          </div>
+          <span v-else>{{ t('policyCreate.footerHint') }}</span>
         </div>
         <div class="flex items-center gap-2">
           <button type="button"

@@ -5,6 +5,8 @@ import { useI18n } from 'vue-i18n'
 import { fetchPaymentHistory, type PaymentRow } from '../../api/opsReports'
 import { toCsv, downloadCsv } from '../../util/csvExport'
 import { ApiError } from '../../api/client'
+import DateInput from '../../components/DateInput.vue'
+import { fmtDate } from '../../util/dateFormat'
 
 const { t } = useI18n()
 
@@ -68,11 +70,11 @@ function fmt(n: number): string {
     <section class="card p-4 flex items-end gap-3">
       <div>
         <label class="text-xs text-slate-500 mb-1 block">{{ t('reports.from') }}</label>
-        <input v-model="range.from" type="date" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <DateInput v-model="range.from" :max="range.to || undefined" />
       </div>
       <div>
         <label class="text-xs text-slate-500 mb-1 block">{{ t('reports.to') }}</label>
-        <input v-model="range.to" type="date" class="border border-slate-200 rounded-lg px-3 py-2 text-sm" />
+        <DateInput v-model="range.to" :min="range.from || undefined" />
       </div>
       <button type="button" class="px-3 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
         :disabled="loading" @click="load">
@@ -104,7 +106,7 @@ function fmt(n: number): string {
         <tbody class="divide-y divide-slate-100">
           <tr v-if="!rows.length && !loading"><td colspan="8" class="text-center py-8 text-slate-400 text-xs">{{ t('reports.empty') }}</td></tr>
           <tr v-for="r in rows" :key="r.paymentId">
-            <td class="px-3 py-2 text-xs font-mono">{{ r.paymentDate }}</td>
+            <td class="px-3 py-2 text-xs font-mono">{{ fmtDate(r.paymentDate) }}</td>
             <td class="px-3 py-2 text-right font-mono">฿ {{ fmt(r.amount) }}</td>
             <td class="px-3 py-2 text-xs">
               <span class="inline-flex px-2 py-0.5 rounded bg-slate-100 text-slate-700">{{ r.method }}</span>

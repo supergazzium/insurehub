@@ -98,6 +98,22 @@ class PolicyRequest extends FormRequest
             'propertyOtherDetail' => ['sometimes', 'nullable', 'string'],
             'propertyNotes' => ['sometimes', 'nullable', 'string'],
             'propertyPhone' => ['sometimes', 'nullable', 'string', 'max:32'],
+            // Travel block — sent when the picked product is travel.
+            'tripDestination' => ['sometimes', 'nullable', 'string', 'max:128'],
+            'tripStart' => ['sometimes', 'nullable', 'date'],
+            'tripEnd' => ['sometimes', 'nullable', 'date'],
+            'travelerCount' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:9999'],
+            'travelerPassport' => ['sometimes', 'nullable', 'string', 'max:32'],
+            // Life / Health insured person + coverage details.
+            'insuredPersonName' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'insuredPersonIdCard' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'insuredPersonBirthDate' => ['sometimes', 'nullable', 'date'],
+            'sumAssured' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'premiumPayingTerm' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:99'],
+            'healthDeclaration' => ['sometimes', 'nullable', 'string'],
+            // Health-only single beneficiary.
+            'healthBeneficiaryName' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'healthBeneficiaryRelation' => ['sometimes', 'nullable', 'string', 'max:64'],
             // Mailing.
             'mailingAddByPolicy' => ['sometimes', 'nullable', 'string', 'max:255'],
             'mailingDate' => ['sometimes', 'nullable', 'date'],
@@ -200,6 +216,20 @@ class PolicyRequest extends FormRequest
             'mailingAddByPolicy' => 'mailing_add_by_policy',
             'mailingDate' => 'mailing_date',
             'mailingNote' => 'mailing_note',
+            // Phase B-2 context fields.
+            'tripDestination' => 'trip_destination',
+            'tripStart' => 'trip_start',
+            'tripEnd' => 'trip_end',
+            'travelerCount' => 'traveler_count',
+            'travelerPassport' => 'traveler_passport',
+            'insuredPersonName' => 'insured_person_name',
+            'insuredPersonIdCard' => 'insured_person_id_card',
+            'insuredPersonBirthDate' => 'insured_person_birth_date',
+            'sumAssured' => 'sum_assured',
+            'premiumPayingTerm' => 'premium_paying_term',
+            'healthDeclaration' => 'health_declaration',
+            'healthBeneficiaryName' => 'health_beneficiary_name',
+            'healthBeneficiaryRelation' => 'health_beneficiary_relation',
         ];
         $out = [];
         foreach ($map as $camel => $snake) {

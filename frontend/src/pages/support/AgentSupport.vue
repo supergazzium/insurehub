@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
+import DateInput from '../../components/DateInput.vue'
+import { toIsoDate } from '../../util/dateFormat'
 import { useRouter } from 'vue-router'
 import { useEmailApi, type DeliveryStatus } from '../../composables/useEmailApi'
 import {
@@ -5808,11 +5810,7 @@ onMounted(() => {
           <div class="px-5 py-4 space-y-3">
             <div>
               <label class="block text-[10px] font-medium uppercase tracking-wider text-slate-500 mb-1">วันที่</label>
-              <input
-                v-model="customScheduleDate"
-                type="date"
-                class="w-full px-3 py-2 text-sm border border-slate-300 rounded-lg focus:outline-none focus:border-blue-500 focus:ring-2 focus:ring-blue-100"
-              />
+              <DateInput v-model="customScheduleDate" :min="toIsoDate(new Date())" />
             </div>
             <div>
               <label class="block text-[10px] font-medium uppercase tracking-wider text-slate-500 mb-1">เวลา</label>

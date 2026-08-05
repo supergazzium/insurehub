@@ -163,6 +163,22 @@ class PolicyResource extends JsonResource
                 'otherDetail' => $this->property_other_detail ?? '',
                 'notes' => $this->property_notes ?? '',
             ] : null,
+            // Phase B-2 — travel / life / health context. Emitted flat so
+            // the wizard/edit views can bind directly without checking a
+            // sub-object shape. Null-safe casts keep motor rows clean.
+            'tripDestination' => $this->trip_destination,
+            'tripStart' => $this->trip_start,
+            'tripEnd' => $this->trip_end,
+            'travelerCount' => $this->traveler_count !== null ? (int) $this->traveler_count : null,
+            'travelerPassport' => $this->traveler_passport,
+            'insuredPersonName' => $this->insured_person_name,
+            'insuredPersonIdCard' => $this->insured_person_id_card,
+            'insuredPersonBirthDate' => $this->insured_person_birth_date,
+            'sumAssured' => $this->sum_assured !== null ? (float) $this->sum_assured : null,
+            'premiumPayingTerm' => $this->premium_paying_term !== null ? (int) $this->premium_paying_term : null,
+            'healthDeclaration' => $this->health_declaration,
+            'healthBeneficiaryName' => $this->health_beneficiary_name,
+            'healthBeneficiaryRelation' => $this->health_beneficiary_relation,
             'events' => PolicyEventResource::collection($this->whenLoaded('events')),
             'payments' => PolicyPaymentResource::collection($this->whenLoaded('payments')),
             'documents' => PolicyDocumentResource::collection($this->whenLoaded('documents')),

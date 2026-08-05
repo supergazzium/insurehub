@@ -12,6 +12,7 @@ import { fetchPolicyList, type PolicyListRow } from '../../api/policies'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import { api, ApiError } from '../../api/client'
+import { fmtDate } from '../../util/dateFormat'
 
 const CUSTOMER_TYPE_OPTIONS = [
   { value: 'individual', label: 'Individual' },
@@ -275,7 +276,15 @@ function statusBadge(s: string): string {
         <section>
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Assignment</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-            <div><div class="text-xs text-slate-400">Assigned agent</div><div class="text-slate-900">{{ customer.assignedAgentId || 'unassigned' }}</div></div>
+            <div>
+              <div class="text-xs text-slate-400">Assigned agent</div>
+              <router-link v-if="customer.assignedAgentCode"
+                :to="{ name: 'agents', query: { q: customer.assignedAgentCode } }"
+                class="text-brand-600 hover:text-brand-800 hover:underline">
+                {{ customer.assignedAgentCode }}<span v-if="customer.assignedAgentName" class="text-slate-500"> · {{ customer.assignedAgentName }}</span>
+              </router-link>
+              <span v-else class="text-slate-400">unassigned</span>
+            </div>
             <div><div class="text-xs text-slate-400">Created by</div><div class="text-slate-900">{{ customer.createdByAgentId || '—' }}</div></div>
             <div><div class="text-xs text-slate-400">Registered</div><div class="text-slate-900">{{ customer.registeredAt || '—' }}</div></div>
             <div><div class="text-xs text-slate-400">Last contact</div><div class="text-slate-900">{{ customer.lastContact || '—' }}</div></div>
@@ -367,16 +376,40 @@ function statusBadge(s: string): string {
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100">
-                <tr v-for="p in policies" :key="p.id">
-                  <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ p.applicationNo ?? '—' }}</td>
+                <tr v-for="p in policies" :key="p.id" class="hover:bg-slate-50">
+                  <td class="px-4 py-2 font-mono text-xs">
+                    <router-link v-if="p.applicationNo"
+                      :to="{ name: 'policies', query: { open: p.id } }"
+                      class="text-brand-600 hover:text-brand-800 hover:underline">
+                      {{ p.applicationNo }}
+                    </router-link>
+                    <span v-else class="text-slate-400">—</span>
+                  </td>
                   <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ p.policyNo ?? '—' }}</td>
                   <td class="px-4 py-2">
-                    <div class="text-slate-900 truncate max-w-[200px]">{{ p.productName ?? p.productCode }}</div>
-                    <div class="text-xs text-slate-500">{{ p.carrierCode }}</div>
+                    <router-link v-if="p.productId"
+                      :to="{ name: 'products', query: { open: p.productId } }"
+                      class="block text-brand-600 hover:text-brand-800 hover:underline truncate max-w-[200px]">
+                      {{ p.productName ?? p.productCode }}
+                    </router-link>
+                    <span v-else class="block text-slate-900 truncate max-w-[200px]">{{ p.productName ?? p.productCode }}</span>
+                    <router-link v-if="p.carrierId"
+                      :to="{ name: 'carriers', query: { open: p.carrierId } }"
+                      class="text-xs text-brand-600 hover:text-brand-800 hover:underline">
+                      {{ p.carrierCode }}
+                    </router-link>
+                    <span v-else class="text-xs text-slate-500">{{ p.carrierCode }}</span>
                   </td>
-                  <td class="px-4 py-2 text-slate-700">{{ p.agentCode }}</td>
+                  <td class="px-4 py-2">
+                    <router-link v-if="p.agentCode"
+                      :to="{ name: 'agents', query: { q: p.agentCode } }"
+                      class="text-brand-600 hover:text-brand-800 hover:underline">
+                      {{ p.agentCode }}
+                    </router-link>
+                    <span v-else class="text-slate-400">—</span>
+                  </td>
                   <td class="px-4 py-2 text-right text-slate-900">{{ fmtBaht(p.annualPremium) }}</td>
-                  <td class="px-4 py-2 text-slate-700">{{ p.effectiveDate ?? '—' }}</td>
+                  <td class="px-4 py-2 text-slate-700">{{ fmtDate(p.effectiveDate) || '—' }}</td>
                   <td class="px-4 py-2">
                     <span :class="['inline-flex px-2 py-0.5 rounded-md text-xs font-medium', statusBadge(p.status)]"
                       :title="p.status">{{ p.statusLabel || p.status }}</span>

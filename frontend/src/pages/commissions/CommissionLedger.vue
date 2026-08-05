@@ -6,6 +6,7 @@ import {
   type LedgerParty,
 } from '../../api/reports'
 import { ApiError } from '../../api/client'
+import DateInput from '../../components/DateInput.vue'
 
 const filters = reactive<{
   agentCode: string
@@ -99,13 +100,11 @@ function partyBadge(p: LedgerParty): string {
       </div>
       <div>
         <label class="text-xs font-medium text-slate-500 mb-1 block">From</label>
-        <input type="date" v-model="filters.fromDate"
-          class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white" />
+        <DateInput v-model="filters.fromDate" :max="filters.toDate || undefined" />
       </div>
       <div>
         <label class="text-xs font-medium text-slate-500 mb-1 block">To</label>
-        <input type="date" v-model="filters.toDate"
-          class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white" />
+        <DateInput v-model="filters.toDate" :min="filters.fromDate || undefined" />
       </div>
       <button
         class="btn btn-brand w-full md:w-auto px-4 py-1.5 bg-brand-600 text-white rounded-lg text-sm hover:bg-brand-700"
