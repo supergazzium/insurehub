@@ -48,4 +48,9 @@ class Carrier extends Model
     {
         return $this->hasMany(Contract::class);
     }
+
+    public function credentials(): HasMany
+    {
+        return $this->hasMany(CarrierCredential::class)->orderBy('sort_order')->orderBy('id');
+    }
 }

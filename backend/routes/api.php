@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CarrierBankAccountController;
+use App\Http\Controllers\Api\CarrierCredentialController;
 use App\Http\Controllers\Api\CarrierContactGroupController;
 use App\Http\Controllers\Api\CarrierController;
 use App\Http\Controllers\Api\CommissionController;
@@ -129,6 +130,13 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
         ->only(['index', 'store', 'update', 'destroy']);
     Route::apiResource('carriers.contacts', \App\Http\Controllers\Api\CarrierContactController::class)
         ->only(['index', 'store', 'update', 'destroy']);
+    Route::apiResource('carriers.credentials', CarrierCredentialController::class)
+        ->parameters(['credentials' => 'credential'])
+        ->only(['index', 'store', 'update', 'destroy']);
+    // Tenant-wide label suggestions for the credential sticky-note picker.
+    // Registered above the resource routes wouldn't be needed (no path
+    // collision), but kept adjacent so the credentials surface is grouped.
+    Route::get('carrier-credentials/labels', [CarrierCredentialController::class, 'labels']);
     Route::apiResource('products', ProductController::class);
     Route::get('products/{product}/commission-rates', [ProductController::class, 'commissionRates']);
     Route::get('carriers/{carrier}/products/next-code', [ProductController::class, 'nextCode']);

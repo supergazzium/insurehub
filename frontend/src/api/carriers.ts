@@ -92,6 +92,38 @@ export function deleteCarrierBankAccount(carrierId: string, accountId: string) {
   return api.delete<{ message: string }>(`carriers/${carrierId}/bank-accounts/${accountId}`)
 }
 
+/** One carrier portal credential — matches CarrierCredentialResource. */
+export interface CarrierCredential {
+  id: string
+  carrierId: string
+  url: string
+  username: string
+  password: string
+  label: string
+  sortOrder: number
+}
+export type CarrierCredentialPayload = Partial<Omit<CarrierCredential, 'id' | 'carrierId'>>
+
+export function fetchCarrierCredentials(carrierId: string) {
+  return api.get<{ data: CarrierCredential[] }>(`carriers/${carrierId}/credentials`)
+}
+export function createCarrierCredential(carrierId: string, payload: CarrierCredentialPayload) {
+  return api.post<{ data: CarrierCredential }>(`carriers/${carrierId}/credentials`, payload)
+}
+export function updateCarrierCredential(carrierId: string, credentialId: string, payload: CarrierCredentialPayload) {
+  return api.patch<{ data: CarrierCredential }>(`carriers/${carrierId}/credentials/${credentialId}`, payload)
+}
+export function deleteCarrierCredential(carrierId: string, credentialId: string) {
+  return api.delete<{ message: string }>(`carriers/${carrierId}/credentials/${credentialId}`)
+}
+
+/** Tenant-wide label suggestions across every carrier's credentials.
+ *  Powers the sticky-note picker so labels can be reused between carriers. */
+export interface CredentialLabelStat { label: string; count: number }
+export function fetchCredentialLabels() {
+  return api.get<{ data: CredentialLabelStat[] }>('carrier-credentials/labels')
+}
+
 /** Sub-resource CRUD for /carriers/{id}/contacts. */
 export type CarrierContactPayload = Partial<Omit<CarrierContact, 'id' | 'carrierId'>>
 
