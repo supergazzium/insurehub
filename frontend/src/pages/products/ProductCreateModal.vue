@@ -267,19 +267,26 @@ const canSubmit = computed(() =>
   ageError.value === null,
 )
 
-const payload = computed(() => ({
-  code: form.code.trim(),
-  name: form.name.trim(),
-  carrierId: Number(form.carrierId),
-  type: form.type || null,
-  mainRider: form.mainRider || null,
-  category: form.category.trim() || null,
-  subCategory: form.subCategory.trim() || null,
-  minAge: form.minAge,
-  maxAge: form.maxAge,
-  commissionPercent: form.commissionPercent,
-  active: true,
-}))
+const payload = computed(() => {
+  const base: Record<string, unknown> = {
+    code: form.code.trim(),
+    name: form.name.trim(),
+    carrierId: Number(form.carrierId),
+    type: form.type || null,
+    mainRider: form.mainRider || null,
+    category: form.category.trim() || null,
+    subCategory: form.subCategory.trim() || null,
+    commissionPercent: form.commissionPercent,
+    active: true,
+  }
+  // Age band is Life-only — omit for non-life so we don't persist stale
+  // 0/99 defaults that would falsely narrow future queries.
+  if (form.insureType === 'life') {
+    base.minAge = form.minAge
+    base.maxAge = form.maxAge
+  }
+  return base
+})
 
 watch(
   () => props.open,
@@ -414,19 +421,24 @@ function onCreated(row: Record<string, unknown>): void {
             @input="nameTouched = true"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
-        <FormField label="Min age (0–99)" error-key="minAge" :errors="fieldErrors">
-          <input v-model.number="form.minAge" type="number" min="0" max="99" step="1"
-            @change="form.minAge = clampAge(form.minAge)"
-            :class="['w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400',
-              ageError ? 'border-rose-400' : 'border-slate-200']" />
-        </FormField>
-        <FormField label="Max age (0–99)" error-key="maxAge" :errors="fieldErrors">
-          <input v-model.number="form.maxAge" type="number" min="0" max="99" step="1"
-            @change="form.maxAge = clampAge(form.maxAge)"
-            :class="['w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400',
-              ageError ? 'border-rose-400' : 'border-slate-200']" />
-        </FormField>
-        <p v-if="ageError" class="col-span-2 -mt-2 text-xs text-rose-600">{{ ageError }}</p>
+        <!-- Age band is a Life-only concept — motor / tax / non-motor
+             products don't gate on the insured's age at the product level.
+             Hidden entirely for other types; skipped from the payload too. -->
+        <template v-if="form.insureType === 'life'">
+          <FormField label="Min age (0–99)" error-key="minAge" :errors="fieldErrors">
+            <input v-model.number="form.minAge" type="number" min="0" max="99" step="1"
+              @change="form.minAge = clampAge(form.minAge)"
+              :class="['w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400',
+                ageError ? 'border-rose-400' : 'border-slate-200']" />
+          </FormField>
+          <FormField label="Max age (0–99)" error-key="maxAge" :errors="fieldErrors">
+            <input v-model.number="form.maxAge" type="number" min="0" max="99" step="1"
+              @change="form.maxAge = clampAge(form.maxAge)"
+              :class="['w-full border rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400',
+                ageError ? 'border-rose-400' : 'border-slate-200']" />
+          </FormField>
+          <p v-if="ageError" class="col-span-2 -mt-2 text-xs text-rose-600">{{ ageError }}</p>
+        </template>
         <FormField label="ค่าคอมมิชชั่น (%)" class="col-span-2" error-key="commissionPercent" :errors="fieldErrors"
           hint="เว้นว่างได้ — ระบบจะบันทึกอัตราเดียวกันนี้สำหรับทุกปี (ปีที่ 1–10 และปีที่ 11 ขึ้นไป)">
           <div class="relative w-40">
