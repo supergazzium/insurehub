@@ -169,11 +169,17 @@ async function removeBankAccount(a: CarrierBankAccount): Promise<void> {
 const bankCopiedId = ref<string | 'all' | null>(null)
 
 function formatBankAccount(a: CarrierBankAccount): string {
+  // Copy uses the carrier's company name as the account name — matches
+  // how operators paste bank details into external forms/emails (the
+  // recipient wants the payee's company name, not the per-row account
+  // label). Falls back to the row's accountName if the carrier isn't
+  // loaded yet for some reason.
+  const accountName = carrier.value?.name || a.accountName || '-'
   const lines = [
     `Bank: ${bankLabelForRow(a) || '-'}`,
     `Branch: ${a.branch || '-'}`,
     `Account No: ${a.accountNo || '-'}`,
-    `Account Name: ${a.accountName || '-'}`,
+    `Account Name: ${accountName}`,
   ]
   return lines.join('\n')
 }
@@ -578,7 +584,6 @@ function typeBadge(insureType: string): string {
                   <th class="px-3 py-2 text-left">Bank</th>
                   <th class="px-3 py-2 text-left">Branch</th>
                   <th class="px-3 py-2 text-left">Account No</th>
-                  <th class="px-3 py-2 text-left">Account Name</th>
                   <th class="px-3 py-2 text-center">Primary</th>
                   <th class="px-3 py-2"></th>
                   <th class="px-3 py-2"></th>
@@ -586,7 +591,7 @@ function typeBadge(insureType: string): string {
               </thead>
               <tbody class="divide-y divide-slate-100">
                 <tr v-if="!bankAccounts.length && !bankAddingNew">
-                  <td class="px-3 py-3 text-slate-500 text-xs" colspan="7">No bank accounts yet — add one below.</td>
+                  <td class="px-3 py-3 text-slate-500 text-xs" colspan="6">No bank accounts yet — add one below.</td>
                 </tr>
                 <tr v-for="a in bankAccounts" :key="a.id" :class="{ 'opacity-60': bankSavingId === a.id }">
                   <td class="px-3 py-2">
@@ -607,10 +612,6 @@ function typeBadge(insureType: string): string {
                   <td class="px-3 py-2">
                     <input :value="a.accountNo" @change="e => saveBankAccount(a, 'accountNo', (e.target as HTMLInputElement).value)"
                       class="w-full border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none font-mono" />
-                  </td>
-                  <td class="px-3 py-2">
-                    <input :value="a.accountName" @change="e => saveBankAccount(a, 'accountName', (e.target as HTMLInputElement).value)"
-                      class="w-full border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
                   </td>
                   <td class="px-3 py-2 text-center">
                     <input type="checkbox" :checked="a.isPrimary"
@@ -644,10 +645,6 @@ function typeBadge(insureType: string): string {
                   <td class="px-3 py-2">
                     <input v-model.trim="newBank.accountNo" placeholder="001-2-34567-8"
                       class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none font-mono" />
-                  </td>
-                  <td class="px-3 py-2">
-                    <input v-model.trim="newBank.accountName" placeholder="ชื่อบัญชี"
-                      class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
                   </td>
                   <td class="px-3 py-2 text-center">
                     <input v-model="newBank.isPrimary" type="checkbox" />
