@@ -234,7 +234,11 @@ watch(
       form.name = ''
       return
     }
-    const shortName = selectedCarrier.value?.nicknameTh || selectedCarrier.value?.code || null
+    // Use the carrier CODE (e.g. TOK, AIA) — not the nickname or full name.
+    // The code matches the product-code prefix (PDTOK0113) and the first
+    // token in the carrier dropdown label, so the auto-filled product name
+    // reads consistently with the rest of the UI.
+    const shortName = selectedCarrier.value?.code || null
     form.name = fillCarrier(template, shortName)
   },
 )

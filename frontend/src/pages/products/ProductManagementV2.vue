@@ -39,9 +39,10 @@ function handleCreated(row: Record<string, unknown>): void {
 }
 
 const filters = reactive({
-  // Client-side narrowing — filters the carrier list + Product Group
-  // options to match the chosen insureType. Not sent to the API (there's
-  // no `insureType` column on products; carrier_id already scopes it).
+  // Sent to the API and also used client-side to narrow the carrier list
+  // + Product Group options. Filters products by the joined carrier's
+  // insure_type — orthogonal to `type` (which filters pr.type on the
+  // product row itself).
   insureType: '' as '' | 'life' | 'non-life' | 'tax',
   q: '',
   carrierId: '',
@@ -68,6 +69,7 @@ async function load(): Promise<void> {
   await productStore.loadPage({
     q: filters.q || undefined,
     carrierId: filters.carrierId || undefined,
+    insureType: filters.insureType || undefined,
     type: filters.type || undefined,
     mainRider: filters.mainRider || undefined,
     activeOnly: filters.activeOnly || undefined,

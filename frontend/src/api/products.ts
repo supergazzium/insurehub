@@ -33,6 +33,9 @@ export interface ProductListRow {
 export interface ProductListFilters {
   q?: string
   carrierId?: string
+  /** Carrier's insure_type — life / non-life / tax. Filters the joined
+   *  carriers row, independent of `type` (which filters pr.type). */
+  insureType?: 'life' | 'non-life' | 'tax'
   type?: string
   category?: string
   mainRider?: string

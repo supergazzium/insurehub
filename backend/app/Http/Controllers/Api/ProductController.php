@@ -62,6 +62,13 @@ class ProductController extends ApiController
         if ($mainRider = $request->input('mainRider')) {
             $q->where('pr.main_rider', $mainRider);
         }
+        // Insurance-type filter — narrows by the carrier's insure_type
+        // (life / non-life / tax). Composes with carrierId, type, mainRider.
+        // The `type` param above filters pr.type (Life/Motor/etc.) — a
+        // different column, so no collision.
+        if ($insureType = $request->input('insureType')) {
+            $q->where('ca.insure_type', $insureType);
+        }
         if ($request->boolean('activeOnly')) {
             $q->where('pr.active', true);
         }
