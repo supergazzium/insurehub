@@ -332,6 +332,7 @@ function partyBadge(party: string): string {
           <!-- Editor -->
           <div v-if="editingRates" class="card p-4 space-y-3">
             <CommissionRatesForm :product-type="product.type" :product-category="product.category"
+              :insure-type="product.carrierInsureType"
               :initial="draftRates" @update:model-value="(v) => draftRates = v" />
             <div v-if="rateSaveError" class="text-xs text-rose-600">{{ rateSaveError }}</div>
             <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">

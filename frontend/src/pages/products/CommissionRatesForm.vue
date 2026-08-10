@@ -31,6 +31,10 @@ const props = defineProps<{
   /** Product category from the create/edit form. Combined with productType to
    *  pick the default shape — Life + ประเภทสามัญ triggers the age-year shape. */
   productCategory?: string | null
+  /** Insurance type ('life' | 'non-life' | 'tax'). Non-life products have
+   *  no notion of insured age, so the age-year shape is hidden and the
+   *  picker default is defended to non-age shapes. */
+  insureType?: string | null
   /** Prefill for edit mode. Undefined on create. */
   initial?: CommissionRatesPayload | null
 }>()
@@ -39,15 +43,27 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: CommissionRatesPayload): void
 }>()
 
-// Suggested default shape per product type + category. Operators can always
-// change it — this only picks the initial radio.
-function defaultShape(type: string | null | undefined, category: string | null | undefined): Shape {
+// True for products where the insured's age is a meaningful axis — Life
+// carriers only. Non-life and tax products have no entry-age concept
+// (Motor rates depend on vehicle, Health on sum-assured band, etc.), so
+// age-year is hidden and defaults are constrained.
+function isLifeInsureType(insure: string | null | undefined): boolean {
+  return (insure ?? '').toLowerCase() === 'life'
+}
+
+// Suggested default shape per product type + category + insure type.
+// Operators can always change it — this only picks the initial radio.
+function defaultShape(
+  type: string | null | undefined,
+  category: string | null | undefined,
+  insure: string | null | undefined,
+): Shape {
   const t = (type ?? '').toLowerCase()
   const c = (category ?? '').toLowerCase()
   // Life ประเภทสามัญ (Whole Life / Endowment / Annuity / Term) uses per-age-
   // bracket × per-year grids in the source PDFs. Route the default there so
-  // operators don't have to hunt for it.
-  if (t === 'life' && (category ?? '').includes('สามัญ')) return 'age-year'
+  // operators don't have to hunt for it — but only for Life products.
+  if (isLifeInsureType(insure) && t === 'life' && (category ?? '').includes('สามัญ')) return 'age-year'
   if (t.includes('life') && !t.includes('rider')) return 'per-year'
   if (t.includes('endowment') || t.includes('annuity')) return 'per-year'
   if (t.includes('health') || c.includes('health') || t === 'pa' || c.includes('ci')) return 'band'
@@ -55,16 +71,24 @@ function defaultShape(type: string | null | undefined, category: string | null |
   return 'flat'
 }
 
-const shape = ref<Shape>(props.initial?.shape ?? defaultShape(props.productType, props.productCategory))
+const shape = ref<Shape>(props.initial?.shape ?? defaultShape(props.productType, props.productCategory, props.insureType))
 
-// Watch productType + category so the default flips when the operator picks
-// a life product after already opening the form — but only if the operator
-// hasn't touched the picker yet (indicated by initial-only defaults).
+// Watch productType + category + insureType so the default flips when the
+// operator picks a different combination after already opening the form.
+// Guarded by shapeTouched so we don't overwrite a manual pick.
 const shapeTouched = ref(props.initial != null)
 watch(
-  () => [props.productType, props.productCategory] as const,
-  ([t, c]) => {
-    if (!shapeTouched.value) shape.value = defaultShape(t, c)
+  () => [props.productType, props.productCategory, props.insureType] as const,
+  ([t, c, i]) => {
+    // If the current shape is no longer available (e.g. operator switched
+    // Life → Non-life while age-year was selected), reset regardless of
+    // whether they touched the picker — we can't keep them on a hidden
+    // option. Otherwise honor the manual pick.
+    if (shape.value === 'age-year' && !isLifeInsureType(i)) {
+      shape.value = defaultShape(t, c, i)
+      return
+    }
+    if (!shapeTouched.value) shape.value = defaultShape(t, c, i)
   },
 )
 function pickShape(s: Shape): void {
@@ -221,6 +245,12 @@ const SHAPE_OPTIONS: Array<{ value: Shape; label: string; hint: string }> = [
   { value: 'band', label: 'ตามช่วงทุนประกัน', hint: 'เหมาะกับ Health / PA / CI' },
 ]
 
+// age-year requires an insured-age concept, which non-life products don't
+// have. Filter it out unless the carrier is Life.
+const visibleShapeOptions = computed(() =>
+  SHAPE_OPTIONS.filter((opt) => opt.value !== 'age-year' || isLifeInsureType(props.insureType)),
+)
+
 function fmtBaht(n: number | null): string {
   if (n === null) return ''
   return new Intl.NumberFormat('th-TH').format(n)
@@ -231,7 +261,7 @@ function fmtBaht(n: number | null): string {
   <div class="space-y-3">
     <!-- Shape picker -->
     <div class="flex flex-wrap gap-2">
-      <button v-for="opt in SHAPE_OPTIONS" :key="opt.value" type="button"
+      <button v-for="opt in visibleShapeOptions" :key="opt.value" type="button"
         @click="pickShape(opt.value)"
         :class="[
           'flex-1 min-w-[9rem] flex flex-col items-start gap-0.5 px-3 py-2 rounded-lg border text-left text-xs transition-colors',
