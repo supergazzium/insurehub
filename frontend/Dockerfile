@@ -23,6 +23,27 @@ COPY . .
 # so a bad type slips out at build time, not at runtime.
 RUN npm run build
 
+# ─── Stage 1b (optional): dev server with HMR ────────────────────────────
+# Selected by compose.dev.yaml. Reuses the `build` stage's node_modules
+# layer so `docker compose --profile ... up` doesn't need to reinstall.
+# The source tree is bind-mounted at runtime by compose.dev.yaml — nothing
+# is baked into this stage's filesystem beyond node_modules.
+#
+# NOT used by Coolify: prod builds target the `runtime` stage below.
+FROM node:22-alpine AS dev
+
+WORKDIR /app
+
+COPY package.json package-lock.json ./
+RUN npm ci --no-audit --no-fund
+
+# Bind mount from compose provides src/, index.html, vite.config.ts, etc.
+# --host 0.0.0.0 so the container port is reachable from the host.
+# --strictPort so we fail loudly if 5173 is already bound instead of
+# silently switching to 5174 (which the host mapping wouldn't route to).
+EXPOSE 5173
+CMD ["npx", "vite", "--host", "0.0.0.0", "--port", "5173", "--strictPort"]
+
 # ─── Stage 2: serve the built SPA with nginx ─────────────────────────────
 FROM nginx:1.27-alpine AS runtime
 

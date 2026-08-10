@@ -8,6 +8,12 @@
 #
 # and get a working stack with MySQL 8 + backend + frontend. Prod
 # deployments are done via Coolify per Dockerfile.
+#
+# Frontend dev with HMR (edit-reload without container rebuild):
+#
+#     docker compose -f compose.yaml -f compose.dev.yaml up --build
+#
+# See compose.dev.yaml for what that override does.
 
 services:
   mysql:
