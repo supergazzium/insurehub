@@ -1,30 +1,36 @@
 <script setup lang="ts">
 // Shape-shifting commission-rate editor for products.
 //
-// Five shapes, chosen by the operator (with a smart default per product type):
+// Six shapes, chosen by the operator (with a smart default per product type):
 //   • skip        — no rates now, add later.
 //   • flat        — arbitrary map of installment_term → three parties. Fits
 //                    Rider and anything with a single fixed rate per party.
 //   • installment — fixed grid main/3/6/12 → three parties. Same physical
 //                    shape as flat; separate picker so the operator sees a
 //                    familiar template for installment-driven products.
-//   • per-year    — Y1..Y5 + Y6+, three parties. Fits Whole Life, Endowment,
-//                    Annuity, and anything else with a maturity curve.
+//   • per-year    — Y1..Y5 + Y6+, three parties. Fits Whole Life / Endowment /
+//                    Annuity when age doesn't affect the rate (rare).
 //   • band        — repeatable rows (min, max, installment_term, parties).
 //                    Fits Health/PA/CI where rate varies by sum-assured tier.
+//   • age-year    — repeatable entry-age brackets, each with a full Y1..Y6+ ×
+//                    three-party grid. Default for Life → ประเภทสามัญ
+//                    (Whole Life / Endowment / Annuity / Term).
 //
 // Emits `update:modelValue` with the CommissionRatesPayload the caller passes
 // straight into the product create/update payload.
 
 import { computed, ref, watch } from 'vue'
-import type { BandRow, CommissionRatesPayload, RateTriple } from '../../api/products'
+import type { AgeBracket, BandRow, CommissionRatesPayload, RateTriple } from '../../api/products'
 
-type Shape = 'skip' | 'flat' | 'installment' | 'per-year' | 'band'
+type Shape = 'skip' | 'flat' | 'installment' | 'per-year' | 'band' | 'age-year'
 const FIXED_INSTALLMENT_TERMS = ['main', '3', '6', '12'] as const
 
 const props = defineProps<{
   /** Product type from the create/edit form. Used to pick the default shape. */
   productType?: string | null
+  /** Product category from the create/edit form. Combined with productType to
+   *  pick the default shape — Life + ประเภทสามัญ triggers the age-year shape. */
+  productCategory?: string | null
   /** Prefill for edit mode. Undefined on create. */
   initial?: CommissionRatesPayload | null
 }>()
@@ -33,26 +39,32 @@ const emit = defineEmits<{
   (e: 'update:modelValue', value: CommissionRatesPayload): void
 }>()
 
-// Suggested default shape per product type. Operators can always change it.
-function defaultShape(type: string | null | undefined): Shape {
+// Suggested default shape per product type + category. Operators can always
+// change it — this only picks the initial radio.
+function defaultShape(type: string | null | undefined, category: string | null | undefined): Shape {
   const t = (type ?? '').toLowerCase()
+  const c = (category ?? '').toLowerCase()
+  // Life ประเภทสามัญ (Whole Life / Endowment / Annuity / Term) uses per-age-
+  // bracket × per-year grids in the source PDFs. Route the default there so
+  // operators don't have to hunt for it.
+  if (t === 'life' && (category ?? '').includes('สามัญ')) return 'age-year'
   if (t.includes('life') && !t.includes('rider')) return 'per-year'
   if (t.includes('endowment') || t.includes('annuity')) return 'per-year'
-  if (t.includes('health') || t.includes('ci') || t === 'pa') return 'band'
+  if (t.includes('health') || c.includes('health') || t === 'pa' || c.includes('ci')) return 'band'
   if (t.includes('motor')) return 'installment'
   return 'flat'
 }
 
-const shape = ref<Shape>(props.initial?.shape ?? defaultShape(props.productType))
+const shape = ref<Shape>(props.initial?.shape ?? defaultShape(props.productType, props.productCategory))
 
-// Watch productType so the default flips when the operator picks a life
-// product after already opening the form — but only if the operator hasn't
-// touched the picker yet (indicated by initial-only defaults).
+// Watch productType + category so the default flips when the operator picks
+// a life product after already opening the form — but only if the operator
+// hasn't touched the picker yet (indicated by initial-only defaults).
 const shapeTouched = ref(props.initial != null)
 watch(
-  () => props.productType,
-  (t) => {
-    if (!shapeTouched.value) shape.value = defaultShape(t)
+  () => [props.productType, props.productCategory] as const,
+  ([t, c]) => {
+    if (!shapeTouched.value) shape.value = defaultShape(t, c)
   },
 )
 function pickShape(s: Shape): void {
@@ -125,12 +137,60 @@ const years = ref<Record<string, RateTriple>>(
     : Object.fromEntries(YEAR_KEYS.map((y) => [y, emptyTriple()])),
 )
 
+// ── Age-year shape state ──────────────────────────────────────────────────
+// Repeatable entry-age brackets; each bracket carries the same Y1..Y6+ ×
+// 3-party grid as per-year. Seeder maps one bracket → one wide-table row.
+const ageBrackets = ref<AgeBracket[]>(
+  props.initial?.shape === 'age-year' && props.initial.brackets.length
+    ? props.initial.brackets.map((b) => ({
+        minAge: b.minAge,
+        maxAge: b.maxAge,
+        // Ensure every year key exists even if the API returned partials.
+        years: Object.fromEntries(YEAR_KEYS.map((y) => [y, b.years[y] ?? emptyTriple()])),
+      }))
+    : [emptyAgeBracket()],
+)
+function emptyAgeBracket(): AgeBracket {
+  return {
+    minAge: null,
+    maxAge: null,
+    years: Object.fromEntries(YEAR_KEYS.map((y) => [y, emptyTriple()])),
+  }
+}
+function addAgeBracket(): void {
+  // New bracket picks up where the last one ended so operators just fill "up to".
+  const last = ageBrackets.value[ageBrackets.value.length - 1]
+  const min = last?.maxAge !== null && last?.maxAge !== undefined
+    ? Number(last.maxAge) + 1
+    : null
+  ageBrackets.value = [...ageBrackets.value, { ...emptyAgeBracket(), minAge: min }]
+}
+function removeAgeBracket(idx: number): void {
+  if (ageBrackets.value.length <= 1) return
+  const next = [...ageBrackets.value]
+  next.splice(idx, 1)
+  ageBrackets.value = next
+}
+function copyBracketYearAcross(bracketIdx: number, fromYear: string): void {
+  const idx = YEAR_KEYS.indexOf(fromYear as (typeof YEAR_KEYS)[number])
+  if (idx < 0 || idx >= YEAR_KEYS.length - 1) return
+  const src = ageBrackets.value[bracketIdx].years[fromYear]
+  const target = YEAR_KEYS[idx + 1]
+  const next = [...ageBrackets.value]
+  next[bracketIdx] = {
+    ...next[bracketIdx],
+    years: { ...next[bracketIdx].years, [target]: { ...src } },
+  }
+  ageBrackets.value = next
+}
+
 // ── Emit ──────────────────────────────────────────────────────────────────
 const payload = computed<CommissionRatesPayload>(() => {
   if (shape.value === 'skip') return { shape: 'skip' }
   if (shape.value === 'flat') return { shape: 'flat', installments: flat.value }
   if (shape.value === 'installment') return { shape: 'installment', installments: installment.value }
   if (shape.value === 'per-year') return { shape: 'per-year', years: years.value }
+  if (shape.value === 'age-year') return { shape: 'age-year', brackets: ageBrackets.value }
   return { shape: 'band', bands: bands.value }
 })
 watch(payload, (v) => emit('update:modelValue', v), { immediate: true, deep: true })
@@ -156,7 +216,8 @@ const SHAPE_OPTIONS: Array<{ value: Shape; label: string; hint: string }> = [
   { value: 'skip', label: 'ไม่กำหนดตอนนี้', hint: 'เพิ่มค่าคอมภายหลังในหน้ารายละเอียดสินค้า' },
   { value: 'flat', label: 'อัตราเดียว', hint: 'เหมาะกับ Rider' },
   { value: 'installment', label: 'ตามงวดชำระ', hint: 'เหมาะกับ Motor / รายเดือน–รายปี' },
-  { value: 'per-year', label: 'ตามปีกรมธรรม์ (Y1–Y6+)', hint: 'เหมาะกับ Whole Life, Endowment, Annuity' },
+  { value: 'per-year', label: 'ตามปีกรมธรรม์ (Y1–Y6+)', hint: 'อายุไม่เกี่ยว — Term ล้วน' },
+  { value: 'age-year', label: 'ตามอายุและปีกรมธรรม์', hint: 'เหมาะกับ Life ประเภทสามัญ' },
   { value: 'band', label: 'ตามช่วงทุนประกัน', hint: 'เหมาะกับ Health / PA / CI' },
 ]
 
@@ -298,7 +359,7 @@ function fmtBaht(n: number | null): string {
     </div>
 
     <!-- Band (sum-assured tiers) -->
-    <div v-else class="card p-3 space-y-2 overflow-x-auto">
+    <div v-else-if="shape === 'band'" class="card p-3 space-y-2 overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead>
           <tr class="text-xs text-slate-500">
@@ -353,6 +414,80 @@ function fmtBaht(n: number | null): string {
         </button>
         <p class="text-[10px] text-slate-400">
           เว้นว่างช่องต่ำสุด/สูงสุด = ไม่จำกัด (เป็นช่วง fallback)
+        </p>
+      </div>
+    </div>
+
+    <!-- Age-year (Life ประเภทสามัญ) — repeatable age brackets, each with a
+         Y1..Y6+ × 3-party grid. Nested layout: one card per bracket. -->
+    <div v-else class="space-y-3">
+      <div v-for="(bracket, bIdx) in ageBrackets" :key="bIdx"
+        class="card p-3 space-y-2 overflow-x-auto">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2">
+            <span class="text-xs font-medium text-slate-500">ช่วงอายุผู้เอาประกัน:</span>
+            <div class="relative">
+              <input v-model.number="bracket.minAge" type="number" min="0" max="120" step="1"
+                placeholder="0"
+                class="w-20 border border-slate-200 rounded-md px-2 py-1 text-sm text-right focus:outline-none focus:border-brand-400" />
+            </div>
+            <span class="text-xs text-slate-400">–</span>
+            <div class="relative">
+              <input v-model.number="bracket.maxAge" type="number" min="0" max="120" step="1"
+                placeholder="120"
+                class="w-20 border border-slate-200 rounded-md px-2 py-1 text-sm text-right focus:outline-none focus:border-brand-400" />
+            </div>
+            <span class="text-[11px] text-slate-400">ปี</span>
+          </div>
+          <button v-if="ageBrackets.length > 1" type="button"
+            @click="removeAgeBracket(bIdx)"
+            class="text-slate-400 hover:text-rose-500 text-xs flex items-center gap-1" title="ลบช่วงอายุนี้">
+            <i class="pi pi-times text-[10px]" /> ลบช่วง
+          </button>
+        </div>
+
+        <table class="min-w-full text-sm">
+          <thead>
+            <tr class="text-xs text-slate-500">
+              <th class="text-left font-medium py-1 pr-3 w-28">ฝ่าย</th>
+              <th v-for="y in YEAR_KEYS" :key="y" class="text-right font-medium py-1 px-1">
+                {{ y === '6' ? 'ปี 6+' : `ปี ${y}` }}
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="p in PARTY_LABELS" :key="p.key" class="border-t border-slate-100">
+              <td class="py-1.5 pr-3">
+                <div class="text-xs font-medium text-slate-700">{{ p.label }}</div>
+                <div class="text-[10px] text-slate-400">{{ p.helper }}</div>
+              </td>
+              <td v-for="y in YEAR_KEYS" :key="y" class="py-1.5 px-1">
+                <div class="relative">
+                  <input v-model.number="bracket.years[y][p.key]" type="number" min="0" max="100" step="0.01"
+                    class="w-full border border-slate-200 rounded-md pl-1.5 pr-5 py-1 text-xs text-right focus:outline-none focus:border-brand-400" />
+                  <span class="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]">%</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <div class="flex items-center justify-end gap-2 text-[11px] text-slate-500">
+          <span>เติมค่าจากปีก่อนหน้า:</span>
+          <button v-for="y in YEAR_KEYS.slice(0, -1)" :key="y" type="button"
+            @click="copyBracketYearAcross(bIdx, y)"
+            class="px-1.5 py-0.5 rounded border border-slate-200 hover:bg-slate-50">
+            ปี {{ y }} → ปี {{ YEAR_KEYS[YEAR_KEYS.indexOf(y as (typeof YEAR_KEYS)[number]) + 1] === '6' ? '6+' : YEAR_KEYS[YEAR_KEYS.indexOf(y as (typeof YEAR_KEYS)[number]) + 1] }}
+          </button>
+        </div>
+      </div>
+
+      <div class="flex items-center justify-between">
+        <button type="button" @click="addAgeBracket"
+          class="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1">
+          <i class="pi pi-plus text-[10px]" /> เพิ่มช่วงอายุ
+        </button>
+        <p class="text-[10px] text-slate-400">
+          เว้นว่างช่อง min/max อายุ = ไม่จำกัด (ช่วง fallback)
         </p>
       </div>
     </div>

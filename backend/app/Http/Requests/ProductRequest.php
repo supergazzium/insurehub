@@ -86,7 +86,7 @@ class ProductRequest extends FormRequest
             // All rate values are percents (0..100). Nulls mean "leave this
             // party at the previous value on update; store nothing on create".
             'commissionRates' => ['sometimes', 'nullable', 'array'],
-            'commissionRates.shape' => ['required_with:commissionRates', 'string', 'in:flat,per-year,installment,band,skip'],
+            'commissionRates.shape' => ['required_with:commissionRates', 'string', 'in:flat,per-year,installment,band,age-year,skip'],
 
             // flat + installment share this validation branch.
             'commissionRates.installments' => ['sometimes', 'array'],
@@ -112,6 +112,19 @@ class ProductRequest extends FormRequest
             'commissionRates.bands.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'commissionRates.bands.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'commissionRates.bands.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+
+            // age-year branch — Life ประเภทสามัญ. Repeatable age brackets,
+            // each carrying a full Y1..Y6+ × 3-party grid. Storage: one
+            // product_commission_rates row per bracket (see ProductRateSeeder).
+            'commissionRates.brackets' => ['sometimes', 'array'],
+            'commissionRates.brackets.*' => ['array'],
+            'commissionRates.brackets.*.minAge' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:120'],
+            'commissionRates.brackets.*.maxAge' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:120'],
+            'commissionRates.brackets.*.years' => ['sometimes', 'array'],
+            'commissionRates.brackets.*.years.*' => ['array'],
+            'commissionRates.brackets.*.years.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.brackets.*.years.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.brackets.*.years.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
         ];
     }
 

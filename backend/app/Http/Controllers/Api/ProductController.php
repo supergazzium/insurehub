@@ -187,25 +187,48 @@ class ProductController extends ApiController
             ->orderByRaw('COALESCE(min_sum_assure, 0)')
             ->get(['id', 'party', 'installment_term', 'min_sum_assure', 'max_sum_assure', 'rate']);
 
-        $wide = DB::table('product_commission_rates')
+        // Wide table can now hold multiple rows per product — one per
+        // entry-age bracket. Fetch all rows ordered so unbounded (both age
+        // bounds NULL) is last; this way `$years` (a single-grid legacy field)
+        // prefers the first specific bracket, which is what the drawer's
+        // per-year preview needs. `$brackets` carries all rows for the new
+        // age-year shape.
+        $wideRows = DB::table('product_commission_rates')
             ->where('product_id', $product->id)
+            ->orderByRaw('CASE WHEN min_age IS NULL AND max_age IS NULL THEN 1 ELSE 0 END')
+            ->orderByRaw('COALESCE(min_age, 0)')
             ->orderByDesc('id')
-            ->first();
+            ->get();
 
-        $years = null;
-        if ($wide !== null) {
-            $years = [];
+        $extractYears = static function (object $row): array {
+            $grid = [];
             foreach ([1, 2, 3, 4, 5, 6] as $y) {
                 // Year 6 in the UI represents the "6+" bucket, which stores in
                 // com_rate_yr_6 through yr_11up. Reading yr_6 back is fine
                 // because the seeder writes the same value across the tail.
-                $years[$y] = [
-                    'inh' => $wide->{"com_rate_yr_{$y}"} !== null ? (float) $wide->{"com_rate_yr_{$y}"} : null,
-                    'ag' => $wide->{"ag_rate_yr_{$y}"} !== null ? (float) $wide->{"ag_rate_yr_{$y}"} : null,
-                    'ov' => $wide->{"in_rate_yr_{$y}"} !== null ? (float) $wide->{"in_rate_yr_{$y}"} : null,
+                $grid[$y] = [
+                    'inh' => $row->{"com_rate_yr_{$y}"} !== null ? (float) $row->{"com_rate_yr_{$y}"} : null,
+                    'ag' => $row->{"ag_rate_yr_{$y}"} !== null ? (float) $row->{"ag_rate_yr_{$y}"} : null,
+                    'ov' => $row->{"in_rate_yr_{$y}"} !== null ? (float) $row->{"in_rate_yr_{$y}"} : null,
                 ];
             }
+
+            return $grid;
+        };
+
+        $brackets = [];
+        foreach ($wideRows as $row) {
+            $brackets[] = [
+                'minAge' => $row->min_age !== null ? (int) $row->min_age : null,
+                'maxAge' => $row->max_age !== null ? (int) $row->max_age : null,
+                'years' => $extractYears($row),
+            ];
         }
+
+        // Backward-compat `years` field — used by the per-year prefill path.
+        // Prefer the first bracket (which is either the only one, or the
+        // "least specific after specifics" per the ORDER BY above).
+        $years = $wideRows->isNotEmpty() ? $extractYears($wideRows->first()) : null;
 
         // Band reconstruction: bucket the installments rows by
         // (min, max, installment_term) so the drawer's band editor can
@@ -248,6 +271,7 @@ class ProductController extends ApiController
             ]),
             'years' => $years,
             'bands' => $bands,
+            'brackets' => $brackets,
         ]);
     }
 

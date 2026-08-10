@@ -53,6 +53,11 @@ class ProductRateSeeder
         }
         if ($shape === 'band') {
             $this->seedBands($product, $payload['bands'] ?? []);
+
+            return;
+        }
+        if ($shape === 'age-year') {
+            $this->seedAgeYear($product, $payload['brackets'] ?? []);
         }
     }
 
@@ -156,32 +161,78 @@ class ProductRateSeeder
                 ->where('product_id', $product->id)
                 ->delete();
 
-            $row = ['product_id' => $product->id];
-            foreach ($years as $yearKey => $parties) {
-                $year = (int) $yearKey;
-                if ($year < 1 || $year > 6) {
-                    continue;
-                }
-                // Year 6 in the UI represents "year 6+" — fan out into every
-                // real column from yr_6 up to yr_11up so the engine returns
-                // this rate for renewals in year 7, 8, 9, 10, and 11+.
-                $columns = $year === 6 ? [6, 7, 8, 9, 10, '11up'] : [$year];
-                foreach ($columns as $col) {
-                    if (($parties['inh'] ?? null) !== null) {
-                        $row["com_rate_yr_{$col}"] = $parties['inh'];
-                    }
-                    if (($parties['ag'] ?? null) !== null) {
-                        $row["ag_rate_yr_{$col}"] = $parties['ag'];
-                    }
-                    if (($parties['ov'] ?? null) !== null) {
-                        $row["in_rate_yr_{$col}"] = $parties['ov'];
-                    }
-                }
-            }
+            // Single "unbounded age" bracket. min_age/max_age stay null so the
+            // engine treats this as the any-age fallback — matches pre-existing
+            // per-year behavior exactly.
+            $row = $this->buildWideRow($product, $years);
             if (count($row) > 1) {
                 ProductCommissionRate::create($row);
             }
         });
+    }
+
+    /**
+     * @param  list<array{minAge?: int|null, maxAge?: int|null, years?: array<int|string, array{inh?: float|null, ag?: float|null, ov?: float|null}>}>  $brackets
+     *                                                                                                                                                             One row per (age-bracket) tuple. Each bracket carries a full Y1..Y6+ grid.
+     *                                                                                                                                                             Missing bounds mean unbounded on that side.
+     */
+    private function seedAgeYear(Product $product, array $brackets): void
+    {
+        DB::transaction(function () use ($product, $brackets): void {
+            ProductCommissionRate::query()
+                ->where('product_id', $product->id)
+                ->delete();
+
+            foreach ($brackets as $bracket) {
+                $years = $bracket['years'] ?? [];
+                if (! is_array($years)) {
+                    continue;
+                }
+                $row = $this->buildWideRow($product, $years);
+                // Only persist bracket-scoping if the row also has at least
+                // one rate cell — otherwise the bracket is empty noise.
+                if (count($row) <= 1) {
+                    continue;
+                }
+                $row['min_age'] = $bracket['minAge'] ?? null;
+                $row['max_age'] = $bracket['maxAge'] ?? null;
+                ProductCommissionRate::create($row);
+            }
+        });
+    }
+
+    /**
+     * Build a single wide-table row from a Y1..Y6 grid. Year 6 fans out into
+     * every real column from yr_6 up to yr_11up so the engine returns this
+     * rate for renewals in year 7, 8, 9, 10, and 11+. Shared between
+     * seedPerYear and seedAgeYear so the fan-out logic stays in one place.
+     *
+     * @param  array<int|string, array{inh?: float|null, ag?: float|null, ov?: float|null}>  $years
+     * @return array<string, mixed>
+     */
+    private function buildWideRow(Product $product, array $years): array
+    {
+        $row = ['product_id' => $product->id];
+        foreach ($years as $yearKey => $parties) {
+            $year = (int) $yearKey;
+            if ($year < 1 || $year > 6) {
+                continue;
+            }
+            $columns = $year === 6 ? [6, 7, 8, 9, 10, '11up'] : [$year];
+            foreach ($columns as $col) {
+                if (($parties['inh'] ?? null) !== null) {
+                    $row["com_rate_yr_{$col}"] = $parties['inh'];
+                }
+                if (($parties['ag'] ?? null) !== null) {
+                    $row["ag_rate_yr_{$col}"] = $parties['ag'];
+                }
+                if (($parties['ov'] ?? null) !== null) {
+                    $row["in_rate_yr_{$col}"] = $parties['ov'];
+                }
+            }
+        }
+
+        return $row;
     }
 
     /**

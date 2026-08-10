@@ -99,6 +99,14 @@ export interface BandRow extends RateTriple {
   installmentTerm: string | null
 }
 
+/** One entry-age bracket in the age-year shape. Carries a full Y1..Y6+ ×
+ *  3-party grid; both age bounds are nullable (null = unbounded that side). */
+export interface AgeBracket {
+  minAge: number | null
+  maxAge: number | null
+  years: Record<string, RateTriple>
+}
+
 /** Structured rate payload sent on product create/update. Matches
  *  ProductRequest::rules() `commissionRates.*`. */
 export type CommissionRatesPayload =
@@ -107,14 +115,18 @@ export type CommissionRatesPayload =
   | { shape: 'installment'; installments: Record<string, RateTriple> }
   | { shape: 'per-year'; years: Record<string, RateTriple> }
   | { shape: 'band'; bands: BandRow[] }
+  | { shape: 'age-year'; brackets: AgeBracket[] }
 
-/** Response of GET /products/{id}/commission-rates. `years` is null when the
- *  product has no wide-table row. `bands` is the same installments data
- *  bucketed by (min, max, term) so the band editor can prefill. */
+/** Response of GET /products/{id}/commission-rates.
+ *  - `years` is null when the product has no wide-table row. When the product
+ *    uses age brackets, `years` holds the first bracket for backward compat.
+ *  - `bands` is the installments data bucketed by (min, max, term).
+ *  - `brackets` is the full list of age-year rows. */
 export interface CommissionRatesResponse {
   data: CommissionRateRow[]
   years: Record<string, RateTriple> | null
   bands: BandRow[]
+  brackets: AgeBracket[]
 }
 
 export function fetchProductCommissionRates(productId: string) {

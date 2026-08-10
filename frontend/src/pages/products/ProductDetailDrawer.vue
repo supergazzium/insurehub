@@ -3,7 +3,7 @@
 import { ref, watch, computed, onMounted } from 'vue'
 import { fetchProduct, fetchProductCommissionRates, fetchProductTaxonomy, updateProductCommissionRates,
   type ProductListRow, type CommissionRateRow, type ProductTaxonomyRow, type CommissionRatesPayload,
-  type RateTriple, type BandRow } from '../../api/products'
+  type RateTriple, type BandRow, type AgeBracket } from '../../api/products'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import CommissionRatesForm from './CommissionRatesForm.vue'
@@ -66,6 +66,15 @@ const product = ref<ProductListRow | null>(null)
 const rates = ref<CommissionRateRow[]>([])
 const yearsSnapshot = ref<Record<string, RateTriple> | null>(null)
 const bandsSnapshot = ref<BandRow[]>([])
+const bracketsSnapshot = ref<AgeBracket[]>([])
+
+// True when the product is using the age-year shape — i.e. the wide table
+// carries multiple rows or at least one row has an age bound. Drives the
+// read-only display: per-bracket cards instead of the flat rate table.
+const hasAgeBrackets = computed(() =>
+  bracketsSnapshot.value.length > 1
+    || bracketsSnapshot.value.some((b) => b.minAge !== null || b.maxAge !== null),
+)
 
 // ── Edit rates ─────────────────────────────────────────────────────────────
 const editingRates = ref(false)
@@ -75,11 +84,21 @@ const rateSaveError = ref<string | null>(null)
 
 function openRatesEditor(): void {
   // Prefill priority:
-  //   1. per-year — if the wide table has data.
-  //   2. band     — if any installments row has a min/max sum-assured.
-  //   3. flat     — installments rows with no bands.
-  //   4. skip     — nothing on file.
-  if (yearsSnapshot.value) {
+  //   1. age-year — wide table has multiple rows or any row has an age bound.
+  //   2. per-year — single unbounded wide-table row.
+  //   3. band     — installments row with a sum-assured bound.
+  //   4. flat     — installments rows with no bands.
+  //   5. skip     — nothing on file.
+  const hasAgeBrackets = bracketsSnapshot.value.length > 1
+    || bracketsSnapshot.value.some((b) => b.minAge !== null || b.maxAge !== null)
+
+  if (hasAgeBrackets) {
+    draftRates.value = { shape: 'age-year', brackets: bracketsSnapshot.value.map((b) => ({
+      minAge: b.minAge,
+      maxAge: b.maxAge,
+      years: { ...b.years },
+    })) }
+  } else if (yearsSnapshot.value) {
     draftRates.value = { shape: 'per-year', years: yearsSnapshot.value }
   } else if (bandsSnapshot.value.some((b) => b.minSumAssure !== null || b.maxSumAssure !== null)) {
     draftRates.value = { shape: 'band', bands: [...bandsSnapshot.value] }
@@ -111,6 +130,7 @@ async function saveRates(): Promise<void> {
     rates.value = cr.data
     yearsSnapshot.value = cr.years
     bandsSnapshot.value = cr.bands ?? []
+    bracketsSnapshot.value = cr.brackets ?? []
     editingRates.value = false
   } catch (e: unknown) {
     rateSaveError.value = e instanceof ApiError
@@ -168,6 +188,7 @@ watch(
       rates.value = []
       yearsSnapshot.value = null
       bandsSnapshot.value = []
+      bracketsSnapshot.value = []
       editingRates.value = false
       return
     }
@@ -181,6 +202,8 @@ watch(
       product.value = prod.data
       rates.value = cr.data
       yearsSnapshot.value = cr.years
+      bandsSnapshot.value = cr.bands ?? []
+      bracketsSnapshot.value = cr.brackets ?? []
       editingRates.value = false
     } catch (e: unknown) {
       errorMsg.value = e instanceof Error ? e.message : 'Failed to load product detail.'
@@ -302,14 +325,14 @@ function partyBadge(party: string): string {
             </h3>
             <button v-if="!editingRates" type="button" @click="openRatesEditor"
               class="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1">
-              <i class="pi pi-pencil text-[10px]" /> {{ rates.length || yearsSnapshot ? 'แก้ไข' : 'เพิ่มอัตรา' }}
+              <i class="pi pi-pencil text-[10px]" /> {{ rates.length || yearsSnapshot || bracketsSnapshot.length ? 'แก้ไข' : 'เพิ่มอัตรา' }}
             </button>
           </div>
 
           <!-- Editor -->
           <div v-if="editingRates" class="card p-4 space-y-3">
-            <CommissionRatesForm :product-type="product.type" :initial="draftRates"
-              @update:model-value="(v) => draftRates = v" />
+            <CommissionRatesForm :product-type="product.type" :product-category="product.category"
+              :initial="draftRates" @update:model-value="(v) => draftRates = v" />
             <div v-if="rateSaveError" class="text-xs text-rose-600">{{ rateSaveError }}</div>
             <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
               <button type="button" @click="editingRates = false" :disabled="savingRates"
@@ -325,9 +348,47 @@ function partyBadge(party: string): string {
 
           <!-- Read-only view -->
           <template v-else>
-            <div v-if="!rates.length && !yearsSnapshot" class="card p-4 text-sm text-slate-500">
+            <div v-if="!rates.length && !yearsSnapshot && !bracketsSnapshot.length" class="card p-4 text-sm text-slate-500">
               No commission rates recorded for this product.
             </div>
+
+            <!-- Age-year: one card per bracket showing the Y1..Y6+ grid.
+                 Preferred over the flat table when the wide table has age
+                 bounds or multiple rows. -->
+            <div v-else-if="hasAgeBrackets" class="space-y-3">
+              <div v-for="(bracket, bIdx) in bracketsSnapshot" :key="bIdx" class="card p-4">
+                <div class="text-xs text-slate-500 mb-2 font-medium">
+                  ช่วงอายุ:
+                  <span class="text-slate-800">
+                    {{ bracket.minAge !== null ? bracket.minAge : '−∞' }} – {{ bracket.maxAge !== null ? bracket.maxAge : '∞' }} ปี
+                  </span>
+                </div>
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-xs text-slate-500">
+                      <th class="text-left font-medium py-1 w-24">ฝ่าย</th>
+                      <th v-for="y in ['1','2','3','4','5','6']" :key="y" class="text-right font-medium py-1 px-1">
+                        {{ y === '6' ? 'ปี 6+' : `ปี ${y}` }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="p in [{ key: 'inh', label: 'บริษัท' }, { key: 'ag', label: 'เอเจนต์' }, { key: 'ov', label: 'Upline' }]"
+                      :key="p.key" class="border-t border-slate-100">
+                      <td class="py-1.5 text-xs text-slate-600">{{ p.label }}</td>
+                      <td v-for="y in ['1','2','3','4','5','6']" :key="y"
+                        class="py-1.5 px-1 text-right text-xs font-medium text-slate-900">
+                        <template v-if="bracket.years[y] && bracket.years[y][p.key as 'inh'|'ag'|'ov'] !== null">
+                          {{ fmtRate(bracket.years[y][p.key as 'inh'|'ag'|'ov'] as number) }}
+                        </template>
+                        <span v-else class="text-slate-300">—</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
             <div v-else class="card overflow-hidden">
               <table class="min-w-full text-sm">
                 <thead class="bg-slate-50 text-xs text-slate-500 uppercase">

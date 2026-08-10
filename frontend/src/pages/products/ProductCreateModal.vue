@@ -444,7 +444,7 @@ function onCreated(row: Record<string, unknown>): void {
         </template>
         <FormField label="ค่าคอมมิชชั่น" class="col-span-2" error-key="commissionRates" :errors="fieldErrors"
           hint="เลือกรูปแบบให้ตรงกับสินค้า — Rider/Motor/PA มักใช้ 'อัตราเดียว', Whole Life/Endowment ใช้ 'ตามปีกรมธรรม์'">
-          <CommissionRatesForm :product-type="form.type" v-model="form.commissionRates" />
+          <CommissionRatesForm :product-type="form.type" :product-category="form.category" v-model="form.commissionRates" />
         </FormField>
       </div>
     </template>
