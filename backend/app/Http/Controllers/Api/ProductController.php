@@ -9,7 +9,7 @@ use App\Http\Resources\ProductListResource;
 use App\Http\Resources\ProductResource;
 use App\Models\Carrier;
 use App\Models\Product;
-use App\Models\ProductCommissionRate;
+use App\Services\Commission\ProductRateSeeder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -79,23 +79,12 @@ class ProductController extends ApiController
         return ProductListResource::collection($paginator);
     }
 
-    public function store(ProductRequest $request): JsonResponse
+    public function store(ProductRequest $request, ProductRateSeeder $seeder): JsonResponse
     {
         $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];
         $product = Product::create($payload);
 
-        // If the caller passed `commissionPercent`, seed a single
-        // product_commission_rates row where every year's com_rate slot is
-        // set to that percent. Agent/insurer split (`ag_rate_*`, `in_rate_*`)
-        // is left null — the commission engine or a later edit can populate.
-        $percent = $request->input('commissionPercent');
-        if ($percent !== null && $percent !== '') {
-            $rateRow = ['product_id' => $product->id];
-            foreach ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, '11up'] as $year) {
-                $rateRow["com_rate_yr_{$year}"] = $percent;
-            }
-            ProductCommissionRate::create($rateRow);
-        }
+        $this->applyRatePayload($request, $product, $seeder);
 
         return (new ProductResource($product))->response()->setStatusCode(201);
     }
@@ -103,20 +92,43 @@ class ProductController extends ApiController
     public function show(Request $request, Product $product): ProductResource
     {
         $this->authorizeTenant($request, $product);
+
         return new ProductResource($product->load('carrier'));
     }
 
-    public function update(ProductRequest $request, Product $product): ProductResource
+    public function update(ProductRequest $request, Product $product, ProductRateSeeder $seeder): ProductResource
     {
         $this->authorizeTenant($request, $product);
         $product->update($request->toModel());
+        $this->applyRatePayload($request, $product, $seeder);
+
         return new ProductResource($product->fresh());
+    }
+
+    /**
+     * Consume `commissionRates` (structured) or `commissionPercent` (legacy
+     * shorthand) from the request and persist via the seeder. Structured
+     * payload wins when both are present.
+     */
+    private function applyRatePayload(ProductRequest $request, Product $product, ProductRateSeeder $seeder): void
+    {
+        $structured = $request->input('commissionRates');
+        if (is_array($structured)) {
+            $seeder->seed($product, $structured);
+
+            return;
+        }
+        $percent = $request->input('commissionPercent');
+        if ($percent !== null && $percent !== '') {
+            $seeder->seedFlatPercent($product, (float) $percent);
+        }
     }
 
     public function destroy(Request $request, Product $product): JsonResponse
     {
         $this->authorizeTenant($request, $product);
         $product->delete();
+
         return response()->json(['message' => 'Deleted.']);
     }
 
@@ -133,7 +145,7 @@ class ProductController extends ApiController
             abort(404);
         }
 
-        $prefix = 'PD' . $carrier->code;
+        $prefix = 'PD'.$carrier->code;
         $prefixLen = strlen($prefix);
 
         // Match every existing product code for this carrier that follows the
@@ -142,41 +154,66 @@ class ProductController extends ApiController
         $maxNum = (int) DB::table('products')
             ->where('tenant_id', $this->tenantId($request))
             ->where('carrier_id', $carrier->id)
-            ->where('code', 'like', $prefix . '%')
+            ->where('code', 'like', $prefix.'%')
             ->whereRaw('SUBSTRING(code, ?) REGEXP \'^[0-9]+$\'', [$prefixLen + 1])
-            ->max(DB::raw('CAST(SUBSTRING(code, ' . ($prefixLen + 1) . ') AS UNSIGNED)'));
+            ->max(DB::raw('CAST(SUBSTRING(code, '.($prefixLen + 1).') AS UNSIGNED)'));
 
         $next = $maxNum + 1;
         $padded = str_pad((string) $next, 4, '0', STR_PAD_LEFT);
 
         return response()->json([
-            'code' => $prefix . $padded,
+            'code' => $prefix.$padded,
             'carrierCode' => $carrier->code,
             'next' => $next,
         ]);
     }
 
     /**
-     * GET /products/{product}/commission-rates — returns all rows from
-     * product_commission_rate_installments for this product.
+     * GET /products/{product}/commission-rates — returns everything the rate
+     * editor needs to prefill:
+     *   data:  flat table rows (party × installment_term) from
+     *          product_commission_rate_installments — used by the "flat" shape.
+     *   years: per-year grid from product_commission_rates — used by the
+     *          "per-year" shape. Populated only if that row exists.
      */
     public function commissionRates(Request $request, Product $product): JsonResponse
     {
         $this->authorizeTenant($request, $product);
 
-        $rows = DB::table('product_commission_rate_installments')
+        $installments = DB::table('product_commission_rate_installments')
             ->where('product_id', $product->id)
             ->orderByRaw("FIELD(party, 'com', 'ag', 'in')")
             ->orderBy('installment_term')
             ->get(['id', 'party', 'installment_term', 'rate']);
 
+        $wide = DB::table('product_commission_rates')
+            ->where('product_id', $product->id)
+            ->orderByDesc('id')
+            ->first();
+
+        $years = null;
+        if ($wide !== null) {
+            $years = [];
+            foreach ([1, 2, 3, 4, 5, 6] as $y) {
+                // Year 6 in the UI represents the "6+" bucket, which stores in
+                // com_rate_yr_6 through yr_11up. Reading yr_6 back is fine
+                // because the seeder writes the same value across the tail.
+                $years[$y] = [
+                    'inh' => $wide->{"com_rate_yr_{$y}"} !== null ? (float) $wide->{"com_rate_yr_{$y}"} : null,
+                    'ag' => $wide->{"ag_rate_yr_{$y}"} !== null ? (float) $wide->{"ag_rate_yr_{$y}"} : null,
+                    'ov' => $wide->{"in_rate_yr_{$y}"} !== null ? (float) $wide->{"in_rate_yr_{$y}"} : null,
+                ];
+            }
+        }
+
         return response()->json([
-            'data' => $rows->map(fn ($r) => [
+            'data' => $installments->map(fn ($r) => [
                 'id' => (string) $r->id,
                 'party' => $r->party,
                 'installmentTerm' => $r->installment_term,
                 'rate' => (float) $r->rate,
             ]),
+            'years' => $years,
         ]);
     }
 

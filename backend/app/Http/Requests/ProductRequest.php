@@ -64,8 +64,34 @@ class ProductRequest extends FormRequest
             // Shorthand: seed a product_commission_rates row where every
             // year (com_rate_yr_1..10 + _11up) is set to this percent.
             // Consumed by ProductController::store — NOT persisted onto
-            // the products table itself.
+            // the products table itself. Kept for backward compat; new
+            // callers should send `commissionRates` instead.
             'commissionPercent' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+
+            // Structured rate payload — supersedes `commissionPercent` when
+            // both are sent. Consumed by CommissionRateSeeder::seed().
+            //   shape: 'flat'  → single-row per party × installment term.
+            //                     `installments` = ['main' => {inh, ag, ov}, '3' => {...}, ...]
+            //   shape: 'per-year' → wide product_commission_rates row.
+            //                     `years` = {1: {inh, ag, ov}, ..., 6: {inh, ag, ov}}
+            //                     Year 6 seeds every column from yr_6..yr_11up
+            //                     because the UI collapses the tail to a single
+            //                     "Year 6+" input matching Excel/PDF convention.
+            //   shape: 'skip'  → no-op; caller wants to add rates later.
+            // All rate values are percents (0..100). Nulls mean "leave this
+            // party at the previous value on update; store 0 on create".
+            'commissionRates' => ['sometimes', 'nullable', 'array'],
+            'commissionRates.shape' => ['required_with:commissionRates', 'string', 'in:flat,per-year,skip'],
+            'commissionRates.installments' => ['sometimes', 'array'],
+            'commissionRates.installments.*' => ['array'],
+            'commissionRates.installments.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.installments.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.installments.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.years' => ['sometimes', 'array'],
+            'commissionRates.years.*' => ['array'],
+            'commissionRates.years.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.years.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.years.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
         ];
     }
 
@@ -111,6 +137,7 @@ class ProductRequest extends FormRequest
                 $out[$snake] = $v[$camel];
             }
         }
+
         return $out;
     }
 }

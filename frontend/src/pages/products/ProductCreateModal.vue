@@ -6,8 +6,9 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import CreateModal from '../../components/CreateModal.vue'
 import FormField from '../../components/FormField.vue'
+import CommissionRatesForm from './CommissionRatesForm.vue'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
-import { fetchNextProductCode, fetchProductTaxonomy, type ProductTaxonomyRow } from '../../api/products'
+import { fetchNextProductCode, fetchProductTaxonomy, type ProductTaxonomyRow, type CommissionRatesPayload } from '../../api/products'
 import { lookupTemplate, fillCarrier } from './productNamePresets'
 
 const props = defineProps<{ open: boolean }>()
@@ -60,9 +61,10 @@ const form = reactive({
   subCategory: '',
   minAge: 0,
   maxAge: 99,
-  // Blank = don't seed a commission-rate row on create. When present it
-  // becomes the flat percent applied across all years (yr_1..yr_11up).
-  commissionPercent: null as number | null,
+  // Structured commission-rate payload emitted by CommissionRatesForm. Default
+  // is `{ shape: 'skip' }` so an operator who ignores the section persists
+  // no rates — matching the pre-refactor behavior of a blank percent input.
+  commissionRates: { shape: 'skip' } as CommissionRatesPayload,
 })
 
 /** Carriers matching the chosen insureType — empties when nothing is picked. */
@@ -276,7 +278,7 @@ const payload = computed(() => {
     mainRider: form.mainRider || null,
     category: form.category.trim() || null,
     subCategory: form.subCategory.trim() || null,
-    commissionPercent: form.commissionPercent,
+    commissionRates: form.commissionRates,
     active: true,
   }
   // Age band is Life-only — omit for non-life so we don't persist stale
@@ -295,7 +297,8 @@ watch(
       Object.assign(form, {
         insureType: '', code: '', name: '', carrierId: '',
         type: '', mainRider: '', category: '', subCategory: '',
-        minAge: 0, maxAge: 99, commissionPercent: null,
+        minAge: 0, maxAge: 99,
+        commissionRates: { shape: 'skip' } as CommissionRatesPayload,
       })
       codeAutoFilled.value = false
       nameTouched.value = false
@@ -318,7 +321,7 @@ function onCreated(row: Record<string, unknown>): void {
   form.subCategory = ''
   form.minAge = 0
   form.maxAge = 99
-  form.commissionPercent = null
+  form.commissionRates = { shape: 'skip' }
   form.code = ''
   codeAutoFilled.value = false
   nameTouched.value = false
@@ -439,14 +442,9 @@ function onCreated(row: Record<string, unknown>): void {
           </FormField>
           <p v-if="ageError" class="col-span-2 -mt-2 text-xs text-rose-600">{{ ageError }}</p>
         </template>
-        <FormField label="ค่าคอมมิชชั่น (%)" class="col-span-2" error-key="commissionPercent" :errors="fieldErrors"
-          hint="เว้นว่างได้ — ระบบจะบันทึกอัตราเดียวกันนี้สำหรับทุกปี (ปีที่ 1–10 และปีที่ 11 ขึ้นไป)">
-          <div class="relative w-40">
-            <input v-model.number="form.commissionPercent" type="number" min="0" max="100" step="0.01"
-              placeholder="เช่น 15"
-              class="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
-          </div>
+        <FormField label="ค่าคอมมิชชั่น" class="col-span-2" error-key="commissionRates" :errors="fieldErrors"
+          hint="เลือกรูปแบบให้ตรงกับสินค้า — Rider/Motor/PA มักใช้ 'อัตราเดียว', Whole Life/Endowment ใช้ 'ตามปีกรมธรรม์'">
+          <CommissionRatesForm :product-type="form.type" v-model="form.commissionRates" />
         </FormField>
       </div>
     </template>

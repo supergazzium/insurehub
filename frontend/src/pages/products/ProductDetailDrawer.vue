@@ -1,9 +1,12 @@
 <script setup lang="ts">
 // Product detail drawer — full spec + commission rate table.
 import { ref, watch, computed, onMounted } from 'vue'
-import { fetchProduct, fetchProductCommissionRates, fetchProductTaxonomy, type ProductListRow, type CommissionRateRow, type ProductTaxonomyRow } from '../../api/products'
+import { fetchProduct, fetchProductCommissionRates, fetchProductTaxonomy, updateProductCommissionRates,
+  type ProductListRow, type CommissionRateRow, type ProductTaxonomyRow, type CommissionRatesPayload,
+  type RateTriple } from '../../api/products'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
+import CommissionRatesForm from './CommissionRatesForm.vue'
 import { api, ApiError } from '../../api/client'
 import { useProductStore } from '../../stores/products'
 
@@ -61,6 +64,55 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const product = ref<ProductListRow | null>(null)
 const rates = ref<CommissionRateRow[]>([])
+const yearsSnapshot = ref<Record<string, RateTriple> | null>(null)
+
+// ── Edit rates ─────────────────────────────────────────────────────────────
+const editingRates = ref(false)
+const draftRates = ref<CommissionRatesPayload>({ shape: 'skip' })
+const savingRates = ref(false)
+const rateSaveError = ref<string | null>(null)
+
+function openRatesEditor(): void {
+  // Prefill with per-year if the product has it, else flat if the tall
+  // table has anything, else skip (empty form).
+  if (yearsSnapshot.value) {
+    draftRates.value = { shape: 'per-year', years: yearsSnapshot.value }
+  } else if (rates.value.length) {
+    const installments: Record<string, RateTriple> = {}
+    for (const r of rates.value) {
+      const term = r.installmentTerm || 'main'
+      if (!installments[term]) installments[term] = { inh: null, ag: null, ov: null }
+      const partyKey: keyof RateTriple | null =
+        r.party === 'com' ? 'inh' : r.party === 'ag' ? 'ag' : r.party === 'in' ? 'ov' : null
+      if (partyKey) installments[term][partyKey] = r.rate
+    }
+    draftRates.value = { shape: 'flat', installments }
+  } else {
+    draftRates.value = { shape: 'skip' }
+  }
+  rateSaveError.value = null
+  editingRates.value = true
+}
+
+async function saveRates(): Promise<void> {
+  if (!props.productId) return
+  savingRates.value = true
+  rateSaveError.value = null
+  try {
+    await updateProductCommissionRates(props.productId, draftRates.value)
+    // Refresh the read-only view from the server.
+    const cr = await fetchProductCommissionRates(props.productId)
+    rates.value = cr.data
+    yearsSnapshot.value = cr.years
+    editingRates.value = false
+  } catch (e: unknown) {
+    rateSaveError.value = e instanceof ApiError
+      ? (e.body?.message ?? `HTTP ${e.status}`)
+      : e instanceof Error ? e.message : 'Save failed'
+  } finally {
+    savingRates.value = false
+  }
+}
 
 // ── Delete ────────────────────────────────────────────────────────────────
 const showDelete = ref(false)
@@ -107,6 +159,8 @@ watch(
     if (!id) {
       product.value = null
       rates.value = []
+      yearsSnapshot.value = null
+      editingRates.value = false
       return
     }
     loading.value = true
@@ -118,6 +172,8 @@ watch(
       ])
       product.value = prod.data
       rates.value = cr.data
+      yearsSnapshot.value = cr.years
+      editingRates.value = false
     } catch (e: unknown) {
       errorMsg.value = e instanceof Error ? e.message : 'Failed to load product detail.'
     } finally {
@@ -231,35 +287,64 @@ function partyBadge(party: string): string {
 
         <!-- Commission rates -->
         <section>
-          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">
-            Commission rates
-            <span class="text-slate-500 normal-case">({{ rates.length }})</span>
-          </h3>
-          <div v-if="!rates.length" class="card p-4 text-sm text-slate-500">No commission rates recorded for this product.</div>
-          <div v-else class="card overflow-hidden">
-            <table class="min-w-full text-sm">
-              <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
-                <tr>
-                  <th class="px-4 py-2 text-left">Party</th>
-                  <th class="px-4 py-2 text-left">Installment term</th>
-                  <th class="px-4 py-2 text-right">Rate</th>
-                </tr>
-              </thead>
-              <tbody class="divide-y divide-slate-100">
-                <template v-for="(rows, party) in groupedRates" :key="party">
-                  <tr v-for="(r, i) in rows" :key="r.id">
-                    <td class="px-4 py-2">
-                      <span v-if="i === 0" :class="['inline-flex px-2 py-0.5 rounded-md text-xs border', partyBadge(String(party))]">
-                        {{ party }}
-                      </span>
-                    </td>
-                    <td class="px-4 py-2 text-slate-700">{{ r.installmentTerm || 'main' }}</td>
-                    <td class="px-4 py-2 text-right font-medium text-slate-900">{{ fmtRate(r.rate) }}</td>
-                  </tr>
-                </template>
-              </tbody>
-            </table>
+          <div class="flex items-center justify-between mb-2">
+            <h3 class="text-xs uppercase tracking-wider text-slate-400">
+              Commission rates
+              <span v-if="!editingRates" class="text-slate-500 normal-case">({{ rates.length }})</span>
+            </h3>
+            <button v-if="!editingRates" type="button" @click="openRatesEditor"
+              class="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1">
+              <i class="pi pi-pencil text-[10px]" /> {{ rates.length || yearsSnapshot ? 'แก้ไข' : 'เพิ่มอัตรา' }}
+            </button>
           </div>
+
+          <!-- Editor -->
+          <div v-if="editingRates" class="card p-4 space-y-3">
+            <CommissionRatesForm :product-type="product.type" :initial="draftRates"
+              @update:model-value="(v) => draftRates = v" />
+            <div v-if="rateSaveError" class="text-xs text-rose-600">{{ rateSaveError }}</div>
+            <div class="flex items-center justify-end gap-2 pt-2 border-t border-slate-100">
+              <button type="button" @click="editingRates = false" :disabled="savingRates"
+                class="px-3 py-1.5 text-sm text-slate-600 hover:text-slate-900">
+                ยกเลิก
+              </button>
+              <button type="button" @click="saveRates" :disabled="savingRates"
+                class="px-3 py-1.5 text-sm rounded-lg bg-brand-500 text-white hover:bg-brand-600 disabled:opacity-50">
+                {{ savingRates ? 'กำลังบันทึก...' : 'บันทึกอัตรา' }}
+              </button>
+            </div>
+          </div>
+
+          <!-- Read-only view -->
+          <template v-else>
+            <div v-if="!rates.length && !yearsSnapshot" class="card p-4 text-sm text-slate-500">
+              No commission rates recorded for this product.
+            </div>
+            <div v-else class="card overflow-hidden">
+              <table class="min-w-full text-sm">
+                <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
+                  <tr>
+                    <th class="px-4 py-2 text-left">Party</th>
+                    <th class="px-4 py-2 text-left">Installment term</th>
+                    <th class="px-4 py-2 text-right">Rate</th>
+                  </tr>
+                </thead>
+                <tbody class="divide-y divide-slate-100">
+                  <template v-for="(rows, party) in groupedRates" :key="party">
+                    <tr v-for="(r, i) in rows" :key="r.id">
+                      <td class="px-4 py-2">
+                        <span v-if="i === 0" :class="['inline-flex px-2 py-0.5 rounded-md text-xs border', partyBadge(String(party))]">
+                          {{ party }}
+                        </span>
+                      </td>
+                      <td class="px-4 py-2 text-slate-700">{{ r.installmentTerm || 'main' }}</td>
+                      <td class="px-4 py-2 text-right font-medium text-slate-900">{{ fmtRate(r.rate) }}</td>
+                    </tr>
+                  </template>
+                </tbody>
+              </table>
+            </div>
+          </template>
         </section>
 
         <div v-if="loading" class="text-center text-slate-500 py-4">Loading…</div>

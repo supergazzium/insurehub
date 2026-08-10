@@ -81,8 +81,36 @@ export interface CommissionRateRow {
   rate: number
 }
 
+/** Per-party rate slot inside the structured `commissionRates` payload.
+ *  All fields are percents (0..100). Null = "don't override this party". */
+export interface RateTriple {
+  inh: number | null
+  ag: number | null
+  ov: number | null
+}
+
+/** Structured rate payload sent on product create/update. Matches
+ *  ProductRequest::rules() `commissionRates.*`. */
+export type CommissionRatesPayload =
+  | { shape: 'skip' }
+  | { shape: 'flat'; installments: Record<string, RateTriple> }
+  | { shape: 'per-year'; years: Record<string, RateTriple> }
+
+/** Response of GET /products/{id}/commission-rates. `years` is null when the
+ *  product has no wide-table row (i.e. never used the per-year shape). */
+export interface CommissionRatesResponse {
+  data: CommissionRateRow[]
+  years: Record<string, RateTriple> | null
+}
+
 export function fetchProductCommissionRates(productId: string) {
-  return api.get<{ data: CommissionRateRow[] }>(`products/${productId}/commission-rates`)
+  return api.get<CommissionRatesResponse>(`products/${productId}/commission-rates`)
+}
+
+/** PUT structured rates onto an existing product. Reuses the PATCH shape the
+ *  product endpoint already accepts. */
+export function updateProductCommissionRates(productId: string, rates: CommissionRatesPayload) {
+  return api.patch<{ data: unknown }>(`products/${productId}`, { commissionRates: rates })
 }
 
 /** Next available `PD{carrierCode}{NNNN}` code for a carrier. */
