@@ -3,7 +3,7 @@
 import { ref, watch, computed, onMounted } from 'vue'
 import { fetchProduct, fetchProductCommissionRates, fetchProductTaxonomy, updateProductCommissionRates,
   type ProductListRow, type CommissionRateRow, type ProductTaxonomyRow, type CommissionRatesPayload,
-  type RateTriple, type BandRow, type AgeBracket } from '../../api/products'
+  type RateTriple, type BandRow, type AgeBracket, type MatrixDimension } from '../../api/products'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import CommissionRatesForm from './CommissionRatesForm.vue'
@@ -67,6 +67,13 @@ const rates = ref<CommissionRateRow[]>([])
 const yearsSnapshot = ref<Record<string, RateTriple> | null>(null)
 const bandsSnapshot = ref<BandRow[]>([])
 const bracketsSnapshot = ref<AgeBracket[]>([])
+const matrixSnapshot = ref<MatrixDimension[]>([])
+
+// True when the product uses the life-matrix shape — presence of any
+// dimension row in the new two-table model implies the operator saved via
+// that shape. Drives read-only rendering: per-dimension cards, not the
+// flat rate table.
+const hasLifeMatrix = computed(() => matrixSnapshot.value.length > 0)
 
 // True when the product is using the age-year shape — i.e. the wide table
 // carries multiple rows or at least one row has an age bound. Drives the
@@ -84,15 +91,28 @@ const rateSaveError = ref<string | null>(null)
 
 function openRatesEditor(): void {
   // Prefill priority:
-  //   1. age-year — wide table has multiple rows or any row has an age bound.
-  //   2. per-year — single unbounded wide-table row.
-  //   3. band     — installments row with a sum-assured bound.
-  //   4. flat     — installments rows with no bands.
-  //   5. skip     — nothing on file.
+  //   1. life-matrix — new two-table model has data. Highest priority
+  //      because it's the newest shape and coexists with the others.
+  //   2. age-year    — wide table has multiple rows or any row has an age bound.
+  //   3. per-year    — single unbounded wide-table row.
+  //   4. band        — installments row with a sum-assured bound.
+  //   5. flat        — installments rows with no bands.
+  //   6. skip        — nothing on file.
   const hasAgeBrackets = bracketsSnapshot.value.length > 1
     || bracketsSnapshot.value.some((b) => b.minAge !== null || b.maxAge !== null)
 
-  if (hasAgeBrackets) {
+  if (matrixSnapshot.value.length) {
+    draftRates.value = {
+      shape: 'life-matrix',
+      dimensions: matrixSnapshot.value.map((d) => ({
+        minAge: d.minAge,
+        maxAge: d.maxAge,
+        minSumAssure: d.minSumAssure,
+        maxSumAssure: d.maxSumAssure,
+        years: d.years.map((y) => ({ ...y })),
+      })),
+    }
+  } else if (hasAgeBrackets) {
     draftRates.value = { shape: 'age-year', brackets: bracketsSnapshot.value.map((b) => ({
       minAge: b.minAge,
       maxAge: b.maxAge,
@@ -131,6 +151,7 @@ async function saveRates(): Promise<void> {
     yearsSnapshot.value = cr.years
     bandsSnapshot.value = cr.bands ?? []
     bracketsSnapshot.value = cr.brackets ?? []
+    matrixSnapshot.value = cr.matrix ?? []
     editingRates.value = false
   } catch (e: unknown) {
     rateSaveError.value = e instanceof ApiError
@@ -189,6 +210,7 @@ watch(
       yearsSnapshot.value = null
       bandsSnapshot.value = []
       bracketsSnapshot.value = []
+      matrixSnapshot.value = []
       editingRates.value = false
       return
     }
@@ -204,6 +226,7 @@ watch(
       yearsSnapshot.value = cr.years
       bandsSnapshot.value = cr.bands ?? []
       bracketsSnapshot.value = cr.brackets ?? []
+      matrixSnapshot.value = cr.matrix ?? []
       editingRates.value = false
     } catch (e: unknown) {
       errorMsg.value = e instanceof Error ? e.message : 'Failed to load product detail.'
@@ -349,8 +372,54 @@ function partyBadge(party: string): string {
 
           <!-- Read-only view -->
           <template v-else>
-            <div v-if="!rates.length && !yearsSnapshot && !bracketsSnapshot.length" class="card p-4 text-sm text-slate-500">
+            <div v-if="!rates.length && !yearsSnapshot && !bracketsSnapshot.length && !hasLifeMatrix" class="card p-4 text-sm text-slate-500">
               No commission rates recorded for this product.
+            </div>
+
+            <!-- Life-matrix: one card per dimension (age × sum-assured),
+                 showing the variable-year grid inside. Highest read-only
+                 priority — matches the openRatesEditor prefill priority. -->
+            <div v-else-if="hasLifeMatrix" class="space-y-3">
+              <div v-for="(dim, dIdx) in matrixSnapshot" :key="dIdx" class="card p-4">
+                <div class="text-xs text-slate-500 mb-2 font-medium space-y-1">
+                  <div>
+                    ช่วงอายุ:
+                    <span class="text-slate-800">
+                      {{ dim.minAge !== null ? dim.minAge : '−∞' }} – {{ dim.maxAge !== null ? dim.maxAge : '∞' }} ปี
+                    </span>
+                  </div>
+                  <div>
+                    ช่วงทุนประกัน:
+                    <span class="text-slate-800">
+                      {{ dim.minSumAssure !== null ? fmtBaht(dim.minSumAssure) : '−∞' }}
+                      – {{ dim.maxSumAssure !== null ? fmtBaht(dim.maxSumAssure) : '∞' }}
+                    </span>
+                  </div>
+                </div>
+                <table class="w-full text-sm">
+                  <thead>
+                    <tr class="text-xs text-slate-500">
+                      <th class="text-left font-medium py-1 w-24">ฝ่าย</th>
+                      <th v-for="y in dim.years" :key="y.year" class="text-right font-medium py-1 px-1">
+                        ปี {{ y.year }}
+                      </th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-for="p in [{ key: 'inh', label: 'บริษัท' }, { key: 'ag', label: 'เอเจนต์' }, { key: 'ov', label: 'Upline' }]"
+                      :key="p.key" class="border-t border-slate-100">
+                      <td class="py-1.5 text-xs text-slate-600">{{ p.label }}</td>
+                      <td v-for="y in dim.years" :key="y.year"
+                        class="py-1.5 px-1 text-right text-xs font-medium text-slate-900">
+                        <template v-if="y[p.key as 'inh'|'ag'|'ov'] !== null">
+                          {{ fmtRate(y[p.key as 'inh'|'ag'|'ov'] as number) }}
+                        </template>
+                        <span v-else class="text-slate-300">—</span>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
             </div>
 
             <!-- Age-year: one card per bracket showing the Y1..Y6+ grid.

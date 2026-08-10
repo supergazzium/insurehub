@@ -6,6 +6,7 @@ namespace App\Services\Commission;
 
 use App\Models\Product;
 use App\Models\ProductCommissionRate;
+use App\Models\ProductLifeRateDimension;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -58,6 +59,11 @@ class ProductRateSeeder
         }
         if ($shape === 'age-year') {
             $this->seedAgeYear($product, $payload['brackets'] ?? []);
+
+            return;
+        }
+        if ($shape === 'life-matrix') {
+            $this->seedLifeMatrix($product, $payload['dimensions'] ?? []);
         }
     }
 
@@ -233,6 +239,69 @@ class ProductRateSeeder
         }
 
         return $row;
+    }
+
+    /**
+     * @param  list<array{minAge?: int|null, maxAge?: int|null, minSumAssure?: float|null, maxSumAssure?: float|null, years?: list<array{year: int, inh?: float|null, ag?: float|null, ov?: float|null}>}>  $dimensions
+     *                                                                                                                                                                                                                   One dimension row per (age-bracket × sum-bracket) combination. Each
+     *                                                                                                                                                                                                                   dimension holds N year-rate rows in the sibling table. Years is a
+     *                                                                                                                                                                                                                   list, not a map, so `year` can be any INT and the shape is
+     *                                                                                                                                                                                                                   comfortable with sparse curves (1, 2, 5, 10) or long ones (1..30).
+     *
+     * Replace semantics: nuking existing dimensions cascades to their rates
+     * via the FK cascade, so we don't have to delete both tables explicitly.
+     */
+    private function seedLifeMatrix(Product $product, array $dimensions): void
+    {
+        DB::transaction(function () use ($product, $dimensions): void {
+            ProductLifeRateDimension::query()
+                ->where('product_id', $product->id)
+                ->delete();
+
+            foreach ($dimensions as $dim) {
+                $years = $dim['years'] ?? [];
+                if (! is_array($years) || $years === []) {
+                    // A dimension with no year rows is empty noise; skip it
+                    // rather than persist an orphaned bracket.
+                    continue;
+                }
+
+                $dimension = ProductLifeRateDimension::create([
+                    'tenant_id' => $product->tenant_id,
+                    'product_id' => $product->id,
+                    'min_age' => $dim['minAge'] ?? null,
+                    'max_age' => $dim['maxAge'] ?? null,
+                    'min_sum_assure' => $dim['minSumAssure'] ?? null,
+                    'max_sum_assure' => $dim['maxSumAssure'] ?? null,
+                ]);
+
+                $now = now();
+                $rateRows = [];
+                foreach ($years as $y) {
+                    $year = isset($y['year']) ? (int) $y['year'] : null;
+                    if ($year === null || $year < 1) {
+                        continue;
+                    }
+                    foreach ($this->partyMap() as $key => $party) {
+                        $rate = $y[$key] ?? null;
+                        if ($rate === null) {
+                            continue;
+                        }
+                        $rateRows[] = [
+                            'dimension_id' => $dimension->id,
+                            'policy_year' => $year,
+                            'party' => $party,
+                            'rate' => $rate,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ];
+                    }
+                }
+                if ($rateRows !== []) {
+                    DB::table('product_life_rates')->insert($rateRows);
+                }
+            }
+        });
     }
 
     /**

@@ -86,7 +86,7 @@ class ProductRequest extends FormRequest
             // All rate values are percents (0..100). Nulls mean "leave this
             // party at the previous value on update; store nothing on create".
             'commissionRates' => ['sometimes', 'nullable', 'array'],
-            'commissionRates.shape' => ['required_with:commissionRates', 'string', 'in:flat,per-year,installment,band,age-year,skip'],
+            'commissionRates.shape' => ['required_with:commissionRates', 'string', 'in:flat,per-year,installment,band,age-year,life-matrix,skip'],
 
             // flat + installment share this validation branch.
             'commissionRates.installments' => ['sometimes', 'array'],
@@ -125,6 +125,23 @@ class ProductRequest extends FormRequest
             'commissionRates.brackets.*.years.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'commissionRates.brackets.*.years.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'commissionRates.brackets.*.years.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+
+            // life-matrix branch — Life products with rates varying by age
+            // AND sum-assured AND policy year. Storage: two tables
+            // (product_life_rate_dimensions × product_life_rates) so
+            // policy_year is a row not a column and can be any INT.
+            'commissionRates.dimensions' => ['sometimes', 'array'],
+            'commissionRates.dimensions.*' => ['array'],
+            'commissionRates.dimensions.*.minAge' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:120'],
+            'commissionRates.dimensions.*.maxAge' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:120'],
+            'commissionRates.dimensions.*.minSumAssure' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commissionRates.dimensions.*.maxSumAssure' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commissionRates.dimensions.*.years' => ['sometimes', 'array'],
+            'commissionRates.dimensions.*.years.*' => ['array'],
+            'commissionRates.dimensions.*.years.*.year' => ['required_with:commissionRates.dimensions.*.years.*', 'integer', 'min:1', 'max:99'],
+            'commissionRates.dimensions.*.years.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.dimensions.*.years.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.dimensions.*.years.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
         ];
     }
 

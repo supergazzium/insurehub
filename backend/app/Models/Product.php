@@ -44,4 +44,9 @@ class Product extends Model
     {
         return $this->hasMany(ProductCommissionRateInstallment::class);
     }
+
+    public function lifeRateDimensions(): HasMany
+    {
+        return $this->hasMany(ProductLifeRateDimension::class);
+    }
 }

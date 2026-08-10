@@ -107,6 +107,24 @@ export interface AgeBracket {
   years: Record<string, RateTriple>
 }
 
+/** One year row inside a matrix dimension. `year` can be any INT ≥ 1 so
+ *  Life products with arbitrarily long curves (Y1..Y30) work without
+ *  schema changes. */
+export interface MatrixYear extends RateTriple {
+  year: number
+}
+
+/** One dimension in the life-matrix shape — a specific (age × sum-assured)
+ *  bracket combination. Each dimension holds N year rows. All four bounds
+ *  are nullable (null = unbounded on that side). */
+export interface MatrixDimension {
+  minAge: number | null
+  maxAge: number | null
+  minSumAssure: number | null
+  maxSumAssure: number | null
+  years: MatrixYear[]
+}
+
 /** Structured rate payload sent on product create/update. Matches
  *  ProductRequest::rules() `commissionRates.*`. */
 export type CommissionRatesPayload =
@@ -116,17 +134,21 @@ export type CommissionRatesPayload =
   | { shape: 'per-year'; years: Record<string, RateTriple> }
   | { shape: 'band'; bands: BandRow[] }
   | { shape: 'age-year'; brackets: AgeBracket[] }
+  | { shape: 'life-matrix'; dimensions: MatrixDimension[] }
 
 /** Response of GET /products/{id}/commission-rates.
  *  - `years` is null when the product has no wide-table row. When the product
  *    uses age brackets, `years` holds the first bracket for backward compat.
  *  - `bands` is the installments data bucketed by (min, max, term).
- *  - `brackets` is the full list of age-year rows. */
+ *  - `brackets` is the full list of age-year rows.
+ *  - `matrix` is the life-matrix data joined from product_life_rate_dimensions
+ *    and product_life_rates. */
 export interface CommissionRatesResponse {
   data: CommissionRateRow[]
   years: Record<string, RateTriple> | null
   bands: BandRow[]
   brackets: AgeBracket[]
+  matrix: MatrixDimension[]
 }
 
 export function fetchProductCommissionRates(productId: string) {

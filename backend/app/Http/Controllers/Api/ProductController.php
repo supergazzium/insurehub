@@ -260,6 +260,72 @@ class ProductController extends ApiController
         }
         $bands = array_values($bandBuckets);
 
+        // life-matrix reconstruction. Two-table join, grouped by dimension so
+        // the drawer's editor can rebuild the dimensions[].years[] payload
+        // without inference. Years are returned sorted so the UI displays
+        // them in policy order regardless of insertion order.
+        $matrixRows = DB::table('product_life_rate_dimensions as d')
+            ->leftJoin('product_life_rates as r', 'r.dimension_id', '=', 'd.id')
+            ->where('d.product_id', $product->id)
+            ->orderBy('d.id')
+            ->orderBy('r.policy_year')
+            ->get([
+                'd.id as dimension_id',
+                'd.min_age',
+                'd.max_age',
+                'd.min_sum_assure',
+                'd.max_sum_assure',
+                'r.policy_year',
+                'r.party',
+                'r.rate',
+            ]);
+
+        $matrixByDim = [];
+        foreach ($matrixRows as $row) {
+            $dimId = (int) $row->dimension_id;
+            if (! isset($matrixByDim[$dimId])) {
+                $matrixByDim[$dimId] = [
+                    'minAge' => $row->min_age !== null ? (int) $row->min_age : null,
+                    'maxAge' => $row->max_age !== null ? (int) $row->max_age : null,
+                    'minSumAssure' => $row->min_sum_assure !== null ? (float) $row->min_sum_assure : null,
+                    'maxSumAssure' => $row->max_sum_assure !== null ? (float) $row->max_sum_assure : null,
+                    'years' => [],
+                ];
+            }
+            if ($row->policy_year === null) {
+                // Dimension exists but has no rate rows yet — keep it in the
+                // response so the editor can render it (rare but not impossible).
+                continue;
+            }
+            $year = (int) $row->policy_year;
+            if (! isset($matrixByDim[$dimId]['years'][$year])) {
+                $matrixByDim[$dimId]['years'][$year] = [
+                    'year' => $year,
+                    'inh' => null,
+                    'ag' => null,
+                    'ov' => null,
+                ];
+            }
+            $partyKey = match ($row->party) {
+                'com' => 'inh',
+                'ag' => 'ag',
+                'in' => 'ov',
+                default => null,
+            };
+            if ($partyKey !== null) {
+                $matrixByDim[$dimId]['years'][$year][$partyKey] = (float) $row->rate;
+            }
+        }
+        // Collapse the year map into a sorted list — the UI expects
+        // dimensions[].years to be a list, not a map.
+        $matrix = [];
+        foreach ($matrixByDim as $dim) {
+            $years = array_values($dim['years']);
+            usort($years, static fn ($a, $b) => $a['year'] <=> $b['year']);
+            $dim['years'] = $years;
+            $matrix[] = $dim;
+        }
+
         return response()->json([
             'data' => $installments->map(fn ($r) => [
                 'id' => (string) $r->id,
@@ -272,6 +338,7 @@ class ProductController extends ApiController
             'years' => $years,
             'bands' => $bands,
             'brackets' => $brackets,
+            'matrix' => $matrix,
         ]);
     }
 
