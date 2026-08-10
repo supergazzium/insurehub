@@ -37,13 +37,22 @@ class ProductRateSeeder
         if ($shape === 'skip') {
             return;
         }
-        if ($shape === 'flat') {
+        // flat + installment share the same physical shape — a set of
+        // (party, installment_term) rows with band = unbounded. The UI
+        // distinction (arbitrary map vs fixed main/3/6/12 grid) doesn't
+        // matter to the DB.
+        if ($shape === 'flat' || $shape === 'installment') {
             $this->seedFlat($product, $payload['installments'] ?? []);
 
             return;
         }
         if ($shape === 'per-year') {
             $this->seedPerYear($product, $payload['years'] ?? []);
+
+            return;
+        }
+        if ($shape === 'band') {
+            $this->seedBands($product, $payload['bands'] ?? []);
         }
     }
 
@@ -83,6 +92,47 @@ class ProductRateSeeder
                         'product_id' => $product->id,
                         'party' => $party,
                         'installment_term' => (string) $term,
+                        'rate' => $rate,
+                        'created_at' => $now,
+                        'updated_at' => $now,
+                    ];
+                }
+            }
+            if ($rows !== []) {
+                DB::table('product_commission_rate_installments')->insert($rows);
+            }
+        });
+    }
+
+    /**
+     * @param  list<array{minSumAssure?: float|null, maxSumAssure?: float|null, installmentTerm?: string|null, inh?: float|null, ag?: float|null, ov?: float|null}>  $bands
+     *                                                                                                                                                                       One row per (band, installment_term) tuple. Missing bounds mean
+     *                                                                                                                                                                       unbounded; missing installmentTerm defaults to 'main'.
+     */
+    private function seedBands(Product $product, array $bands): void
+    {
+        DB::transaction(function () use ($product, $bands): void {
+            DB::table('product_commission_rate_installments')
+                ->where('product_id', $product->id)
+                ->delete();
+
+            $now = now();
+            $rows = [];
+            foreach ($bands as $band) {
+                $min = $band['minSumAssure'] ?? null;
+                $max = $band['maxSumAssure'] ?? null;
+                $term = $band['installmentTerm'] ?? 'main';
+                foreach ($this->partyMap() as $key => $party) {
+                    $rate = $band[$key] ?? null;
+                    if ($rate === null) {
+                        continue;
+                    }
+                    $rows[] = [
+                        'product_id' => $product->id,
+                        'party' => $party,
+                        'installment_term' => (string) $term,
+                        'min_sum_assure' => $min,
+                        'max_sum_assure' => $max,
                         'rate' => $rate,
                         'created_at' => $now,
                         'updated_at' => $now,

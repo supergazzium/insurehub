@@ -3,7 +3,7 @@
 import { ref, watch, computed, onMounted } from 'vue'
 import { fetchProduct, fetchProductCommissionRates, fetchProductTaxonomy, updateProductCommissionRates,
   type ProductListRow, type CommissionRateRow, type ProductTaxonomyRow, type CommissionRatesPayload,
-  type RateTriple } from '../../api/products'
+  type RateTriple, type BandRow } from '../../api/products'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import CommissionRatesForm from './CommissionRatesForm.vue'
@@ -65,6 +65,7 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 const product = ref<ProductListRow | null>(null)
 const rates = ref<CommissionRateRow[]>([])
 const yearsSnapshot = ref<Record<string, RateTriple> | null>(null)
+const bandsSnapshot = ref<BandRow[]>([])
 
 // ── Edit rates ─────────────────────────────────────────────────────────────
 const editingRates = ref(false)
@@ -73,10 +74,15 @@ const savingRates = ref(false)
 const rateSaveError = ref<string | null>(null)
 
 function openRatesEditor(): void {
-  // Prefill with per-year if the product has it, else flat if the tall
-  // table has anything, else skip (empty form).
+  // Prefill priority:
+  //   1. per-year — if the wide table has data.
+  //   2. band     — if any installments row has a min/max sum-assured.
+  //   3. flat     — installments rows with no bands.
+  //   4. skip     — nothing on file.
   if (yearsSnapshot.value) {
     draftRates.value = { shape: 'per-year', years: yearsSnapshot.value }
+  } else if (bandsSnapshot.value.some((b) => b.minSumAssure !== null || b.maxSumAssure !== null)) {
+    draftRates.value = { shape: 'band', bands: [...bandsSnapshot.value] }
   } else if (rates.value.length) {
     const installments: Record<string, RateTriple> = {}
     for (const r of rates.value) {
@@ -104,6 +110,7 @@ async function saveRates(): Promise<void> {
     const cr = await fetchProductCommissionRates(props.productId)
     rates.value = cr.data
     yearsSnapshot.value = cr.years
+    bandsSnapshot.value = cr.bands ?? []
     editingRates.value = false
   } catch (e: unknown) {
     rateSaveError.value = e instanceof ApiError
@@ -160,6 +167,7 @@ watch(
       product.value = null
       rates.value = []
       yearsSnapshot.value = null
+      bandsSnapshot.value = []
       editingRates.value = false
       return
     }
@@ -326,6 +334,7 @@ function partyBadge(party: string): string {
                   <tr>
                     <th class="px-4 py-2 text-left">Party</th>
                     <th class="px-4 py-2 text-left">Installment term</th>
+                    <th class="px-4 py-2 text-left">Sum-assured band</th>
                     <th class="px-4 py-2 text-right">Rate</th>
                   </tr>
                 </thead>
@@ -338,6 +347,14 @@ function partyBadge(party: string): string {
                         </span>
                       </td>
                       <td class="px-4 py-2 text-slate-700">{{ r.installmentTerm || 'main' }}</td>
+                      <td class="px-4 py-2 text-slate-700 text-xs">
+                        <template v-if="r.minSumAssure !== null || r.maxSumAssure !== null">
+                          {{ r.minSumAssure !== null ? fmtBaht(r.minSumAssure) : '−∞' }}
+                          –
+                          {{ r.maxSumAssure !== null ? fmtBaht(r.maxSumAssure) : '∞' }}
+                        </template>
+                        <span v-else class="text-slate-400">ทุกช่วง</span>
+                      </td>
                       <td class="px-4 py-2 text-right font-medium text-slate-900">{{ fmtRate(r.rate) }}</td>
                     </tr>
                   </template>

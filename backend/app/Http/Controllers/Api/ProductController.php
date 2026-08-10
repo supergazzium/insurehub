@@ -184,7 +184,8 @@ class ProductController extends ApiController
             ->where('product_id', $product->id)
             ->orderByRaw("FIELD(party, 'com', 'ag', 'in')")
             ->orderBy('installment_term')
-            ->get(['id', 'party', 'installment_term', 'rate']);
+            ->orderByRaw('COALESCE(min_sum_assure, 0)')
+            ->get(['id', 'party', 'installment_term', 'min_sum_assure', 'max_sum_assure', 'rate']);
 
         $wide = DB::table('product_commission_rates')
             ->where('product_id', $product->id)
@@ -206,14 +207,47 @@ class ProductController extends ApiController
             }
         }
 
+        // Band reconstruction: bucket the installments rows by
+        // (min, max, installment_term) so the drawer's band editor can
+        // prefill without re-guessing the intent. Rows with both bounds null
+        // are the "unbounded" flat rows and are still included — the editor
+        // renders them as a band with min/max blank.
+        $bandBuckets = [];
+        foreach ($installments as $r) {
+            $key = ($r->min_sum_assure ?? '').':'.($r->max_sum_assure ?? '').':'.($r->installment_term ?? '');
+            if (! isset($bandBuckets[$key])) {
+                $bandBuckets[$key] = [
+                    'minSumAssure' => $r->min_sum_assure !== null ? (float) $r->min_sum_assure : null,
+                    'maxSumAssure' => $r->max_sum_assure !== null ? (float) $r->max_sum_assure : null,
+                    'installmentTerm' => $r->installment_term,
+                    'inh' => null,
+                    'ag' => null,
+                    'ov' => null,
+                ];
+            }
+            $partyKey = match ($r->party) {
+                'com' => 'inh',
+                'ag' => 'ag',
+                'in' => 'ov',
+                default => null,
+            };
+            if ($partyKey !== null) {
+                $bandBuckets[$key][$partyKey] = (float) $r->rate;
+            }
+        }
+        $bands = array_values($bandBuckets);
+
         return response()->json([
             'data' => $installments->map(fn ($r) => [
                 'id' => (string) $r->id,
                 'party' => $r->party,
                 'installmentTerm' => $r->installment_term,
+                'minSumAssure' => $r->min_sum_assure !== null ? (float) $r->min_sum_assure : null,
+                'maxSumAssure' => $r->max_sum_assure !== null ? (float) $r->max_sum_assure : null,
                 'rate' => (float) $r->rate,
             ]),
             'years' => $years,
+            'bands' => $bands,
         ]);
     }
 

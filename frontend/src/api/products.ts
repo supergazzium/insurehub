@@ -78,6 +78,8 @@ export interface CommissionRateRow {
   id: string
   party: string
   installmentTerm: string | null
+  minSumAssure: number | null
+  maxSumAssure: number | null
   rate: number
 }
 
@@ -89,18 +91,30 @@ export interface RateTriple {
   ov: number | null
 }
 
+/** One row in a band-shape payload — a rate tier scoped to a sum-assured
+ *  bracket and (optionally) a specific installment term. */
+export interface BandRow extends RateTriple {
+  minSumAssure: number | null
+  maxSumAssure: number | null
+  installmentTerm: string | null
+}
+
 /** Structured rate payload sent on product create/update. Matches
  *  ProductRequest::rules() `commissionRates.*`. */
 export type CommissionRatesPayload =
   | { shape: 'skip' }
   | { shape: 'flat'; installments: Record<string, RateTriple> }
+  | { shape: 'installment'; installments: Record<string, RateTriple> }
   | { shape: 'per-year'; years: Record<string, RateTriple> }
+  | { shape: 'band'; bands: BandRow[] }
 
 /** Response of GET /products/{id}/commission-rates. `years` is null when the
- *  product has no wide-table row (i.e. never used the per-year shape). */
+ *  product has no wide-table row. `bands` is the same installments data
+ *  bucketed by (min, max, term) so the band editor can prefill. */
 export interface CommissionRatesResponse {
   data: CommissionRateRow[]
   years: Record<string, RateTriple> | null
+  bands: BandRow[]
 }
 
 export function fetchProductCommissionRates(productId: string) {

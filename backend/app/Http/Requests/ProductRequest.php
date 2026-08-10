@@ -69,29 +69,49 @@ class ProductRequest extends FormRequest
             'commissionPercent' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
 
             // Structured rate payload — supersedes `commissionPercent` when
-            // both are sent. Consumed by CommissionRateSeeder::seed().
-            //   shape: 'flat'  → single-row per party × installment term.
-            //                     `installments` = ['main' => {inh, ag, ov}, '3' => {...}, ...]
-            //   shape: 'per-year' → wide product_commission_rates row.
-            //                     `years` = {1: {inh, ag, ov}, ..., 6: {inh, ag, ov}}
-            //                     Year 6 seeds every column from yr_6..yr_11up
-            //                     because the UI collapses the tail to a single
-            //                     "Year 6+" input matching Excel/PDF convention.
-            //   shape: 'skip'  → no-op; caller wants to add rates later.
+            // both are sent. Consumed by ProductRateSeeder::seed().
+            //   shape: 'flat'         → arbitrary installment map. Writes rows
+            //                             to product_commission_rate_installments
+            //                             with band = unbounded.
+            //   shape: 'per-year'     → wide product_commission_rates row. Year 6
+            //                             seeds every column from yr_6..yr_11up
+            //                             (matches PDF "Y6+" convention).
+            //   shape: 'installment'  → fixed grid main/3/6/12. Same target as
+            //                             flat but UI-distinct.
+            //   shape: 'band'         → repeatable band rows on
+            //                             product_commission_rate_installments
+            //                             with min/max_sum_assure filled. Each
+            //                             row carries its own installment term.
+            //   shape: 'skip'         → no-op; caller wants to add rates later.
             // All rate values are percents (0..100). Nulls mean "leave this
-            // party at the previous value on update; store 0 on create".
+            // party at the previous value on update; store nothing on create".
             'commissionRates' => ['sometimes', 'nullable', 'array'],
-            'commissionRates.shape' => ['required_with:commissionRates', 'string', 'in:flat,per-year,skip'],
+            'commissionRates.shape' => ['required_with:commissionRates', 'string', 'in:flat,per-year,installment,band,skip'],
+
+            // flat + installment share this validation branch.
             'commissionRates.installments' => ['sometimes', 'array'],
             'commissionRates.installments.*' => ['array'],
             'commissionRates.installments.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'commissionRates.installments.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'commissionRates.installments.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+
+            // per-year branch.
             'commissionRates.years' => ['sometimes', 'array'],
             'commissionRates.years.*' => ['array'],
             'commissionRates.years.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'commissionRates.years.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
             'commissionRates.years.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+
+            // band branch — repeatable rows. UI enforces min <= max where
+            // both are present; we defer to the seeder for cross-row validation.
+            'commissionRates.bands' => ['sometimes', 'array'],
+            'commissionRates.bands.*' => ['array'],
+            'commissionRates.bands.*.minSumAssure' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commissionRates.bands.*.maxSumAssure' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commissionRates.bands.*.installmentTerm' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'commissionRates.bands.*.inh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.bands.*.ag' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+            'commissionRates.bands.*.ov' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
         ];
     }
 

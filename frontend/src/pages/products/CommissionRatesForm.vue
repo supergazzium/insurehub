@@ -1,20 +1,26 @@
 <script setup lang="ts">
 // Shape-shifting commission-rate editor for products.
 //
-// Three shapes, chosen by the operator (with a smart default per product type):
-//   • skip     — no rates now, add later.
-//   • flat     — one row per (party × installment_term). Fits Term, Motor,
-//                Riders, PA, health-without-band.
-//   • per-year — Y1..Y5 + Y6+, three parties. Fits Whole Life, Endowment,
-//                Annuity, and anything else with a maturity curve.
+// Five shapes, chosen by the operator (with a smart default per product type):
+//   • skip        — no rates now, add later.
+//   • flat        — arbitrary map of installment_term → three parties. Fits
+//                    Rider and anything with a single fixed rate per party.
+//   • installment — fixed grid main/3/6/12 → three parties. Same physical
+//                    shape as flat; separate picker so the operator sees a
+//                    familiar template for installment-driven products.
+//   • per-year    — Y1..Y5 + Y6+, three parties. Fits Whole Life, Endowment,
+//                    Annuity, and anything else with a maturity curve.
+//   • band        — repeatable rows (min, max, installment_term, parties).
+//                    Fits Health/PA/CI where rate varies by sum-assured tier.
 //
 // Emits `update:modelValue` with the CommissionRatesPayload the caller passes
 // straight into the product create/update payload.
 
 import { computed, ref, watch } from 'vue'
-import type { CommissionRatesPayload, RateTriple } from '../../api/products'
+import type { BandRow, CommissionRatesPayload, RateTriple } from '../../api/products'
 
-type Shape = 'skip' | 'flat' | 'per-year'
+type Shape = 'skip' | 'flat' | 'installment' | 'per-year' | 'band'
+const FIXED_INSTALLMENT_TERMS = ['main', '3', '6', '12'] as const
 
 const props = defineProps<{
   /** Product type from the create/edit form. Used to pick the default shape. */
@@ -32,6 +38,8 @@ function defaultShape(type: string | null | undefined): Shape {
   const t = (type ?? '').toLowerCase()
   if (t.includes('life') && !t.includes('rider')) return 'per-year'
   if (t.includes('endowment') || t.includes('annuity')) return 'per-year'
+  if (t.includes('health') || t.includes('ci') || t === 'pa') return 'band'
+  if (t.includes('motor')) return 'installment'
   return 'flat'
 }
 
@@ -71,6 +79,43 @@ function removeFlatTerm(term: string): void {
   flat.value = next
 }
 
+// ── Installment (fixed grid) shape state ──────────────────────────────────
+// Same data shape as flat but keys are pinned to main/3/6/12.
+const installment = ref<Record<string, RateTriple>>(
+  props.initial?.shape === 'installment'
+    ? Object.fromEntries(FIXED_INSTALLMENT_TERMS.map((t) => [t, props.initial!.shape === 'installment' ? props.initial!.installments[t] ?? emptyTriple() : emptyTriple()]))
+    : Object.fromEntries(FIXED_INSTALLMENT_TERMS.map((t) => [t, emptyTriple()])),
+)
+
+// ── Band shape state ──────────────────────────────────────────────────────
+const bands = ref<BandRow[]>(
+  props.initial?.shape === 'band' && props.initial.bands.length
+    ? [...props.initial.bands]
+    : [emptyBand()],
+)
+function addBand(): void {
+  // New band starts where the last one ended, so operators just fill "up to".
+  const last = bands.value[bands.value.length - 1]
+  const min = last?.maxSumAssure !== null && last?.maxSumAssure !== undefined
+    ? Number(last.maxSumAssure) + 1
+    : null
+  bands.value = [...bands.value, { ...emptyBand(), minSumAssure: min }]
+}
+function removeBand(idx: number): void {
+  if (bands.value.length <= 1) return
+  const next = [...bands.value]
+  next.splice(idx, 1)
+  bands.value = next
+}
+function emptyBand(): BandRow {
+  return {
+    minSumAssure: null,
+    maxSumAssure: null,
+    installmentTerm: 'main',
+    ...emptyTriple(),
+  }
+}
+
 // ── Per-year shape state ──────────────────────────────────────────────────
 // Fixed columns 1..5 + "6+" — matches the source PDFs and the Excel exports.
 const YEAR_KEYS = ['1', '2', '3', '4', '5', '6'] as const
@@ -84,7 +129,9 @@ const years = ref<Record<string, RateTriple>>(
 const payload = computed<CommissionRatesPayload>(() => {
   if (shape.value === 'skip') return { shape: 'skip' }
   if (shape.value === 'flat') return { shape: 'flat', installments: flat.value }
-  return { shape: 'per-year', years: years.value }
+  if (shape.value === 'installment') return { shape: 'installment', installments: installment.value }
+  if (shape.value === 'per-year') return { shape: 'per-year', years: years.value }
+  return { shape: 'band', bands: bands.value }
 })
 watch(payload, (v) => emit('update:modelValue', v), { immediate: true, deep: true })
 
@@ -107,9 +154,16 @@ const PARTY_LABELS: Array<{ key: keyof RateTriple; label: string; helper: string
 
 const SHAPE_OPTIONS: Array<{ value: Shape; label: string; hint: string }> = [
   { value: 'skip', label: 'ไม่กำหนดตอนนี้', hint: 'เพิ่มค่าคอมภายหลังในหน้ารายละเอียดสินค้า' },
-  { value: 'flat', label: 'อัตราเดียวทุกปี', hint: 'เหมาะกับ Rider, Motor, PA, Health' },
+  { value: 'flat', label: 'อัตราเดียว', hint: 'เหมาะกับ Rider' },
+  { value: 'installment', label: 'ตามงวดชำระ', hint: 'เหมาะกับ Motor / รายเดือน–รายปี' },
   { value: 'per-year', label: 'ตามปีกรมธรรม์ (Y1–Y6+)', hint: 'เหมาะกับ Whole Life, Endowment, Annuity' },
+  { value: 'band', label: 'ตามช่วงทุนประกัน', hint: 'เหมาะกับ Health / PA / CI' },
 ]
+
+function fmtBaht(n: number | null): string {
+  if (n === null) return ''
+  return new Intl.NumberFormat('th-TH').format(n)
+}
 </script>
 
 <template>
@@ -175,8 +229,39 @@ const SHAPE_OPTIONS: Array<{ value: Shape; label: string; hint: string }> = [
       </button>
     </div>
 
+    <!-- Installment (fixed grid main/3/6/12) -->
+    <div v-else-if="shape === 'installment'" class="card p-3">
+      <table class="w-full text-sm">
+        <thead>
+          <tr class="text-xs text-slate-500">
+            <th class="text-left font-medium py-1 w-32">งวดชำระ</th>
+            <th v-for="p in PARTY_LABELS" :key="p.key" class="text-right font-medium py-1">
+              {{ p.label }}
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="term in FIXED_INSTALLMENT_TERMS" :key="term" class="border-t border-slate-100">
+            <td class="py-1.5 pr-2">
+              <span class="text-xs font-mono px-1.5 py-0.5 rounded bg-slate-100 text-slate-700">{{ term }}</span>
+              <span class="ml-2 text-[11px] text-slate-400">
+                {{ term === 'main' ? '(รายปี)' : term === '3' ? '(3 เดือน)' : term === '6' ? '(6 เดือน)' : '(12 เดือน)' }}
+              </span>
+            </td>
+            <td v-for="p in PARTY_LABELS" :key="p.key" class="py-1.5">
+              <div class="relative">
+                <input v-model.number="installment[term][p.key]" type="number" min="0" max="100" step="0.01"
+                  class="w-full border border-slate-200 rounded-md pl-2 pr-6 py-1 text-sm text-right focus:outline-none focus:border-brand-400" />
+                <span class="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 text-xs">%</span>
+              </div>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
     <!-- Per-year -->
-    <div v-else class="card p-3 overflow-x-auto">
+    <div v-else-if="shape === 'per-year'" class="card p-3 overflow-x-auto">
       <table class="min-w-full text-sm">
         <thead>
           <tr class="text-xs text-slate-500">
@@ -209,6 +294,66 @@ const SHAPE_OPTIONS: Array<{ value: Shape; label: string; hint: string }> = [
           class="px-1.5 py-0.5 rounded border border-slate-200 hover:bg-slate-50">
           → ปี {{ y === '6' ? '6+' : y }}
         </button>
+      </div>
+    </div>
+
+    <!-- Band (sum-assured tiers) -->
+    <div v-else class="card p-3 space-y-2 overflow-x-auto">
+      <table class="min-w-full text-sm">
+        <thead>
+          <tr class="text-xs text-slate-500">
+            <th class="text-left font-medium py-1 pr-2">ทุนประกันขั้นต่ำ</th>
+            <th class="text-left font-medium py-1 pr-2">ทุนประกันสูงสุด</th>
+            <th class="text-left font-medium py-1 pr-2 w-20">งวดชำระ</th>
+            <th v-for="p in PARTY_LABELS" :key="p.key" class="text-right font-medium py-1 px-1">
+              {{ p.label }}
+            </th>
+            <th class="w-8" />
+          </tr>
+        </thead>
+        <tbody>
+          <tr v-for="(row, idx) in bands" :key="idx" class="border-t border-slate-100">
+            <td class="py-1.5 pr-2">
+              <input v-model.number="row.minSumAssure" type="number" min="0" step="1" placeholder="ไม่จำกัด"
+                class="w-32 border border-slate-200 rounded-md px-2 py-1 text-sm text-right focus:outline-none focus:border-brand-400" />
+              <div v-if="row.minSumAssure !== null" class="text-[10px] text-slate-400 text-right pr-1">{{ fmtBaht(row.minSumAssure) }} ฿</div>
+            </td>
+            <td class="py-1.5 pr-2">
+              <input v-model.number="row.maxSumAssure" type="number" min="0" step="1" placeholder="ไม่จำกัด"
+                class="w-32 border border-slate-200 rounded-md px-2 py-1 text-sm text-right focus:outline-none focus:border-brand-400" />
+              <div v-if="row.maxSumAssure !== null" class="text-[10px] text-slate-400 text-right pr-1">{{ fmtBaht(row.maxSumAssure) }} ฿</div>
+            </td>
+            <td class="py-1.5 pr-2">
+              <select v-model="row.installmentTerm"
+                class="w-20 border border-slate-200 rounded-md px-1 py-1 text-xs bg-white focus:outline-none focus:border-brand-400">
+                <option v-for="t in FIXED_INSTALLMENT_TERMS" :key="t" :value="t">{{ t }}</option>
+              </select>
+            </td>
+            <td v-for="p in PARTY_LABELS" :key="p.key" class="py-1.5 px-1">
+              <div class="relative">
+                <input v-model.number="row[p.key]" type="number" min="0" max="100" step="0.01"
+                  class="w-full border border-slate-200 rounded-md pl-1.5 pr-5 py-1 text-xs text-right focus:outline-none focus:border-brand-400" />
+                <span class="absolute right-1.5 top-1/2 -translate-y-1/2 text-slate-400 text-[10px]">%</span>
+              </div>
+            </td>
+            <td class="text-center">
+              <button v-if="bands.length > 1" type="button"
+                @click="removeBand(idx)"
+                class="text-slate-400 hover:text-rose-500 text-xs" title="ลบช่วงนี้">
+                <i class="pi pi-times" />
+              </button>
+            </td>
+          </tr>
+        </tbody>
+      </table>
+      <div class="flex items-center justify-between">
+        <button type="button" @click="addBand"
+          class="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1">
+          <i class="pi pi-plus text-[10px]" /> เพิ่มช่วงทุนประกัน
+        </button>
+        <p class="text-[10px] text-slate-400">
+          เว้นว่างช่องต่ำสุด/สูงสุด = ไม่จำกัด (เป็นช่วง fallback)
+        </p>
       </div>
     </div>
   </div>

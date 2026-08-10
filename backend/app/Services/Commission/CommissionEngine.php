@@ -28,7 +28,9 @@ use Illuminate\Support\Facades\DB;
 class CommissionEngine
 {
     public const PARTY_INH = 'InH';
+
     public const PARTY_AGENT = 'AG';
+
     public const PARTY_OVERRIDE = 'Override';
 
     /**
@@ -38,9 +40,9 @@ class CommissionEngine
      * @return list<CommissionTransaction> the txns created on THIS call (none if all keys already exist).
      */
     /**
-     * @param string $keyVersion Optional idempotency suffix. Default "" runs
-     *   the standard first-time-only accrual. Recompute passes e.g. ":v2" to
-     *   create fresh txns after reversing the old ones — see recomputeForPolicy().
+     * @param  string  $keyVersion  Optional idempotency suffix. Default "" runs
+     *                              the standard first-time-only accrual. Recompute passes e.g. ":v2" to
+     *                              create fresh txns after reversing the old ones — see recomputeForPolicy().
      */
     public function accrueForPayment(PolicyPayment $payment, string $keyVersion = ''): array
     {
@@ -65,7 +67,11 @@ class CommissionEngine
         //   - policies.main_com_rate_ag present + > 0  → use it for the AG share
         // Override missing = fall back to product_commission_rate_installments.
         // Override present but = 0 = "zeroed on purpose" → skip that party.
-        $productRates = $this->fetchProductRates($policy->product_id, $payment->id);
+        $productRates = $this->fetchProductRates(
+            (int) $policy->product_id,
+            (int) $payment->id,
+            $policy->coverage !== null ? (float) $policy->coverage : null,
+        );
         $rates = [
             'inh' => $policy->main_com_rate_inh !== null ? (float) $policy->main_com_rate_inh : $productRates['inh'],
             'ag' => $policy->main_com_rate_ag !== null ? (float) $policy->main_com_rate_ag : $productRates['ag'],
@@ -148,7 +154,7 @@ class CommissionEngine
         }
 
         $count = 0;
-        DB::transaction(function () use ($originals, &$count, $reason): void {
+        DB::transaction(function () use ($originals, &$count): void {
             foreach ($originals as $orig) {
                 // Idempotent — don't reverse twice.
                 $existing = CommissionTransaction::query()
@@ -174,6 +180,7 @@ class CommissionEngine
                 $count++;
             }
         });
+
         return $count;
     }
 
@@ -231,20 +238,60 @@ class CommissionEngine
     }
 
     /**
+     * @param  float|null  $sumAssured  Policy's sum-assured (`policies.coverage`).
+     *                                  When set, band rows filter by
+     *                                  min_sum_assure/max_sum_assure. When null
+     *                                  (or when no band matches), the unbounded
+     *                                  row (both bounds NULL) is used.
      * @return array{inh: float, ag: float, override: float}
      */
-    private function fetchProductRates(int $productId, int $paymentId): array
+    private function fetchProductRates(int $productId, int $paymentId, ?float $sumAssured = null): array
     {
         // Look up rates for installment_term=0 (annual/single). The importer
         // seeded most rows at term 0; per-installment rates would key by
         // payment sequence, but that's a Phase 7 refinement.
+        //
+        // NOTE: the match arm below compares $r->party to constants
+        // 'InH'/'AG'/'Override' — but the seeder + Access import both write
+        // 'com'/'ag'/'in'. Fixing that mismatch is out of scope for this PR;
+        // sum-assured filtering below is layered on top of the existing
+        // (broken) match so we don't quietly change accrual behavior. When
+        // the mismatch is fixed, the party comparison and the constants
+        // should be updated together.
         $rows = DB::table('product_commission_rate_installments')
             ->where('product_id', $productId)
             ->where('installment_term', 0)
-            ->get(['party', 'rate']);
+            ->when($sumAssured !== null, function ($q) use ($sumAssured): void {
+                // Match a band that covers the policy's sum-assured, or the
+                // unbounded (both-null) fallback. Rows where one bound is null
+                // treat that side as unbounded.
+                $q->where(function ($w) use ($sumAssured): void {
+                    $w->where(function ($b) use ($sumAssured): void {
+                        $b->where(function ($lo) use ($sumAssured): void {
+                            $lo->whereNull('min_sum_assure')->orWhere('min_sum_assure', '<=', $sumAssured);
+                        })->where(function ($hi) use ($sumAssured): void {
+                            $hi->whereNull('max_sum_assure')->orWhere('max_sum_assure', '>=', $sumAssured);
+                        });
+                    });
+                });
+            })
+            // Prefer specific bands over unbounded fallbacks: rows with any
+            // bound set win over rows with both null. Within same specificity,
+            // higher id wins (most-recently seeded).
+            ->orderByRaw('CASE WHEN min_sum_assure IS NULL AND max_sum_assure IS NULL THEN 1 ELSE 0 END')
+            ->orderByDesc('id')
+            ->get(['party', 'rate', 'min_sum_assure', 'max_sum_assure']);
 
+        // Take the first (best-matching) row per party. Multiple bands can
+        // exist for the same party × term; the ORDER BY above puts the winner
+        // first, so we only assign each party once.
         $out = ['inh' => 0.0, 'ag' => 0.0, 'override' => 0.0];
+        $seen = [];
         foreach ($rows as $r) {
+            if (isset($seen[$r->party])) {
+                continue;
+            }
+            $seen[$r->party] = true;
             $rate = (float) $r->rate;
             match ($r->party) {
                 self::PARTY_INH => $out['inh'] = $rate,
@@ -253,6 +300,7 @@ class CommissionEngine
                 default => null,
             };
         }
+
         return $out;
     }
 
