@@ -123,6 +123,10 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // Business entities — REST resource routes.
     Route::apiResource('agents', AgentController::class);
+    // Layer 2 (firm -> agent) commission overrides. See CommissionEngine::resolveRates().
+    Route::apiResource('agents.commission-plans', \App\Http\Controllers\Api\AgentCommissionPlanController::class)
+        ->parameters(['commission-plans' => 'commissionPlan'])
+        ->only(['index', 'store', 'update', 'destroy']);
     Route::apiResource('customers', CustomerController::class);
     Route::apiResource('carriers', CarrierController::class);
     Route::apiResource('carriers.bank-accounts', CarrierBankAccountController::class)

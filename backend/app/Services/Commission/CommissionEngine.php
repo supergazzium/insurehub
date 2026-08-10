@@ -5,9 +5,11 @@ declare(strict_types=1);
 namespace App\Services\Commission;
 
 use App\Models\Agent;
+use App\Models\AgentCommissionPlan;
 use App\Models\CommissionTransaction;
 use App\Models\Policy;
 use App\Models\PolicyPayment;
+use App\Models\Product;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -28,7 +30,9 @@ use Illuminate\Support\Facades\DB;
 class CommissionEngine
 {
     public const PARTY_INH = 'InH';
+
     public const PARTY_AGENT = 'AG';
+
     public const PARTY_OVERRIDE = 'Override';
 
     /**
@@ -38,9 +42,9 @@ class CommissionEngine
      * @return list<CommissionTransaction> the txns created on THIS call (none if all keys already exist).
      */
     /**
-     * @param string $keyVersion Optional idempotency suffix. Default "" runs
-     *   the standard first-time-only accrual. Recompute passes e.g. ":v2" to
-     *   create fresh txns after reversing the old ones — see recomputeForPolicy().
+     * @param  string  $keyVersion  Optional idempotency suffix. Default "" runs
+     *                              the standard first-time-only accrual. Recompute passes e.g. ":v2" to
+     *                              create fresh txns after reversing the old ones — see recomputeForPolicy().
      */
     public function accrueForPayment(PolicyPayment $payment, string $keyVersion = ''): array
     {
@@ -57,21 +61,18 @@ class CommissionEngine
             return [];
         }
 
-        // Rate lookup: per-policy overrides win over product defaults. Access's
-        // Form_Edit_Account_Recp_Com writes rates into main_com_rate_{inh,ag}
-        // when finance renegotiates a deal; the engine honors those here.
-        // Override rules per party:
-        //   - policies.main_com_rate_inh present + > 0 → use it for the InH share
-        //   - policies.main_com_rate_ag present + > 0  → use it for the AG share
-        // Override missing = fall back to product_commission_rate_installments.
-        // Override present but = 0 = "zeroed on purpose" → skip that party.
-        $productRates = $this->fetchProductRates($policy->product_id, $payment->id);
-        $rates = [
-            'inh' => $policy->main_com_rate_inh !== null ? (float) $policy->main_com_rate_inh : $productRates['inh'],
-            'ag' => $policy->main_com_rate_ag !== null ? (float) $policy->main_com_rate_ag : $productRates['ag'],
-            // Override didn't touch upline; keep product default.
-            'override' => $productRates['override'],
-        ];
+        // Rate resolution order (most specific wins):
+        //   1. Per-policy overrides (policies.main_com_rate_{inh,ag}) — set by
+        //      finance in Form_Edit_Account_Recp_Com when a deal is
+        //      renegotiated. Only inh + ag; upline share isn't per-policy.
+        //   2. Agent commission plan matching (agent, product, effective date).
+        //      Nullable per-party columns let a plan override e.g. only `ag`
+        //      while leaving `inh`/`override` at product defaults.
+        //   3. product_commission_rate_installments — the product default.
+        //
+        // Semantics: null at any layer = "not set, fall through". Explicit 0 =
+        // "zeroed on purpose", skip that party. See resolveRates() docblock.
+        $rates = $this->resolveRates($policy, (int) $payment->id);
         $created = [];
 
         // In-house share
@@ -148,7 +149,7 @@ class CommissionEngine
         }
 
         $count = 0;
-        DB::transaction(function () use ($originals, &$count, $reason): void {
+        DB::transaction(function () use ($originals, &$count): void {
             foreach ($originals as $orig) {
                 // Idempotent — don't reverse twice.
                 $existing = CommissionTransaction::query()
@@ -174,6 +175,7 @@ class CommissionEngine
                 $count++;
             }
         });
+
         return $count;
     }
 
@@ -231,6 +233,55 @@ class CommissionEngine
     }
 
     /**
+     * Resolve the effective (inh, ag, override) rates for a policy payment.
+     *
+     * Layering (per party, independently):
+     *   policy override -> agent plan -> product default
+     *
+     * Only the writing agent's plan is consulted. The upline that receives the
+     * `override` share is picked later in accrueForPayment() from the writing
+     * agent's parent_agent_id — override_rate here is the RATE, not the target.
+     *
+     * @return array{inh: float, ag: float, override: float}
+     */
+    private function resolveRates(Policy $policy, int $paymentId): array
+    {
+        $productRates = $this->fetchProductRates((int) $policy->product_id, $paymentId);
+        $planRates = $this->fetchAgentPlanRates(
+            (int) $policy->tenant_id,
+            (int) $policy->writing_agent_id,
+            (int) $policy->product_id,
+            $policy->effective_date,
+        );
+
+        $pick = static function (?float $policyOverride, ?float $planRate, float $productRate): float {
+            if ($policyOverride !== null) {
+                return $policyOverride;
+            }
+            if ($planRate !== null) {
+                return $planRate;
+            }
+
+            return $productRate;
+        };
+
+        return [
+            'inh' => $pick(
+                $policy->main_com_rate_inh !== null ? (float) $policy->main_com_rate_inh : null,
+                $planRates['inh'],
+                $productRates['inh'],
+            ),
+            'ag' => $pick(
+                $policy->main_com_rate_ag !== null ? (float) $policy->main_com_rate_ag : null,
+                $planRates['ag'],
+                $productRates['ag'],
+            ),
+            // No per-policy override for upline share — plan wins over product.
+            'override' => $pick(null, $planRates['override'], $productRates['override']),
+        ];
+    }
+
+    /**
      * @return array{inh: float, ag: float, override: float}
      */
     private function fetchProductRates(int $productId, int $paymentId): array
@@ -253,7 +304,72 @@ class CommissionEngine
                 default => null,
             };
         }
+
         return $out;
+    }
+
+    /**
+     * Look up the most-specific agent commission plan for a (agent, product,
+     * date) triple. Specificity: product_id > category > default. If two rows
+     * tie on specificity (impossible under the unique index), the highest
+     * valid_start wins.
+     *
+     * Returns nullable per-party rates — null means "plan didn't override this
+     * party; fall through to the product rate".
+     *
+     * @return array{inh: ?float, ag: ?float, override: ?float}
+     */
+    private function fetchAgentPlanRates(
+        int $tenantId,
+        int $agentId,
+        int $productId,
+        ?\DateTimeInterface $asOf,
+    ): array {
+        $empty = ['inh' => null, 'ag' => null, 'override' => null];
+        if ($agentId <= 0 || $productId <= 0) {
+            return $empty;
+        }
+
+        $product = Product::query()->find($productId);
+        $category = $product?->type;
+
+        // "as of" defaults to today when a payment has no policy effective_date.
+        $asOfDate = $asOf?->format('Y-m-d') ?? now()->toDateString();
+
+        $plans = AgentCommissionPlan::query()
+            ->where('tenant_id', $tenantId)
+            ->where('agent_id', $agentId)
+            ->where('valid_start', '<=', $asOfDate)
+            ->where(function ($q) use ($asOfDate): void {
+                $q->whereNull('valid_end')->orWhere('valid_end', '>=', $asOfDate);
+            })
+            ->where(function ($q) use ($productId, $category): void {
+                $q->where('product_id', $productId)
+                    ->orWhere(function ($q2) use ($category): void {
+                        $q2->whereNull('product_id');
+                        if ($category !== null) {
+                            $q2->where(function ($q3) use ($category): void {
+                                $q3->where('category', $category)->orWhereNull('category');
+                            });
+                        } else {
+                            $q2->whereNull('category');
+                        }
+                    });
+            })
+            ->orderByRaw('CASE WHEN product_id IS NOT NULL THEN 0 WHEN category IS NOT NULL THEN 1 ELSE 2 END')
+            ->orderByDesc('valid_start')
+            ->orderByDesc('id')
+            ->first();
+
+        if ($plans === null) {
+            return $empty;
+        }
+
+        return [
+            'inh' => $plans->inh_rate !== null ? (float) $plans->inh_rate : null,
+            'ag' => $plans->ag_rate !== null ? (float) $plans->ag_rate : null,
+            'override' => $plans->override_rate !== null ? (float) $plans->override_rate : null,
+        ];
     }
 
     /**

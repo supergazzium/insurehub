@@ -73,4 +73,9 @@ class Agent extends Model
     {
         return $this->hasMany(Policy::class, 'writing_agent_id');
     }
+
+    public function commissionPlans(): HasMany
+    {
+        return $this->hasMany(AgentCommissionPlan::class);
+    }
 }
