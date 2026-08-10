@@ -27,9 +27,41 @@ use Illuminate\Support\Facades\DB;
  */
 class CommissionEngine
 {
+    /**
+     * Human-readable party labels — written into
+     * `commission_transactions.payer_level` and rendered by the PDF
+     * statement / commission ledger UI. Kept for backward compatibility
+     * with existing rows.
+     */
     public const PARTY_INH = 'InH';
+
     public const PARTY_AGENT = 'AG';
+
     public const PARTY_OVERRIDE = 'Override';
+
+    /**
+     * DB codes stored in product_commission_rate_installments.party. The
+     * Access importer preserves these lowercase codes verbatim; the
+     * seeder (see ProductRateSeeder) uses the same set.
+     *
+     * These are what fetchProductRates() must actually compare against —
+     * NOT the PARTY_* constants above, which are display strings that
+     * happen to share names but not values.
+     */
+    private const DB_PARTY_INH = 'com';
+
+    private const DB_PARTY_AGENT = 'ag';
+
+    private const DB_PARTY_OVERRIDE = 'in';
+
+    /**
+     * Default installment_term for the "annual" rate row in the tall
+     * table. The importer defaults null installment_term to this string,
+     * and the seeder writes 'main' for the top row of the flat shape.
+     * fetchProductRates() historically compared against integer 0, which
+     * never matched anything.
+     */
+    private const DEFAULT_INSTALLMENT_TERM = 'main';
 
     /**
      * Accrue commission rows for one payment. Safe to call multiple times —
@@ -38,9 +70,9 @@ class CommissionEngine
      * @return list<CommissionTransaction> the txns created on THIS call (none if all keys already exist).
      */
     /**
-     * @param string $keyVersion Optional idempotency suffix. Default "" runs
-     *   the standard first-time-only accrual. Recompute passes e.g. ":v2" to
-     *   create fresh txns after reversing the old ones — see recomputeForPolicy().
+     * @param  string  $keyVersion  Optional idempotency suffix. Default "" runs
+     *                              the standard first-time-only accrual. Recompute passes e.g. ":v2" to
+     *                              create fresh txns after reversing the old ones — see recomputeForPolicy().
      */
     public function accrueForPayment(PolicyPayment $payment, string $keyVersion = ''): array
     {
@@ -148,7 +180,7 @@ class CommissionEngine
         }
 
         $count = 0;
-        DB::transaction(function () use ($originals, &$count, $reason): void {
+        DB::transaction(function () use ($originals, &$count): void {
             foreach ($originals as $orig) {
                 // Idempotent — don't reverse twice.
                 $existing = CommissionTransaction::query()
@@ -174,6 +206,7 @@ class CommissionEngine
                 $count++;
             }
         });
+
         return $count;
     }
 
@@ -235,24 +268,43 @@ class CommissionEngine
      */
     private function fetchProductRates(int $productId, int $paymentId): array
     {
-        // Look up rates for installment_term=0 (annual/single). The importer
-        // seeded most rows at term 0; per-installment rates would key by
-        // payment sequence, but that's a Phase 7 refinement.
+        // Feature-gated behavior change — see config/commission.php.
+        //
+        // Before this PR, this method's rate lookup was silently broken:
+        // the party match arm compared against 'InH'/'AG'/'Override' but
+        // rows are stored as 'com'/'ag'/'in', and the installment_term
+        // filter used integer 0 against a string column ('main').
+        //
+        // As a result, product-level rates from the tall table have
+        // never applied since launch. Every accrual came from the
+        // per-policy overrides main_com_rate_{inh,ag}.
+        //
+        // Turning the fix on retroactively would start creating InH/AG
+        // rows on payments whose policies previously accrued nothing at
+        // this layer. To avoid a silent ledger change, callers must
+        // opt in via COMMISSION_READ_PRODUCT_RATES=true after auditing
+        // the tall table and running recomputeForPolicy() to backfill
+        // any older payments the operator wants to bring up to date.
+        if (! (bool) config('commission.read_product_rates', false)) {
+            return ['inh' => 0.0, 'ag' => 0.0, 'override' => 0.0];
+        }
+
         $rows = DB::table('product_commission_rate_installments')
             ->where('product_id', $productId)
-            ->where('installment_term', 0)
+            ->where('installment_term', self::DEFAULT_INSTALLMENT_TERM)
             ->get(['party', 'rate']);
 
         $out = ['inh' => 0.0, 'ag' => 0.0, 'override' => 0.0];
         foreach ($rows as $r) {
             $rate = (float) $r->rate;
             match ($r->party) {
-                self::PARTY_INH => $out['inh'] = $rate,
-                self::PARTY_AGENT => $out['ag'] = $rate,
-                self::PARTY_OVERRIDE => $out['override'] = $rate,
+                self::DB_PARTY_INH => $out['inh'] = $rate,
+                self::DB_PARTY_AGENT => $out['ag'] = $rate,
+                self::DB_PARTY_OVERRIDE => $out['override'] = $rate,
                 default => null,
             };
         }
+
         return $out;
     }
 
