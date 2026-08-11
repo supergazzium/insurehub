@@ -45,6 +45,9 @@ class DatabaseSeeder extends Seeder
         $this->command->info('Seeding MGM ranks (Lv1..Lv10)...');
         $this->call(RankSeeder::class);
 
+        $this->command->info('Seeding MGM commission tiers (3 tiers × 10 ranks)...');
+        $this->call(CommissionTierSeeder::class);
+
         $this->command->info('Seeding agents...');
         $this->call(AgentSeeder::class);
 

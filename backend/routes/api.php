@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\CarrierContactController;
 use App\Http\Controllers\Api\CarrierContactGroupController;
 use App\Http\Controllers\Api\CarrierController;
 use App\Http\Controllers\Api\CarrierCredentialController;
+use App\Http\Controllers\Api\CommissionTierController;
 use App\Http\Controllers\Api\ContractController;
 use App\Http\Controllers\Api\CustomerAssignmentController;
 use App\Http\Controllers\Api\CustomerController;
@@ -112,6 +113,13 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // Phase 7b — Admin payout cycle.
     // Admin payout routes removed with the old commission engine. The new
     // MGM commission_ledgers + payout system will re-introduce equivalents.
+
+    // MGM commission tiers — 3 admin-editable tiers (TIER_FULL / TIER_PARTIAL /
+    // TIER_DIRECT_ONLY). Renames + per-cell rate edits only; number of tiers is
+    // fixed. See CommissionTierController.
+    Route::get('commission-tiers', [CommissionTierController::class, 'index']);
+    Route::patch('commission-tiers/{commissionTier}', [CommissionTierController::class, 'update']);
+    Route::patch('commission-tiers/{commissionTier}/rates/{rate}', [CommissionTierController::class, 'updateRate']);
 
     // Tenant settings (single resource).
     Route::get('tenant', [TenantController::class, 'show']);
