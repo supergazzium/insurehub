@@ -121,6 +121,7 @@ class MgmScenarioSeeder extends Seeder
             $this->scenario5($nonLifeCarrier, $customer);
             $this->scenario6($orphanCarrier, $customer);
             $this->scenario7($nonLifeCarrier, $customer);
+            $this->scenario8($nonLifeCarrier, $customer);
         });
 
         $this->printSummary();
@@ -301,6 +302,38 @@ class MgmScenarioSeeder extends Seeder
         $product = $this->makeProduct('SCN7_PROD', $carrier, 'MOTOR_CLASS1_GARAGE');
         $policy = $this->makePolicy('SCN7_POL', $customer, $product, $carrier, $seller);
         $this->makePayment($policy, 1500000, 'SCN7_PAY');
+    }
+
+    /**
+     * S8 — 5-level upline chain. TIER_FULL, Motor Class 1 (garage) 10%.
+     *   Seller Lv2 → Lv3 → Lv5 → Lv7 → Lv10 (5 tiers of humans total: 1 seller + 4 uplines).
+     *   Seller Lv2 mgmt fee: 3%      Referral: 1% (TIER_FULL) → goes to direct upline (Lv3)
+     *   Uplines (all TIER_FULL):
+     *     Lv3 mgmt fee = 4%   diff = 4  - 3  = 1%   → 10000×0.01   = ฿100
+     *     Lv5 mgmt fee = 5%   diff = 5  - 4  = 1%   → 10000×0.01   = ฿100
+     *     Lv7 mgmt fee = 6%   diff = 6  - 5  = 1%   → 10000×0.01   = ฿100
+     *     Lv10 mgmt fee= 6.75% diff= 6.75-6 = 0.75% → 10000×0.0075 = ฿75
+     *   Payment: ฿10,000
+     *
+     * Expected ledger rows (6 total):
+     *   DIRECT       → Lv2 seller     10000×(0.10+0.03) = ฿1,300
+     *   REFERRAL     → Lv3 (direct upline) 10000×0.01   = ฿100
+     *   DIFFERENTIAL → Lv3 rate=0.01000 → ฿100
+     *   DIFFERENTIAL → Lv5 rate=0.01000 → ฿100
+     *   DIFFERENTIAL → Lv7 rate=0.01000 → ฿100
+     *   DIFFERENTIAL → Lv10 rate=0.00750 → ฿75
+     */
+    private function scenario8(Carrier $carrier, Customer $customer): void
+    {
+        $l10 = $this->makeAgent('SCN8_L10', level: 10, parent: null, active: true, hasLicense: true);
+        $l7 = $this->makeAgent('SCN8_L7', level: 7, parent: $l10, active: true, hasLicense: true);
+        $l5 = $this->makeAgent('SCN8_L5', level: 5, parent: $l7, active: true, hasLicense: false);
+        $l3 = $this->makeAgent('SCN8_L3', level: 3, parent: $l5, active: true, hasLicense: false);
+        $l2 = $this->makeAgent('SCN8_L2', level: 2, parent: $l3, active: true, hasLicense: false);
+
+        $product = $this->makeProduct('SCN8_PROD', $carrier, 'MOTOR_CLASS1_GARAGE');
+        $policy = $this->makePolicy('SCN8_POL', $customer, $product, $carrier, $l2);
+        $this->makePayment($policy, 10000, 'SCN8_PAY');
     }
 
     // ─────────────────────────────────────────────────────────────────────
