@@ -4,7 +4,9 @@ declare(strict_types=1);
 
 namespace App\Console\Commands;
 
+use App\Models\Agent;
 use App\Models\Tenant;
+use App\Services\Commission\RankPromotionService;
 use App\Services\Commission\VolumeAccumulator;
 use Illuminate\Console\Command;
 use Illuminate\Support\Carbon;
@@ -36,7 +38,7 @@ class MgmReconcileVolumes extends Command
 
     protected $description = 'Rebuild member_volume_accumulations rows for a given month from source truth.';
 
-    public function handle(VolumeAccumulator $accumulator): int
+    public function handle(VolumeAccumulator $accumulator, RankPromotionService $promotion): int
     {
         $yearMonth = (string) ($this->option('month') ?? Carbon::now()->format('Y-m'));
         if (! preg_match('/^\d{4}-\d{2}$/', $yearMonth)) {
@@ -57,14 +59,31 @@ class MgmReconcileVolumes extends Command
         }
 
         $totalAgents = 0;
+        $totalPromotions = 0;
         foreach ($tenants as $tenant) {
             $this->info(">>> tenant={$tenant->id} month={$yearMonth}");
             $count = $accumulator->reconcileMonth((int) $tenant->id, $yearMonth);
             $totalAgents += $count;
             $this->line("    reconciled {$count} agent(s)");
+
+            // After volumes are current, re-evaluate every agent for
+            // promotion. Catches promotions the observer missed (crashes,
+            // rank data fixes, cross-tenant carrier moves, etc.).
+            $agentIds = Agent::query()
+                ->where('tenant_id', $tenant->id)
+                ->whereNull('deleted_at')
+                ->pluck('id');
+            $promoted = 0;
+            foreach ($agentIds as $agentId) {
+                if ($promotion->evaluateForAgent((int) $agentId) !== null) {
+                    $promoted++;
+                }
+            }
+            $totalPromotions += $promoted;
+            $this->line("    promoted {$promoted} agent(s)");
         }
 
-        $this->info("Done. Reconciled {$totalAgents} agent-month rows across {$tenants->count()} tenant(s).");
+        $this->info("Done. Reconciled {$totalAgents} agent-month rows, {$totalPromotions} promotions across {$tenants->count()} tenant(s).");
 
         return self::SUCCESS;
     }

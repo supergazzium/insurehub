@@ -5,27 +5,36 @@ declare(strict_types=1);
 namespace App\Observers;
 
 use App\Models\PolicyPayment;
+use App\Services\Commission\RankPromotionService;
 use App\Services\Commission\VolumeAccumulator;
 use Illuminate\Support\Facades\Log;
 
 /**
- * Fires the MGM volume accumulator on every new payment.
+ * Fires the MGM volume accumulator + rank promotion evaluation on every
+ * new payment.
  *
- * This is the same observer name as the one deleted in PR-0. The old
- * observer called CommissionEngine::accrueForPayment (deleted).
- * This one calls VolumeAccumulator::accumulateForPayment. When PR-D
- * lands, this observer will also fire the MgmCommissionEngine.
+ * Order matters:
+ *   1. VolumeAccumulator writes the seller's + uplines' rows for the
+ *      payment's month.
+ *   2. RankPromotionService walks the same chain and evaluates each
+ *      agent against the fresh volumes. Any qualifying promotion is
+ *      instant (Sheet2 rule 4).
  *
- * Wired via #[ObservedBy] on the PolicyPayment model — but that
- * attribute was removed in PR-0. Re-adding it here.
+ * When PR-D lands, MgmCommissionEngine will fire AFTER both of these —
+ * the engine reads the (possibly just-promoted) rank_id to compute
+ * mgmt fees.
  *
  * Failures are logged but non-fatal — a payment must succeed even if
- * the volume observer crashes. Nightly reconciliation
- * (`mgm:reconcile-volumes`) will catch anything the observer missed.
+ * volume / promotion fail. Nightly reconciliation
+ * (`mgm:reconcile-volumes`) catches missed volume updates; promotion
+ * is re-evaluated on the next payment.
  */
 class PolicyPaymentObserver
 {
-    public function __construct(private readonly VolumeAccumulator $accumulator) {}
+    public function __construct(
+        private readonly VolumeAccumulator $accumulator,
+        private readonly RankPromotionService $promotion,
+    ) {}
 
     public function created(PolicyPayment $payment): void
     {
@@ -33,6 +42,21 @@ class PolicyPaymentObserver
             $this->accumulator->accumulateForPayment($payment);
         } catch (\Throwable $e) {
             Log::error('MGM volume accumulation failed on payment.created', [
+                'payment_id' => $payment->id,
+                'policy_id' => $payment->policy_id,
+                'error' => $e->getMessage(),
+            ]);
+
+            return;  // don't evaluate promotion against stale volumes
+        }
+
+        try {
+            $policy = $payment->policy()->first();
+            if ($policy?->writing_agent_id !== null) {
+                $this->promotion->evaluateForChain((int) $policy->writing_agent_id);
+            }
+        } catch (\Throwable $e) {
+            Log::error('MGM rank promotion failed on payment.created', [
                 'payment_id' => $payment->id,
                 'policy_id' => $payment->policy_id,
                 'error' => $e->getMessage(),
