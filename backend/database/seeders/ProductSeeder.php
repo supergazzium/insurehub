@@ -6,7 +6,6 @@ namespace Database\Seeders;
 
 use App\Models\Carrier;
 use App\Models\Product;
-use App\Models\ProductCommissionRate;
 use App\Models\Tenant;
 use Database\Seeders\Concerns\SeedsFromCsv;
 use Illuminate\Database\Seeder;
@@ -51,38 +50,12 @@ class ProductSeeder extends Seeder
                 ],
             );
             $seen[$code] = $product;
-
-            // One commission-rate row per Access row (versioned by Valid_start/Valid_End).
-            ProductCommissionRate::updateOrCreate(
-                [
-                    'product_id' => $product->id,
-                    'commission_code' => $this->nonEmpty($row['Commission_Code'] ?? null),
-                ],
-                array_merge(
-                    [
-                        'valid_start' => $this->parseDate($row['Valid_start'] ?? null),
-                        'valid_end' => $this->parseDate($row['Valid_End'] ?? null),
-                    ],
-                    $this->extractRates($row),
-                ),
-            );
+            // NOTE: legacy product_commission_rates seeding removed with the
+            // MGM rewrite. The new engine (PR-D) reads rates from
+            // carrier_product_type_rates (non-life) or product_life_rates
+            // (Life); those seeders will land with their respective PRs.
         }
         $this->command?->info('  products: '.Product::where('tenant_id', $tenantId)->count());
-        $this->command?->info('  product_commission_rates: '.ProductCommissionRate::count());
-    }
-
-    /** @return array<string,float|null> */
-    private function extractRates(array $row): array
-    {
-        $out = [];
-        for ($y = 1; $y <= 11; $y++) {
-            $suffix = $y === 1 ? '' : ($y === 11 ? '_11Up' : "_{$y}");
-            $key = $y === 11 ? '11up' : (string) $y;
-            $out["com_rate_yr_{$key}"] = $this->num($row["ComCommission{$suffix}"] ?? null) ?: null;
-            $out["ag_rate_yr_{$key}"] = $this->num($row["AgCommission{$suffix}"] ?? null) ?: null;
-            $out["in_rate_yr_{$key}"] = $this->num($row["InCommission{$suffix}"] ?? null) ?: null;
-        }
-        return $out;
     }
 
     private function mapProductType(array $row): ?string
@@ -95,6 +68,7 @@ class ProductSeeder extends Seeder
         if (stripos($sub, 'motor') !== false) {
             return 'motor';
         }
+
         return 'non_life';
     }
 }

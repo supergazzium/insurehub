@@ -61,13 +61,6 @@ class PolicyResource extends JsonResource
                 'netCustomerPaid' => $this->net_customer_paid !== null ? (float) $this->net_customer_paid : null,
                 'check' => $this->premium_check ?? '',
             ],
-            // Main-product commission split — riders live on `riders`.
-            'mainCommission' => [
-                'rateInh' => $this->main_com_rate_inh !== null ? (float) $this->main_com_rate_inh : null,
-                'amtInh' => $this->main_com_amt_inh !== null ? (float) $this->main_com_amt_inh : null,
-                'rateAg' => $this->main_com_rate_ag !== null ? (float) $this->main_com_rate_ag : null,
-                'amtAg' => $this->main_com_amt_ag !== null ? (float) $this->main_com_amt_ag : null,
-            ],
             'comRecCheck' => $this->com_rec_check ?? '',
             // Installment / payment terms.
             'installment' => [

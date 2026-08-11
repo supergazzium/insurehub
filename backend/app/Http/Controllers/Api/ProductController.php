@@ -9,7 +9,6 @@ use App\Http\Resources\ProductListResource;
 use App\Http\Resources\ProductResource;
 use App\Models\Carrier;
 use App\Models\Product;
-use App\Models\ProductCommissionRate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -84,25 +83,13 @@ class ProductController extends ApiController
         $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];
         $product = Product::create($payload);
 
-        // If the caller passed `commissionPercent`, seed a single
-        // product_commission_rates row where every year's com_rate slot is
-        // set to that percent. Agent/insurer split (`ag_rate_*`, `in_rate_*`)
-        // is left null — the commission engine or a later edit can populate.
-        $percent = $request->input('commissionPercent');
-        if ($percent !== null && $percent !== '') {
-            $rateRow = ['product_id' => $product->id];
-            foreach ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, '11up'] as $year) {
-                $rateRow["com_rate_yr_{$year}"] = $percent;
-            }
-            ProductCommissionRate::create($rateRow);
-        }
-
         return (new ProductResource($product))->response()->setStatusCode(201);
     }
 
     public function show(Request $request, Product $product): ProductResource
     {
         $this->authorizeTenant($request, $product);
+
         return new ProductResource($product->load('carrier'));
     }
 
@@ -110,6 +97,7 @@ class ProductController extends ApiController
     {
         $this->authorizeTenant($request, $product);
         $product->update($request->toModel());
+
         return new ProductResource($product->fresh());
     }
 
@@ -117,6 +105,7 @@ class ProductController extends ApiController
     {
         $this->authorizeTenant($request, $product);
         $product->delete();
+
         return response()->json(['message' => 'Deleted.']);
     }
 
@@ -133,7 +122,7 @@ class ProductController extends ApiController
             abort(404);
         }
 
-        $prefix = 'PD' . $carrier->code;
+        $prefix = 'PD'.$carrier->code;
         $prefixLen = strlen($prefix);
 
         // Match every existing product code for this carrier that follows the
@@ -142,41 +131,17 @@ class ProductController extends ApiController
         $maxNum = (int) DB::table('products')
             ->where('tenant_id', $this->tenantId($request))
             ->where('carrier_id', $carrier->id)
-            ->where('code', 'like', $prefix . '%')
+            ->where('code', 'like', $prefix.'%')
             ->whereRaw('SUBSTRING(code, ?) REGEXP \'^[0-9]+$\'', [$prefixLen + 1])
-            ->max(DB::raw('CAST(SUBSTRING(code, ' . ($prefixLen + 1) . ') AS UNSIGNED)'));
+            ->max(DB::raw('CAST(SUBSTRING(code, '.($prefixLen + 1).') AS UNSIGNED)'));
 
         $next = $maxNum + 1;
         $padded = str_pad((string) $next, 4, '0', STR_PAD_LEFT);
 
         return response()->json([
-            'code' => $prefix . $padded,
+            'code' => $prefix.$padded,
             'carrierCode' => $carrier->code,
             'next' => $next,
-        ]);
-    }
-
-    /**
-     * GET /products/{product}/commission-rates — returns all rows from
-     * product_commission_rate_installments for this product.
-     */
-    public function commissionRates(Request $request, Product $product): JsonResponse
-    {
-        $this->authorizeTenant($request, $product);
-
-        $rows = DB::table('product_commission_rate_installments')
-            ->where('product_id', $product->id)
-            ->orderByRaw("FIELD(party, 'com', 'ag', 'in')")
-            ->orderBy('installment_term')
-            ->get(['id', 'party', 'installment_term', 'rate']);
-
-        return response()->json([
-            'data' => $rows->map(fn ($r) => [
-                'id' => (string) $r->id,
-                'party' => $r->party,
-                'installmentTerm' => $r->installment_term,
-                'rate' => (float) $r->rate,
-            ]),
         ]);
     }
 

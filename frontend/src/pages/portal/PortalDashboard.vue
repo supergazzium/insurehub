@@ -23,7 +23,7 @@ const quickLinks = [
   { key: 'quote', icon: 'pi pi-comments', to: 'https://line.me/', external: true },
   { key: 'carriers', icon: 'pi pi-building', to: '/carriers', external: false },
   { key: 'products', icon: 'pi pi-th-large', to: '/products', external: false },
-  { key: 'commission', icon: 'pi pi-percentage', to: '/commissions/ledger', external: false },
+  { key: 'commission', icon: 'pi pi-percentage', to: '/commissions/rebates', external: false },
   { key: 'compareHealth', icon: 'pi pi-heart', to: 'https://example.com/compare/health', external: true },
   { key: 'compareMotor', icon: 'pi pi-car', to: 'https://example.com/compare/motor', external: true },
 ]

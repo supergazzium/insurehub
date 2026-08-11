@@ -193,44 +193,9 @@ export const MODULES: ModuleDef[] = [
       'สรุปยอด premium ที่ต้องต่ออายุในช่วงเวลา',
     ],
   },
-  {
-    key: 'commission-engine',
-    number: 9,
-    routePath: '/commissions/engine',
-    routeName: 'commission-engine',
-    icon: 'pi pi-sitemap',
-    i18nKey: 'commissionEngine',
-    group: 'commission',
-    functions: [
-      'คำนวณค่าคอมฯ เมื่อเกิดเหตุการณ์ของกรมธรรม์ (ตัวแทนผู้ขาย + สาย upline)',
-      'ใช้กฎ compression: ข้าม upline ที่ระดับเดียวกันหรือต่ำกว่า',
-      'ใช้ clawback: ย้อนค่าคอมฯ เมื่อยกเลิก / หลุด (กระจายขึ้นทั้งต้นไม้)',
-      'รองรับโหมด advance commission (v2)',
-      'รองรับโหมด as-earned: สร้างรายการเมื่อชำระเบี้ยเท่านั้น',
-      'พรีวิวการแบ่งค่าคอมฯ ก่อนออกกรมธรรม์',
-      'คำนวณค่าคอมฯ ใหม่หากระดับสัญญาเปลี่ยนย้อนหลัง',
-      'ป้องกันการสร้างค่าคอมฯ ซ้ำ (idempotency guard)',
-      'คำนวณโบนัสแนะนำลูกค้าเมื่อกรมธรรม์แรกออก',
-      'ตั้งค่าโบนัสแนะนำ (จำนวนคงที่ vs % ของค่าคอมฯ ปีแรก)',
-      'บันทึกโบนัสแนะนำเป็นรายการประเภทแยก',
-    ],
-  },
-  {
-    key: 'commission-ledger',
-    number: 10,
-    routePath: '/commissions/ledger',
-    routeName: 'commission-ledger',
-    icon: 'pi pi-list',
-    i18nKey: 'commissionLedger',
-    group: 'commission',
-    functions: [
-      'แสดงรายการค่าคอมฯ ของตัวแทน (กรองตามประเภท สถานะ ช่วงวันที่)',
-      'ดูยอดคงเหลือปัจจุบันของตัวแทน',
-      'ดูรายละเอียดรายการ (เหตุการณ์ที่ทำให้เกิด + สายตัวแทน)',
-      'ย้อนรายการแบบแมนนวล (สำหรับผู้ดูแล)',
-      'ส่งออกบัญชีค่าคอมฯ เป็น CSV',
-    ],
-  },
+  // NOTE: `commission-engine` and `commission-ledger` module entries removed
+  // with the MGM rewrite. New MGM-based equivalents will be added when their
+  // pages ship (PR-D and later).
   {
     key: 'rebate-reconciliation',
     number: 10,
@@ -245,24 +210,8 @@ export const MODULES: ModuleDef[] = [
       'ดูประวัติ rebate ledger ต่อกรมธรรม์',
     ],
   },
-  {
-    key: 'payouts',
-    number: 11,
-    routePath: '/payouts',
-    routeName: 'payouts',
-    icon: 'pi pi-wallet',
-    i18nKey: 'payouts',
-    group: 'commission',
-    functions: [
-      'สร้างชุดจ่ายเงิน (รวมรายการที่ค้างจ่ายทั้งหน่วยงาน)',
-      'พรีวิวก่อนอนุมัติ (ยอดรวมต่อตัวแทน)',
-      'อนุมัติชุดจ่ายเงิน',
-      'ทำเครื่องหมายว่าจ่ายแล้ว (บันทึกวันที่และเลขอ้างอิง)',
-      'ปฏิเสธ / ยกเลิกชุดจ่ายเงิน',
-      'ดูประวัติการจ่ายเงิน (ตามชุด ตามตัวแทน)',
-      'สร้างใบแจ้งยอดค่าคอมฯ ของตัวแทน (ได้รับ / จ่ายแล้ว / clawback / ยอดคงเหลือ)',
-    ],
-  },
+  // NOTE: `payouts` module entry removed with the MGM rewrite. New payout
+  // module will be added when PR-D's admin surface ships.
   {
     key: 'reports',
     number: 12,
@@ -393,16 +342,6 @@ export const MODULES: ModuleDef[] = [
     icon: 'pi pi-sitemap',
     i18nKey: 'adminDownlineTree',
     group: 'platform',
-    functions: [],
-  },
-  {
-    key: 'admin-payouts',
-    number: 92,
-    routePath: '/admin/payouts',
-    routeName: 'admin-payouts',
-    icon: 'pi pi-money-bill',
-    i18nKey: 'adminPayouts',
-    group: 'commission',
     functions: [],
   },
   {
