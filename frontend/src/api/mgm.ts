@@ -160,3 +160,62 @@ export function updateCarrierProductTypeRate(id: string, payload: {
 export function deleteCarrierProductTypeRate(id: string) {
   return api.delete<{ message: string }>(`carrier-product-type-rates/${id}`)
 }
+
+// ── Per-agent commission detail (read-only) ──────────────────────────────
+
+export interface AgentCommissionAgent {
+  id: string
+  code: string
+  name: string
+  rankCode: string | null
+  rankLevel: number | null
+  active: boolean
+  hasLicense: boolean
+}
+
+export interface AgentCommissionUplineLink {
+  id: string
+  code: string
+  name: string
+  rankCode: string | null
+  active: boolean
+}
+
+export type PayoutType = 'DIRECT_COMMISSION' | 'REFERRAL_FEE' | 'MANAGEMENT_DIFFERENTIAL'
+
+export interface AgentCommissionLedgerRow {
+  id: string
+  payoutType: PayoutType
+  status: string
+  basePremium: number
+  rateApplied: number
+  amount: number
+  standardRate: number | null
+  mgmtFeeRate: number | null
+  createdAt: string | null
+  paymentReference: string | null
+  paymentDate: string | null
+  policyNo: string | null
+  policyId: string
+  sourceAgentCode: string | null
+  carrierCode: string | null
+  carrierName: string | null
+  productTypeCode: string | null
+  productTypeNameTh: string | null
+}
+
+export interface AgentCommissionResponse {
+  agent: AgentCommissionAgent
+  uplineChain: AgentCommissionUplineLink[]
+  ledger: AgentCommissionLedgerRow[]
+  totals: {
+    directCommission: number
+    referralFee: number
+    managementDifferential: number
+    grandTotal: number
+  }
+}
+
+export function fetchAgentCommissionDetail(agentCode: string) {
+  return api.get<AgentCommissionResponse>(`agents/${encodeURIComponent(agentCode)}/commission-detail`)
+}

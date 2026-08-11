@@ -122,6 +122,7 @@ class MgmScenarioSeeder extends Seeder
             $this->scenario6($orphanCarrier, $customer);
             $this->scenario7($nonLifeCarrier, $customer);
             $this->scenario8($nonLifeCarrier, $customer);
+            $this->scenario9($nonLifeCarrier, $customer);
         });
 
         $this->printSummary();
@@ -334,6 +335,53 @@ class MgmScenarioSeeder extends Seeder
         $product = $this->makeProduct('SCN8_PROD', $carrier, 'MOTOR_CLASS1_GARAGE');
         $policy = $this->makePolicy('SCN8_POL', $customer, $product, $carrier, $l2);
         $this->makePayment($policy, 10000, 'SCN8_PAY');
+    }
+
+    /**
+     * S9 — 8-agent chain (root → seller): L10 → L9 → L8 → L7 → L5 → L3 → L2 → L1.
+     *   Seller is L1 (bottom). TIER_FULL Motor Class 1 (garage) 10%. ฿10,000.
+     *
+     *   IMPORTANT: RankPromotionService fires BEFORE accrual. Lv1 and Lv2 both
+     *   have three_month_accum_target = 0, so the seller's own ฿10,000 payment
+     *   promotes SCN9_L1 from Lv1 → Lv2 instantly. The engine accrues DIRECT
+     *   at Lv2's mgmt fee (3%), not Lv1's (0%).
+     *
+     *   TIER_FULL mgmt fees along the chain, post-promotion:
+     *     L1 → Lv2  mgmt=3%      (seller, max_passed starts here)
+     *     L2 → Lv2  mgmt=3%      diff = 3  - 3    = 0     → ฿0     (audit row)
+     *     L3 → Lv3  mgmt=4%      diff = 4  - 3    = 1%    → ฿100
+     *     L5 → Lv5  mgmt=5%      diff = 5  - 4    = 1%    → ฿100
+     *     L7 → Lv7  mgmt=6%      diff = 6  - 5    = 1%    → ฿100
+     *     L8 → Lv8  mgmt=6.25%   diff = 6.25-6    = 0.25% → ฿25
+     *     L9 → Lv9  mgmt=6.5%    diff = 6.5-6.25  = 0.25% → ฿25
+     *     L10→ Lv10 mgmt=6.75%   diff = 6.75-6.5  = 0.25% → ฿25
+     *
+     * Expected ledger rows (9 total: 1 DIRECT + 1 REFERRAL + 7 DIFFERENTIAL):
+     *   DIRECT       → SCN9_L1  applied = 0.10 + 0.03 = 0.13000 → ฿1,300
+     *   REFERRAL     → SCN9_L2  applied = 0.01000              → ฿100
+     *   DIFFERENTIAL → SCN9_L2  applied = 0.00000              → ฿0    (audit row)
+     *   DIFFERENTIAL → SCN9_L3  applied = 0.01000              → ฿100
+     *   DIFFERENTIAL → SCN9_L5  applied = 0.01000              → ฿100
+     *   DIFFERENTIAL → SCN9_L7  applied = 0.01000              → ฿100
+     *   DIFFERENTIAL → SCN9_L8  applied = 0.00250              → ฿25
+     *   DIFFERENTIAL → SCN9_L9  applied = 0.00250              → ฿25
+     *   DIFFERENTIAL → SCN9_L10 applied = 0.00250              → ฿25
+     * Grand total payout across all 8 agents: ฿1,775
+     */
+    private function scenario9(Carrier $carrier, Customer $customer): void
+    {
+        $l10 = $this->makeAgent('SCN9_L10', level: 10, parent: null, active: true, hasLicense: true);
+        $l9 = $this->makeAgent('SCN9_L9', level: 9, parent: $l10, active: true, hasLicense: true);
+        $l8 = $this->makeAgent('SCN9_L8', level: 8, parent: $l9, active: true, hasLicense: true);
+        $l7 = $this->makeAgent('SCN9_L7', level: 7, parent: $l8, active: true, hasLicense: true);
+        $l5 = $this->makeAgent('SCN9_L5', level: 5, parent: $l7, active: true, hasLicense: false);
+        $l3 = $this->makeAgent('SCN9_L3', level: 3, parent: $l5, active: true, hasLicense: false);
+        $l2 = $this->makeAgent('SCN9_L2', level: 2, parent: $l3, active: true, hasLicense: false);
+        $l1 = $this->makeAgent('SCN9_L1', level: 1, parent: $l2, active: true, hasLicense: false);
+
+        $product = $this->makeProduct('SCN9_PROD', $carrier, 'MOTOR_CLASS1_GARAGE');
+        $policy = $this->makePolicy('SCN9_POL', $customer, $product, $carrier, $l1);
+        $this->makePayment($policy, 10000, 'SCN9_PAY');
     }
 
     // ─────────────────────────────────────────────────────────────────────

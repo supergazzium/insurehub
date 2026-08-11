@@ -23,6 +23,7 @@ import AdminDownlineTree from '../pages/admin/AdminDownlineTree.vue'
 import AdminMotorTariffs from '../pages/admin/AdminMotorTariffs.vue'
 import AdminCommissionTiers from '../pages/admin/AdminCommissionTiers.vue'
 import AdminProductTypes from '../pages/admin/AdminProductTypes.vue'
+import AdminAgentCommissionDetail from '../pages/admin/AdminAgentCommissionDetail.vue'
 import AdminCarrierProductTypeRates from '../pages/admin/AdminCarrierProductTypeRates.vue'
 import FreelookReport from '../pages/reports/FreelookReport.vue'
 import MailingReport from '../pages/reports/MailingReport.vue'
@@ -70,6 +71,7 @@ const IMPLEMENTED_MODULES = new Set([
   'admin-commission-tiers',
   'admin-product-types',
   'admin-carrier-product-type-rates',
+  'admin-agent-commission-detail',
   // Phase 5 (quotation)
   'quotes',
   // Phase 8a (operational reports)
@@ -165,6 +167,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'admin/commission-tiers', name: 'admin-commission-tiers', component: AdminCommissionTiers, meta: { moduleKey: 'admin-commission-tiers' } },
       { path: 'admin/product-types', name: 'admin-product-types', component: AdminProductTypes, meta: { moduleKey: 'admin-product-types' } },
       { path: 'admin/carrier-product-type-rates', name: 'admin-carrier-product-type-rates', component: AdminCarrierProductTypeRates, meta: { moduleKey: 'admin-carrier-product-type-rates' } },
+      { path: 'admin/agents/:code/commission-detail', name: 'admin-agent-commission-detail', component: AdminAgentCommissionDetail, meta: { moduleKey: 'admin-agent-commission-detail' }, props: true },
       // Phase 8a — operational reports
       { path: 'reports/freelook', name: 'report-freelook', component: FreelookReport, meta: { moduleKey: 'report-freelook' } },
       { path: 'reports/mailing', name: 'report-mailing', component: MailingReport, meta: { moduleKey: 'report-mailing' } },

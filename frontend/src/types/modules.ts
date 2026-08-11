@@ -385,6 +385,17 @@ export const MODULES: ModuleDef[] = [
     group: 'commission',
     functions: [],
   },
+  {
+    key: 'admin-agent-commission-detail',
+    number: 97,
+    // Parameterized route — sidebar entry is a placeholder linking to first seeded scenario agent.
+    routePath: '/admin/agents/SCN9_L1/commission-detail',
+    routeName: 'admin-agent-commission-detail',
+    icon: 'pi pi-user',
+    i18nKey: 'adminAgentCommission',
+    group: 'commission',
+    functions: [],
+  },
   // Phase 8a — operational reports (admin/staff)
   {
     key: 'report-freelook',

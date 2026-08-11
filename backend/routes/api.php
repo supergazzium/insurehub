@@ -5,6 +5,7 @@ declare(strict_types=1);
 use App\Http\Controllers\Api\AdminAgentApprovalController;
 use App\Http\Controllers\Api\AdminRoleController;
 use App\Http\Controllers\Api\AdminUserController;
+use App\Http\Controllers\Api\AgentCommissionController;
 use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CarrierBankAccountController;
@@ -119,6 +120,9 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // MGM commission tiers — 3 admin-editable tiers (TIER_FULL / TIER_PARTIAL /
     // TIER_DIRECT_ONLY). Renames + per-cell rate edits only; number of tiers is
     // fixed. See CommissionTierController.
+    // Per-agent commission detail (ledger rows + upline chain + totals).
+    Route::get('agents/{agentCode}/commission-detail', [AgentCommissionController::class, 'show']);
+
     Route::get('commission-tiers', [CommissionTierController::class, 'index']);
     Route::patch('commission-tiers/{commissionTier}', [CommissionTierController::class, 'update']);
     Route::patch('commission-tiers/{commissionTier}/rates/{rate}', [CommissionTierController::class, 'updateRate']);
