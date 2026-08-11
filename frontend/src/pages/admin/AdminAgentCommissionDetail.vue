@@ -37,6 +37,40 @@ const error = ref<string | null>(null)
 // Filter by payout type — null = show all.
 const filter = ref<PayoutType | null>(null)
 
+// Set of downline node codes whose subtrees are collapsed. Default is
+// empty (everything expanded). Cleared whenever the URL agent changes.
+const collapsed = ref<Set<string>>(new Set())
+watch(agentCode, () => {
+  collapsed.value = new Set()
+})
+
+function toggleCollapsed(code: string): void {
+  const next = new Set(collapsed.value)
+  if (next.has(code)) {
+    next.delete(code)
+  } else {
+    next.add(code)
+  }
+  collapsed.value = next
+}
+
+function expandAllDownlines(): void {
+  collapsed.value = new Set()
+}
+
+function collapseAllDownlines(): void {
+  if (data.value === null) return
+  const codes = new Set<string>()
+  const walk = (nodes: AgentDownlineNode[]): void => {
+    for (const n of nodes) {
+      if (n.children.length > 0) codes.add(n.code)
+      walk(n.children)
+    }
+  }
+  walk(data.value.downlineTree ?? [])
+  collapsed.value = codes
+}
+
 async function load(): Promise<void> {
   if (!agentCode.value) {
     data.value = null
@@ -108,6 +142,9 @@ interface TreeNode {
   isCurrent: boolean
   isDownline: boolean  // rendered under the current agent
   depth: number  // 0 = root of the whole tree
+  hasChildren: boolean  // used to decide whether to render collapse chevron
+  isCollapsed: boolean  // subtree hidden — chevron rotates
+  hiddenDescendants: number  // rendered on the collapsed node as "(N more)"
 }
 
 const hierarchyNodes = computed<TreeNode[]>(() => {
@@ -122,6 +159,9 @@ const hierarchyNodes = computed<TreeNode[]>(() => {
     isCurrent: false,
     isDownline: false,
     depth: idx,
+    hasChildren: false,
+    isCollapsed: false,
+    hiddenDescendants: 0,
   }))
   const sellerDepth = nodes.length
   nodes.push({
@@ -134,15 +174,29 @@ const hierarchyNodes = computed<TreeNode[]>(() => {
     isCurrent: true,
     isDownline: false,
     depth: sellerDepth,
+    hasChildren: false,
+    isCollapsed: false,
+    hiddenDescendants: 0,
   })
   // Flatten downline subtree depth-first, starting one deeper than seller.
-  flattenDownline(data.value.downlineTree ?? [], sellerDepth + 1, nodes)
+  flattenDownline(data.value.downlineTree ?? [], sellerDepth + 1, nodes, collapsed.value)
 
   return nodes
 })
 
-function flattenDownline(children: AgentDownlineNode[], depth: number, out: TreeNode[]): void {
+function countSubtree(nodes: AgentDownlineNode[]): number {
+  return nodes.reduce((acc, n) => acc + 1 + countSubtree(n.children), 0)
+}
+
+function flattenDownline(
+  children: AgentDownlineNode[],
+  depth: number,
+  out: TreeNode[],
+  collapsedSet: Set<string>,
+): void {
   for (const c of children) {
+    const hasChildren = c.children.length > 0
+    const isCollapsed = collapsedSet.has(c.code)
     out.push({
       code: c.code,
       name: c.name,
@@ -152,20 +206,19 @@ function flattenDownline(children: AgentDownlineNode[], depth: number, out: Tree
       isCurrent: false,
       isDownline: true,
       depth,
+      hasChildren,
+      isCollapsed,
+      hiddenDescendants: isCollapsed ? countSubtree(c.children) : 0,
     })
-    if (c.children.length > 0) {
-      flattenDownline(c.children, depth + 1, out)
+    if (hasChildren && !isCollapsed) {
+      flattenDownline(c.children, depth + 1, out, collapsedSet)
     }
   }
 }
 
-const downlineCount = computed(() => {
-  if (data.value === null) return 0
-  const count = (nodes: AgentDownlineNode[]): number =>
-    nodes.reduce((acc, n) => acc + 1 + count(n.children), 0)
-
-  return count(data.value.downlineTree ?? [])
-})
+const downlineCount = computed(() =>
+  data.value === null ? 0 : countSubtree(data.value.downlineTree ?? []),
+)
 
 function parseRankLevel(rankCode: string | null): number | null {
   if (!rankCode) return null
@@ -261,6 +314,23 @@ function rankBadgeClasses(level: number | null): string {
             <span>{{ t('adminAgentCommission.uplineCount', { n: data.uplineChain.length }) }}</span>
             <span>·</span>
             <span>{{ t('adminAgentCommission.downlineCount', { n: downlineCount }) }}</span>
+            <template v-if="downlineCount > 0">
+              <span>·</span>
+              <button
+                type="button"
+                class="text-brand-600 hover:underline"
+                @click="expandAllDownlines"
+              >
+                {{ t('adminAgentCommission.expandAll') }}
+              </button>
+              <button
+                type="button"
+                class="text-brand-600 hover:underline"
+                @click="collapseAllDownlines"
+              >
+                {{ t('adminAgentCommission.collapseAll') }}
+              </button>
+            </template>
           </div>
         </div>
 
@@ -305,6 +375,23 @@ function rankBadgeClasses(level: number | null): string {
                 !node.active ? 'opacity-60' : '',
               ]"
             >
+              <!-- Collapse chevron (downline nodes with children only) -->
+              <button
+                v-if="node.isDownline && node.hasChildren"
+                type="button"
+                class="w-5 h-5 shrink-0 flex items-center justify-center rounded hover:bg-slate-200 text-slate-500"
+                :title="node.isCollapsed ? t('adminAgentCommission.expand') : t('adminAgentCommission.collapse')"
+                @click="toggleCollapsed(node.code)"
+              >
+                <i class="pi text-xs" :class="node.isCollapsed ? 'pi-chevron-right' : 'pi-chevron-down'" />
+              </button>
+              <!-- Spacer keeps rank-badge column aligned when no chevron -->
+              <span
+                v-else-if="node.isDownline"
+                class="w-5 h-5 shrink-0"
+                aria-hidden="true"
+              />
+
               <!-- Rank badge with color scale by level -->
               <span
                 class="px-2 py-1 rounded text-xs font-bold font-mono min-w-[42px] text-center"
@@ -330,7 +417,15 @@ function rankBadgeClasses(level: number | null): string {
                     {{ t('adminAgentCommission.thisAgent') }}
                   </span>
                 </div>
-                <div class="text-xs text-slate-500 truncate">{{ node.name || '—' }}</div>
+                <div class="text-xs text-slate-500 truncate">
+                  {{ node.name || '—' }}
+                  <span
+                    v-if="node.isCollapsed && node.hiddenDescendants > 0"
+                    class="ml-1 text-slate-400"
+                  >
+                    ({{ t('adminAgentCommission.moreHidden', { n: node.hiddenDescendants }) }})
+                  </span>
+                </div>
               </div>
 
               <!-- Status pills (compact) -->
