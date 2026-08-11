@@ -354,6 +354,37 @@ export const MODULES: ModuleDef[] = [
     group: 'platform',
     functions: [],
   },
+  // MGM commission admin surfaces (PR-A5).
+  {
+    key: 'admin-commission-tiers',
+    number: 94,
+    routePath: '/admin/commission-tiers',
+    routeName: 'admin-commission-tiers',
+    icon: 'pi pi-sitemap',
+    i18nKey: 'adminCommissionTiers',
+    group: 'commission',
+    functions: [],
+  },
+  {
+    key: 'admin-product-types',
+    number: 95,
+    routePath: '/admin/product-types',
+    routeName: 'admin-product-types',
+    icon: 'pi pi-tags',
+    i18nKey: 'adminProductTypes',
+    group: 'commission',
+    functions: [],
+  },
+  {
+    key: 'admin-carrier-product-type-rates',
+    number: 96,
+    routePath: '/admin/carrier-product-type-rates',
+    routeName: 'admin-carrier-product-type-rates',
+    icon: 'pi pi-table',
+    i18nKey: 'adminMatrix',
+    group: 'commission',
+    functions: [],
+  },
   // Phase 8a — operational reports (admin/staff)
   {
     key: 'report-freelook',

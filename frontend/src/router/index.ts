@@ -21,6 +21,9 @@ import PortalEarnings from '../pages/portal/PortalEarnings.vue'
 import AdminAgentApprovals from '../pages/admin/AdminAgentApprovals.vue'
 import AdminDownlineTree from '../pages/admin/AdminDownlineTree.vue'
 import AdminMotorTariffs from '../pages/admin/AdminMotorTariffs.vue'
+import AdminCommissionTiers from '../pages/admin/AdminCommissionTiers.vue'
+import AdminProductTypes from '../pages/admin/AdminProductTypes.vue'
+import AdminCarrierProductTypeRates from '../pages/admin/AdminCarrierProductTypeRates.vue'
 import FreelookReport from '../pages/reports/FreelookReport.vue'
 import MailingReport from '../pages/reports/MailingReport.vue'
 import PaymentHistoryReport from '../pages/reports/PaymentHistoryReport.vue'
@@ -64,6 +67,9 @@ const IMPLEMENTED_MODULES = new Set([
   'admin-payouts',
   // Phase 9 (motor tariff admin)
   'admin-motor-tariffs',
+  'admin-commission-tiers',
+  'admin-product-types',
+  'admin-carrier-product-type-rates',
   // Phase 5 (quotation)
   'quotes',
   // Phase 8a (operational reports)
@@ -156,6 +162,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'admin/roles', redirect: { name: 'admin-access', query: { tab: 'roles' } } },
       { path: 'admin/downline-tree', name: 'admin-downline-tree', component: AdminDownlineTree, meta: { moduleKey: 'admin-downline-tree' } },
       { path: 'admin/motor-tariffs', name: 'admin-motor-tariffs', component: AdminMotorTariffs, meta: { moduleKey: 'admin-motor-tariffs' } },
+      { path: 'admin/commission-tiers', name: 'admin-commission-tiers', component: AdminCommissionTiers, meta: { moduleKey: 'admin-commission-tiers' } },
+      { path: 'admin/product-types', name: 'admin-product-types', component: AdminProductTypes, meta: { moduleKey: 'admin-product-types' } },
+      { path: 'admin/carrier-product-type-rates', name: 'admin-carrier-product-type-rates', component: AdminCarrierProductTypeRates, meta: { moduleKey: 'admin-carrier-product-type-rates' } },
       // Phase 8a — operational reports
       { path: 'reports/freelook', name: 'report-freelook', component: FreelookReport, meta: { moduleKey: 'report-freelook' } },
       { path: 'reports/mailing', name: 'report-mailing', component: MailingReport, meta: { moduleKey: 'report-mailing' } },

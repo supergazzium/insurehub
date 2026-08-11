@@ -163,6 +163,9 @@ export default {
     adminDownlineTree: { name: 'สายงานทีม (ต้นไม้)', short: 'สายงาน' },
     adminPayouts: { name: 'รอบจ่ายค่าคอมมิชชั่น', short: 'จ่ายค่าคอม' },
     adminMotorTariffs: { name: 'อัตรา พ.ร.บ. รถ', short: 'อัตรา พ.ร.บ.' },
+    adminCommissionTiers: { name: 'ระดับค่าคอมมิชชั่น (MGM)', short: 'ระดับค่าคอม' },
+    adminProductTypes: { name: 'ประเภทสินค้า MGM', short: 'ประเภทสินค้า' },
+    adminMatrix: { name: 'ตารางค่าคอม บริษัท × ประเภท', short: 'ตารางค่าคอม' },
     reportFreelook: { name: 'รายงาน Freelook', short: 'Freelook' },
     reportCancellations: { name: 'รายงานการยกเลิก', short: 'ยกเลิก' },
     reportMailing: { name: 'รายงานการจัดส่ง', short: 'จัดส่ง' },
@@ -1433,6 +1436,50 @@ export default {
     off: 'ปิด',
     empty: 'ยังไม่มีอัตราเบี้ย',
     confirmDelete: 'ลบอัตราเบี้ย {code} ใช่หรือไม่?',
+  },
+
+  // ── MGM commission tiers admin (Phase A5) ───────────────────────────
+  adminCommissionTiers: {
+    title: 'ระดับค่าคอมมิชชั่น (MGM)',
+    subtitle: 'จัดการชื่อและอัตราค่าคอมของ 3 ระดับ (BLUE / YELLOW / RED) × 10 ระดับ Rank',
+    loading: 'กำลังโหลดข้อมูล…',
+    empty: 'ยังไม่มีระดับค่าคอมมิชชั่น',
+    color: 'สี',
+    notes: 'หมายเหตุ',
+    rank: 'Rank',
+    mgmtFee: 'Management Fee',
+    referralFee: 'Referral Fee',
+    hint: 'คลิกที่ช่องเพื่อแก้ไข — การเปลี่ยนแปลงจะบันทึกอัตโนมัติเมื่อ blur',
+  },
+
+  // ── MGM product types admin (Phase A5) ──────────────────────────────
+  adminProductTypes: {
+    title: 'ประเภทสินค้า MGM',
+    subtitle: 'จัดการประเภทสินค้า (Motor / Fire / Health / Life / …) และกำหนด Tier ค่าคอม',
+    loading: 'กำลังโหลดข้อมูล…',
+    code: 'รหัส',
+    nameTh: 'ชื่อไทย',
+    nameEn: 'ชื่ออังกฤษ',
+    tier: 'ระดับค่าคอม',
+    group: 'หมวด (sub_of)',
+    active: 'ใช้งาน',
+    addNew: 'เพิ่มประเภทสินค้าใหม่',
+    addBtn: 'เพิ่ม',
+    deleteTitle: 'ลบประเภทสินค้า',
+    confirmDelete: 'ลบประเภทสินค้า {code} ใช่หรือไม่?',
+    errorRequired: 'กรุณากรอกรหัส ชื่อไทย ชื่ออังกฤษ และเลือก Tier',
+  },
+
+  // ── MGM carrier × product-type standard rate matrix (Phase A5) ──────
+  adminMatrix: {
+    title: 'ตารางค่าคอมมาตรฐาน บริษัท × ประเภทสินค้า',
+    subtitle: 'อัตราค่าคอมมาตรฐาน (%) ต่อบริษัทประกัน (แนวตั้ง) × ประเภทสินค้า (แนวนอน)',
+    loading: 'กำลังโหลดข้อมูล…',
+    carrier: 'บริษัทประกัน',
+    filter: 'กรองตามหมวด:',
+    allGroups: 'ทุกหมวด',
+    invalidRate: 'อัตราไม่ถูกต้อง — ต้องเป็นตัวเลข 0–100',
+    hint: 'ช่องว่าง (-) หมายถึงบริษัทนี้ไม่ขายประเภทนี้ · คลิกที่ช่องเพื่อแก้ไข %',
   },
 
   // ── Admin payout cycles (Phase 7b) ──────────────────────────────────
