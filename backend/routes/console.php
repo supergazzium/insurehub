@@ -16,3 +16,11 @@ Schedule::command('mail:poll')
     ->everyMinute()
     ->withoutOverlapping()
     ->runInBackground();
+
+// MGM volume reconciliation — safety net for the PolicyPaymentObserver.
+// Runs nightly for the current month. Reconciling the current month picks
+// up any observer misses from the day; ops can reconcile prior months
+// manually when needed via `php artisan mgm:reconcile-volumes --month=YYYY-MM`.
+Schedule::command('mgm:reconcile-volumes')
+    ->dailyAt('02:00')
+    ->withoutOverlapping();
