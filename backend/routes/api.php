@@ -12,6 +12,7 @@ use App\Http\Controllers\Api\CarrierContactController;
 use App\Http\Controllers\Api\CarrierContactGroupController;
 use App\Http\Controllers\Api\CarrierController;
 use App\Http\Controllers\Api\CarrierCredentialController;
+use App\Http\Controllers\Api\CarrierProductTypeRateController;
 use App\Http\Controllers\Api\CommissionTierController;
 use App\Http\Controllers\Api\ContractController;
 use App\Http\Controllers\Api\CustomerAssignmentController;
@@ -124,6 +125,15 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // MGM product-types — full CRUD (unlike tiers which are fixed at 3).
     Route::apiResource('product-types', ProductTypeController::class)->except(['show']);
+
+    // MGM (carrier × product-type) standard commission matrix. GET returns
+    // the full grid pre-shaped for the admin UI; POST creates a new cell;
+    // PATCH edits standard_rate on an existing cell; DELETE marks a
+    // (carrier, type) as "not sold" (same effect as null standard_rate).
+    Route::get('carrier-product-type-rates', [CarrierProductTypeRateController::class, 'index']);
+    Route::post('carrier-product-type-rates', [CarrierProductTypeRateController::class, 'store']);
+    Route::patch('carrier-product-type-rates/{rate}', [CarrierProductTypeRateController::class, 'update']);
+    Route::delete('carrier-product-type-rates/{rate}', [CarrierProductTypeRateController::class, 'destroy']);
 
     // Tenant settings (single resource).
     Route::get('tenant', [TenantController::class, 'show']);

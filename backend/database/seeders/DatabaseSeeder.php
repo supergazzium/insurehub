@@ -51,6 +51,9 @@ class DatabaseSeeder extends Seeder
         $this->command->info('Seeding MGM product types (~26 rows / tenant)...');
         $this->call(ProductTypeSeeder::class);
 
+        $this->command->info('Seeding MGM carrier × product-type standard rate matrix...');
+        $this->call(CarrierProductTypeRateSeeder::class);
+
         $this->command->info('Seeding agents...');
         $this->call(AgentSeeder::class);
 
