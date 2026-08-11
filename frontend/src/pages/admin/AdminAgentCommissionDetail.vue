@@ -17,6 +17,7 @@ import { ApiError } from '../../api/client'
 import {
   fetchAgentCommissionDetail,
   type AgentCommissionResponse,
+  type AgentDownlineNode,
   type PayoutType,
 } from '../../api/mgm'
 
@@ -105,7 +106,8 @@ interface TreeNode {
   active: boolean
   hasLicense?: boolean
   isCurrent: boolean
-  depth: number  // 0 = root
+  isDownline: boolean  // rendered under the current agent
+  depth: number  // 0 = root of the whole tree
 }
 
 const hierarchyNodes = computed<TreeNode[]>(() => {
@@ -118,8 +120,10 @@ const hierarchyNodes = computed<TreeNode[]>(() => {
     rankLevel: parseRankLevel(u.rankCode),
     active: u.active,
     isCurrent: false,
+    isDownline: false,
     depth: idx,
   }))
+  const sellerDepth = nodes.length
   nodes.push({
     code: data.value.agent.code,
     name: data.value.agent.name,
@@ -128,10 +132,39 @@ const hierarchyNodes = computed<TreeNode[]>(() => {
     active: data.value.agent.active,
     hasLicense: data.value.agent.hasLicense,
     isCurrent: true,
-    depth: nodes.length,
+    isDownline: false,
+    depth: sellerDepth,
   })
+  // Flatten downline subtree depth-first, starting one deeper than seller.
+  flattenDownline(data.value.downlineTree ?? [], sellerDepth + 1, nodes)
 
   return nodes
+})
+
+function flattenDownline(children: AgentDownlineNode[], depth: number, out: TreeNode[]): void {
+  for (const c of children) {
+    out.push({
+      code: c.code,
+      name: c.name,
+      rankCode: c.rankCode,
+      rankLevel: c.rankLevel,
+      active: c.active,
+      isCurrent: false,
+      isDownline: true,
+      depth,
+    })
+    if (c.children.length > 0) {
+      flattenDownline(c.children, depth + 1, out)
+    }
+  }
+}
+
+const downlineCount = computed(() => {
+  if (data.value === null) return 0
+  const count = (nodes: AgentDownlineNode[]): number =>
+    nodes.reduce((acc, n) => acc + 1 + count(n.children), 0)
+
+  return count(data.value.downlineTree ?? [])
 })
 
 function parseRankLevel(rankCode: string | null): number | null {
@@ -220,15 +253,19 @@ function rankBadgeClasses(level: number | null): string {
 
       </section>
 
-      <!-- Hierarchy tree — root at top, current agent (seller) at bottom -->
+      <!-- Hierarchy tree — root at top, downlines under the current agent -->
       <section class="card p-5 space-y-3">
-        <div class="flex items-baseline justify-between">
+        <div class="flex items-baseline justify-between flex-wrap gap-2">
           <h2 class="text-sm font-semibold text-slate-700">{{ t('adminAgentCommission.hierarchy') }}</h2>
-          <span class="text-xs text-slate-400">{{ t('adminAgentCommission.hierarchyHint') }}</span>
+          <div class="flex items-center gap-3 text-xs text-slate-400">
+            <span>{{ t('adminAgentCommission.uplineCount', { n: data.uplineChain.length }) }}</span>
+            <span>·</span>
+            <span>{{ t('adminAgentCommission.downlineCount', { n: downlineCount }) }}</span>
+          </div>
         </div>
 
-        <div v-if="hierarchyNodes.length <= 1 && (data.agent.rankCode === null || data.uplineChain.length === 0)" class="text-xs text-slate-400 italic">
-          {{ t('adminAgentCommission.noUpline') }}
+        <div v-if="hierarchyNodes.length <= 1" class="text-xs text-slate-400 italic">
+          {{ t('adminAgentCommission.noHierarchy') }}
         </div>
 
         <ol v-else class="space-y-0">
@@ -241,14 +278,16 @@ function rankBadgeClasses(level: number | null): string {
             <!-- Vertical connector line from previous node -->
             <span
               v-if="node.depth > 0"
-              class="absolute top-0 border-l-2 border-slate-200"
+              class="absolute top-0"
+              :class="node.isDownline ? 'border-l-2 border-dashed border-slate-300' : 'border-l-2 border-slate-200'"
               :style="{ left: ((node.depth - 1) * 24 + 12) + 'px', height: '50%' }"
               aria-hidden="true"
             />
             <!-- Horizontal connector into this node -->
             <span
               v-if="node.depth > 0"
-              class="absolute border-t-2 border-slate-200"
+              class="absolute"
+              :class="node.isDownline ? 'border-t-2 border-dashed border-slate-300' : 'border-t-2 border-slate-200'"
               :style="{
                 left: ((node.depth - 1) * 24 + 12) + 'px',
                 top: '50%',

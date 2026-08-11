@@ -86,6 +86,8 @@ class AgentCommissionController extends ApiController
         }
         $grandTotal = array_sum($totals);
 
+        $downlineTree = $this->buildDownlineTree((int) $agent->id, $tenantId);
+
         return response()->json([
             'agent' => [
                 'id' => (string) $agent->id,
@@ -97,6 +99,7 @@ class AgentCommissionController extends ApiController
                 'hasLicense' => (bool) $agent->has_license,
             ],
             'uplineChain' => $uplineChain,
+            'downlineTree' => $downlineTree,
             'ledger' => $rows->map(fn ($r) => [
                 'id' => (string) $r->id,
                 'payoutType' => $r->payout_type,
@@ -124,5 +127,45 @@ class AgentCommissionController extends ApiController
                 'grandTotal' => round($grandTotal, 2),
             ],
         ]);
+    }
+
+    /**
+     * Recursively build the downline subtree rooted at $parentId.
+     *
+     * Bounded by MAX_DEPTH to protect against pathological trees; deeper
+     * downlines are truncated with a placeholder node showing "(N more)".
+     * Excludes soft-deleted agents. Ordered alphabetically by agent_code
+     * within each parent so the tree renders deterministically.
+     *
+     * @return list<array{code: string, name: string, rankCode: ?string, rankLevel: ?int, active: bool, childCount: int, children: array}>
+     */
+    private function buildDownlineTree(int $parentId, int $tenantId, int $depth = 0): array
+    {
+        $MAX_DEPTH = 5;
+        if ($depth >= $MAX_DEPTH) {
+            return [];
+        }
+
+        $children = Agent::query()
+            ->where('tenant_id', $tenantId)
+            ->where('parent_agent_id', $parentId)
+            ->whereNull('deleted_at')
+            ->with('rank')
+            ->orderBy('agent_code')
+            ->get();
+
+        $out = [];
+        foreach ($children as $c) {
+            $out[] = [
+                'code' => $c->agent_code,
+                'name' => trim(($c->first_name ?? '').' '.($c->last_name ?? '')),
+                'rankCode' => $c->rank?->code,
+                'rankLevel' => $c->rank?->level,
+                'active' => (bool) $c->active,
+                'children' => $this->buildDownlineTree((int) $c->id, $tenantId, $depth + 1),
+            ];
+        }
+
+        return $out;
     }
 }

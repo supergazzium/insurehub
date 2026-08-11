@@ -204,9 +204,19 @@ export interface AgentCommissionLedgerRow {
   productTypeNameTh: string | null
 }
 
+export interface AgentDownlineNode {
+  code: string
+  name: string
+  rankCode: string | null
+  rankLevel: number | null
+  active: boolean
+  children: AgentDownlineNode[]
+}
+
 export interface AgentCommissionResponse {
   agent: AgentCommissionAgent
   uplineChain: AgentCommissionUplineLink[]
+  downlineTree: AgentDownlineNode[]
   ledger: AgentCommissionLedgerRow[]
   totals: {
     directCommission: number
