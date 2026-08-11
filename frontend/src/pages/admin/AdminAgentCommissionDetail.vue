@@ -90,6 +90,72 @@ const payoutBadge: Record<PayoutType, { label: string; class: string }> = {
   REFERRAL_FEE: { label: 'REFERRAL', class: 'bg-emerald-100 text-emerald-700' },
   MANAGEMENT_DIFFERENTIAL: { label: 'DIFF', class: 'bg-amber-100 text-amber-700' },
 }
+
+// ── Hierarchy tree rendering (root at top, seller at bottom) ─────────────
+// The API returns uplineChain as [direct upline, next up, ..., root]. To
+// render top-down we reverse and append the current agent at the end so
+// the reader scans root→leaf. Each node carries a levelNumeric (parsed
+// from "Lv7" → 7) used to color the rank badge on a light→dark scale.
+
+interface TreeNode {
+  code: string
+  name: string
+  rankCode: string | null
+  rankLevel: number | null
+  active: boolean
+  hasLicense?: boolean
+  isCurrent: boolean
+  depth: number  // 0 = root
+}
+
+const hierarchyNodes = computed<TreeNode[]>(() => {
+  if (data.value === null) return []
+  const uplineTopDown = [...data.value.uplineChain].reverse()  // root first
+  const nodes: TreeNode[] = uplineTopDown.map((u, idx) => ({
+    code: u.code,
+    name: u.name,
+    rankCode: u.rankCode,
+    rankLevel: parseRankLevel(u.rankCode),
+    active: u.active,
+    isCurrent: false,
+    depth: idx,
+  }))
+  nodes.push({
+    code: data.value.agent.code,
+    name: data.value.agent.name,
+    rankCode: data.value.agent.rankCode,
+    rankLevel: data.value.agent.rankLevel,
+    active: data.value.agent.active,
+    hasLicense: data.value.agent.hasLicense,
+    isCurrent: true,
+    depth: nodes.length,
+  })
+
+  return nodes
+})
+
+function parseRankLevel(rankCode: string | null): number | null {
+  if (!rankCode) return null
+  const m = rankCode.match(/^Lv(\d+)$/)
+
+  return m ? Number(m[1]) : null
+}
+
+// Rank badge color by level — darker = higher rank. 10-step Tailwind ramp.
+function rankBadgeClasses(level: number | null): string {
+  if (level === null) return 'bg-slate-100 text-slate-500'
+  if (level >= 10) return 'bg-purple-700 text-white'
+  if (level >= 9) return 'bg-purple-600 text-white'
+  if (level >= 8) return 'bg-indigo-600 text-white'
+  if (level >= 7) return 'bg-indigo-500 text-white'
+  if (level >= 6) return 'bg-blue-500 text-white'
+  if (level >= 5) return 'bg-blue-400 text-white'
+  if (level >= 4) return 'bg-sky-400 text-white'
+  if (level >= 3) return 'bg-cyan-300 text-cyan-900'
+  if (level >= 2) return 'bg-teal-200 text-teal-800'
+
+  return 'bg-slate-200 text-slate-700'
+}
 </script>
 
 <template>
@@ -152,26 +218,108 @@ const payoutBadge: Record<PayoutType, { label: string; class: string }> = {
           </div>
         </div>
 
-        <!-- Upline chain: root ← ... ← direct ← THIS AGENT -->
-        <div v-if="data.uplineChain.length > 0" class="pt-2 border-t border-slate-100">
-          <div class="text-xs text-slate-500 mb-2">{{ t('adminAgentCommission.uplineChain') }}</div>
-          <div class="flex items-center gap-2 flex-wrap text-sm">
-            <template v-for="(link, idx) in data.uplineChain" :key="link.id">
-              <router-link
-                :to="{ name: 'admin-agent-commission-detail', params: { code: link.code } }"
-                class="inline-flex items-center gap-1 px-2 py-1 rounded border border-slate-200 hover:bg-slate-50"
-                :class="{ 'opacity-60': !link.active }"
-              >
-                <span class="font-mono text-xs">{{ link.code }}</span>
-                <span v-if="link.rankCode" class="text-xs text-slate-500">({{ link.rankCode }})</span>
-              </router-link>
-              <span v-if="idx < data.uplineChain.length - 1" class="text-slate-300">→</span>
-            </template>
-            <span class="text-slate-300">→</span>
-            <span class="font-mono text-xs px-2 py-1 rounded bg-brand-500 text-white">{{ data.agent.code }}</span>
-          </div>
+      </section>
+
+      <!-- Hierarchy tree — root at top, current agent (seller) at bottom -->
+      <section class="card p-5 space-y-3">
+        <div class="flex items-baseline justify-between">
+          <h2 class="text-sm font-semibold text-slate-700">{{ t('adminAgentCommission.hierarchy') }}</h2>
+          <span class="text-xs text-slate-400">{{ t('adminAgentCommission.hierarchyHint') }}</span>
         </div>
-        <div v-else class="text-xs text-slate-400 italic">{{ t('adminAgentCommission.noUpline') }}</div>
+
+        <div v-if="hierarchyNodes.length <= 1 && (data.agent.rankCode === null || data.uplineChain.length === 0)" class="text-xs text-slate-400 italic">
+          {{ t('adminAgentCommission.noUpline') }}
+        </div>
+
+        <ol v-else class="space-y-0">
+          <li
+            v-for="node in hierarchyNodes"
+            :key="node.code"
+            class="relative"
+            :style="{ paddingLeft: (node.depth * 24) + 'px' }"
+          >
+            <!-- Vertical connector line from previous node -->
+            <span
+              v-if="node.depth > 0"
+              class="absolute top-0 border-l-2 border-slate-200"
+              :style="{ left: ((node.depth - 1) * 24 + 12) + 'px', height: '50%' }"
+              aria-hidden="true"
+            />
+            <!-- Horizontal connector into this node -->
+            <span
+              v-if="node.depth > 0"
+              class="absolute border-t-2 border-slate-200"
+              :style="{
+                left: ((node.depth - 1) * 24 + 12) + 'px',
+                top: '50%',
+                width: '12px',
+              }"
+              aria-hidden="true"
+            />
+
+            <div
+              class="flex items-center gap-3 py-2 pl-2 pr-3 rounded border transition-colors"
+              :class="[
+                node.isCurrent
+                  ? 'border-brand-500 bg-brand-50 shadow-sm ring-1 ring-brand-200'
+                  : 'border-slate-200 hover:bg-slate-50',
+                !node.active ? 'opacity-60' : '',
+              ]"
+            >
+              <!-- Rank badge with color scale by level -->
+              <span
+                class="px-2 py-1 rounded text-xs font-bold font-mono min-w-[42px] text-center"
+                :class="rankBadgeClasses(node.rankLevel)"
+              >
+                {{ node.rankCode ?? '—' }}
+              </span>
+
+              <!-- Agent code + name -->
+              <div class="flex-1 min-w-0">
+                <div class="flex items-center gap-2">
+                  <router-link
+                    v-if="!node.isCurrent"
+                    :to="{ name: 'admin-agent-commission-detail', params: { code: node.code } }"
+                    class="font-mono text-xs text-brand-600 hover:underline truncate"
+                  >
+                    {{ node.code }}
+                  </router-link>
+                  <span v-else class="font-mono text-xs font-semibold text-brand-800 truncate">
+                    {{ node.code }}
+                  </span>
+                  <span v-if="node.isCurrent" class="text-[10px] px-1.5 py-0.5 rounded bg-brand-500 text-white font-medium">
+                    {{ t('adminAgentCommission.thisAgent') }}
+                  </span>
+                </div>
+                <div class="text-xs text-slate-500 truncate">{{ node.name || '—' }}</div>
+              </div>
+
+              <!-- Status pills (compact) -->
+              <div class="flex items-center gap-1 shrink-0">
+                <span
+                  v-if="!node.active"
+                  class="text-[10px] px-1.5 py-0.5 rounded bg-slate-200 text-slate-500 font-medium"
+                >
+                  {{ t('adminAgentCommission.inactive') }}
+                </span>
+                <span
+                  v-if="node.isCurrent && node.hasLicense"
+                  class="text-[10px] px-1.5 py-0.5 rounded bg-indigo-100 text-indigo-700 font-medium"
+                >
+                  {{ t('adminAgentCommission.licensed') }}
+                </span>
+              </div>
+
+              <!-- "Seller" marker on the bottom row -->
+              <span
+                v-if="node.isCurrent"
+                class="shrink-0 text-[10px] uppercase tracking-wider text-brand-600 font-semibold"
+              >
+                <i class="pi pi-user mr-1" />{{ t('adminAgentCommission.seller') }}
+              </span>
+            </div>
+          </li>
+        </ol>
       </section>
 
       <!-- Totals card -->
