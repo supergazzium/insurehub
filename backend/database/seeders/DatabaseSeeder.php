@@ -42,6 +42,9 @@ class DatabaseSeeder extends Seeder
         $this->command->info('Seeding products + commission rates...');
         $this->call(ProductSeeder::class);
 
+        $this->command->info('Seeding MGM ranks (Lv1..Lv10)...');
+        $this->call(RankSeeder::class);
+
         $this->command->info('Seeding agents...');
         $this->call(AgentSeeder::class);
 
