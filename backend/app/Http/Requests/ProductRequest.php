@@ -34,6 +34,10 @@ class ProductRequest extends FormRequest
                 Rule::exists('carriers', 'id')->where('tenant_id', $tenantId),
             ],
             'type' => ['sometimes', 'nullable', 'string', 'max:32'],
+            // MGM product-type assignment — drives which commission tier applies.
+            // Nullable during transition; PR-D's engine treats null as
+            // "no commission accrual until classified".
+            'productTypeId' => ['sometimes', 'nullable', 'integer', 'exists:product_types,id'],
             'mainRider' => ['sometimes', 'nullable', 'string', 'max:32'],
             'category' => ['sometimes', 'nullable', 'string', 'max:255'],
             'subCategory' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -74,6 +78,7 @@ class ProductRequest extends FormRequest
             'nameEn' => 'name_en',
             'carrierId' => 'carrier_id',
             'type' => 'type',
+            'productTypeId' => 'product_type_id',
             'mainRider' => 'main_rider',
             'category' => 'category',
             'subCategory' => 'sub_category',

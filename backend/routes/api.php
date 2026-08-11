@@ -33,6 +33,7 @@ use App\Http\Controllers\Api\PolicyPaymentController;
 use App\Http\Controllers\Api\PolicyRebateController;
 use App\Http\Controllers\Api\ProductController;
 use App\Http\Controllers\Api\ProductTaxonomyController;
+use App\Http\Controllers\Api\ProductTypeController;
 use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\RecruitmentLinkController;
@@ -120,6 +121,9 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-tiers', [CommissionTierController::class, 'index']);
     Route::patch('commission-tiers/{commissionTier}', [CommissionTierController::class, 'update']);
     Route::patch('commission-tiers/{commissionTier}/rates/{rate}', [CommissionTierController::class, 'updateRate']);
+
+    // MGM product-types — full CRUD (unlike tiers which are fixed at 3).
+    Route::apiResource('product-types', ProductTypeController::class)->except(['show']);
 
     // Tenant settings (single resource).
     Route::get('tenant', [TenantController::class, 'show']);

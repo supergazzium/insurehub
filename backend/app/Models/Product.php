@@ -33,4 +33,9 @@ class Product extends Model
     {
         return $this->belongsTo(Carrier::class);
     }
+
+    public function productType(): BelongsTo
+    {
+        return $this->belongsTo(ProductType::class);
+    }
 }

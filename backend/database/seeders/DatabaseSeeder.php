@@ -48,6 +48,9 @@ class DatabaseSeeder extends Seeder
         $this->command->info('Seeding MGM commission tiers (3 tiers × 10 ranks)...');
         $this->call(CommissionTierSeeder::class);
 
+        $this->command->info('Seeding MGM product types (~26 rows / tenant)...');
+        $this->call(ProductTypeSeeder::class);
+
         $this->command->info('Seeding agents...');
         $this->call(AgentSeeder::class);
 

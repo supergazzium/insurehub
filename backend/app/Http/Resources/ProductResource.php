@@ -28,6 +28,8 @@ class ProductResource extends JsonResource
             'carrierName' => $this->carrier?->name,
             'carrierInsureType' => $this->carrier?->insure_type ?? '',
             'type' => $this->type ?? '',
+            // MGM product-type FK — nullable during transition (see PR-A3).
+            'productTypeId' => $this->product_type_id !== null ? (string) $this->product_type_id : null,
             'category' => $this->category ?? '',
             'subCategory' => $this->sub_category ?? '',
             'subCategory2' => $this->sub_category_2 ?? '',
