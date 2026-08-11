@@ -123,6 +123,7 @@ class MgmScenarioSeeder extends Seeder
             $this->scenario7($nonLifeCarrier, $customer);
             $this->scenario8($nonLifeCarrier, $customer);
             $this->scenario9($nonLifeCarrier, $customer);
+            $this->scenario10($nonLifeCarrier, $customer);
         });
 
         $this->printSummary();
@@ -382,6 +383,49 @@ class MgmScenarioSeeder extends Seeder
         $product = $this->makeProduct('SCN9_PROD', $carrier, 'MOTOR_CLASS1_GARAGE');
         $policy = $this->makePolicy('SCN9_POL', $customer, $product, $carrier, $l1);
         $this->makePayment($policy, 10000, 'SCN9_PAY');
+    }
+
+    /**
+     * S10 — Lv2 seller with Lv5→Lv5→Lv7→Lv8 uplines (user-supplied spec).
+     *   TIER_FULL, FIRE_HOUSE_BASIC (AIG standard rate 9%), payment ฿100,000.
+     *
+     *   Chain (root → seller):
+     *     SCN10_L8   Lv8   root
+     *     SCN10_L7   Lv7   parent of L5B
+     *     SCN10_L5B  Lv5   parent of L5A
+     *     SCN10_L5A  Lv5   parent of L2  (direct upline of seller)
+     *     SCN10_L2   Lv2   SELLER
+     *
+     *   Max_passed walk starts at seller_mgmt_fee = 3% (Lv2 TIER_FULL):
+     *     L5A mgmt 5%  → diff = 5-3   = 2%    → ฿2,000
+     *     L5B mgmt 5%  → diff = 5-5   = 0     → ฿0     (audit row per spec)
+     *     L7  mgmt 6%  → diff = 6-5   = 1%    → ฿1,000
+     *     L8  mgmt 6.25% → diff = 6.25-6 = 0.25% → ฿250
+     *
+     * Expected ledger rows (6 total):
+     *   DIRECT       → SCN10_L2   applied = 0.09 + 0.03 = 0.12000 → ฿12,000
+     *   REFERRAL     → SCN10_L5A  (direct upline)   0.01000       → ฿1,000
+     *   DIFFERENTIAL → SCN10_L5A  0.02000                         → ฿2,000
+     *   DIFFERENTIAL → SCN10_L5B  0.00000  (audit row)            → ฿0
+     *   DIFFERENTIAL → SCN10_L7   0.01000                         → ฿1,000
+     *   DIFFERENTIAL → SCN10_L8   0.00250                         → ฿250
+     *   Grand total payout across all agents: ฿16,250
+     *
+     * IMPORTANT: SCN10_L2 sits at Lv2 which shares a 0-volume target with Lv1,
+     * so the auto-promotion pipeline is a no-op for this seller — they were
+     * seeded at Lv2 and stay at Lv2 through accrual.
+     */
+    private function scenario10(Carrier $carrier, Customer $customer): void
+    {
+        $l8 = $this->makeAgent('SCN10_L8', level: 8, parent: null, active: true, hasLicense: true);
+        $l7 = $this->makeAgent('SCN10_L7', level: 7, parent: $l8, active: true, hasLicense: true);
+        $l5b = $this->makeAgent('SCN10_L5B', level: 5, parent: $l7, active: true, hasLicense: false);
+        $l5a = $this->makeAgent('SCN10_L5A', level: 5, parent: $l5b, active: true, hasLicense: false);
+        $l2 = $this->makeAgent('SCN10_L2', level: 2, parent: $l5a, active: true, hasLicense: false);
+
+        $product = $this->makeProduct('SCN10_PROD', $carrier, 'FIRE_HOUSE_BASIC');
+        $policy = $this->makePolicy('SCN10_POL', $customer, $product, $carrier, $l2);
+        $this->makePayment($policy, 100000, 'SCN10_PAY');
     }
 
     // ─────────────────────────────────────────────────────────────────────
