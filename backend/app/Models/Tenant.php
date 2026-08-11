@@ -6,7 +6,6 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
-use Illuminate\Database\Eloquent\Relations\HasOne;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Tenant extends Model
@@ -49,11 +48,6 @@ class Tenant extends Model
     public function policies(): HasMany
     {
         return $this->hasMany(Policy::class);
-    }
-
-    public function referralBonusConfig(): HasOne
-    {
-        return $this->hasOne(ReferralBonusConfig::class);
     }
 
     public function auditEntries(): HasMany

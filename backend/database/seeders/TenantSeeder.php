@@ -4,7 +4,6 @@ declare(strict_types=1);
 
 namespace Database\Seeders;
 
-use App\Models\ReferralBonusConfig;
 use App\Models\Tenant;
 use App\Models\User;
 use Illuminate\Database\Seeder;
@@ -37,11 +36,6 @@ class TenantSeeder extends Seeder
                 'email_signature' => "อินชัวร์ฮับ โบรกเกอร์\n02-xxx-xxxx",
                 'active' => true,
             ],
-        );
-
-        ReferralBonusConfig::updateOrCreate(
-            ['tenant_id' => $tenant->id],
-            ['enabled' => false, 'type' => 'flat', 'flat_amount' => 0, 'pct_value' => 0],
         );
 
         // Default super-admin login (development seed only).
