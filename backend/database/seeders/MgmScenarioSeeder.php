@@ -124,6 +124,7 @@ class MgmScenarioSeeder extends Seeder
             $this->scenario8($nonLifeCarrier, $customer);
             $this->scenario9($nonLifeCarrier, $customer);
             $this->scenario10($nonLifeCarrier, $customer);
+            $this->scenario11($nonLifeCarrier, $customer);
         });
 
         $this->printSummary();
@@ -426,6 +427,84 @@ class MgmScenarioSeeder extends Seeder
         $product = $this->makeProduct('SCN10_PROD', $carrier, 'FIRE_HOUSE_BASIC');
         $policy = $this->makePolicy('SCN10_POL', $customer, $product, $carrier, $l2);
         $this->makePayment($policy, 100000, 'SCN10_PAY');
+    }
+
+    /**
+     * S11 — Portfolio for SCN9_L2 as seller. Four policies across every
+     * tier/type combination to exercise how a single agent's mixed sales
+     * activity fans out through the 8-agent chain built in S9.
+     *
+     * Seller: SCN9_L2 (Lv2). Uplines (via S9 chain, root → seller):
+     *   SCN9_L10 → SCN9_L9 → SCN9_L8 → SCN9_L7 → SCN9_L5 → SCN9_L3 → SCN9_L2
+     *
+     * Reuses S9's tree — this scenario does NOT create new agents. It just
+     * adds 4 policies + 4 payments where SCN9_L2 is the writing agent.
+     * Product codes SCN11_PROD_* and policy nos SCN11_POL_* are unique so
+     * they don't clash with S9.
+     *
+     * The 4 policies:
+     *   P1  MOTOR_CLASS1_GARAGE (AIG 10%) TIER_FULL       ฿20,000  → 8 rows
+     *   P2  FIRE_HOUSE_BASIC    (AIG 9%)  TIER_FULL       ฿50,000  → 8 rows
+     *   P3  PORROR_CAR          (AIG 7%)  TIER_PARTIAL    ฿5,000   → 7 rows (no referral)
+     *   P4  IAR_CAR_EAR         (AIG 9%)  TIER_DIRECT_ONLY ฿100,000 → 7 rows (DIRECT + 6 audit zeros)
+     *
+     * Expected 30 ledger rows total. SCN9_L2 direct income: ฿17,975
+     *   (P1: ฿2,600 + P2: ฿6,000 + P3: ฿375 + P4: ฿9,000)
+     *
+     * See docblock on each helper below for the row-by-row math.
+     */
+    private function scenario11(Carrier $carrier, Customer $customer): void
+    {
+        $seller = Agent::query()
+            ->where('tenant_id', $this->tenantId)
+            ->where('agent_code', 'SCN9_L2')
+            ->first();
+        if ($seller === null) {
+            $this->command?->warn('  S11 skipped: SCN9_L2 not found (run S9 first).');
+
+            return;
+        }
+
+        // P1 — TIER_FULL Motor: DIRECT + REFERRAL + 6 DIFF (8 rows)
+        //   Seller Lv2 mgmt 3% → DIRECT rate 13% × 20,000 = ฿2,600
+        //   REFERRAL 1% × 20,000 = ฿200 to SCN9_L3
+        //   DIFF walk: L3 1% ฿200 | L5 1% ฿200 | L7 1% ฿200
+        //           | L8 0.25% ฿50 | L9 0.25% ฿50 | L10 0.25% ฿50
+        $p1 = $this->makeProduct('SCN11_PROD_MOTOR', $carrier, 'MOTOR_CLASS1_GARAGE');
+        $pol1 = $this->makePolicy('SCN11_POL_MOTOR', $customer, $p1, $carrier, $seller);
+        $this->makePayment($pol1, 20000, 'SCN11_PAY_MOTOR');
+
+        // P2 — TIER_FULL Fire: DIRECT + REFERRAL + 6 DIFF (8 rows)
+        //   Seller Lv2 mgmt 3% → DIRECT rate 12% × 50,000 = ฿6,000
+        //   REFERRAL 1% × 50,000 = ฿500 to SCN9_L3
+        //   DIFF walk: L3 1% ฿500 | L5 1% ฿500 | L7 1% ฿500
+        //           | L8 0.25% ฿125 | L9 0.25% ฿125 | L10 0.25% ฿125
+        $p2 = $this->makeProduct('SCN11_PROD_FIRE', $carrier, 'FIRE_HOUSE_BASIC');
+        $pol2 = $this->makePolicy('SCN11_POL_FIRE', $customer, $p2, $carrier, $seller);
+        $this->makePayment($pol2, 50000, 'SCN11_PAY_FIRE');
+
+        // P3 — TIER_PARTIAL PORROR: DIRECT + no referral + 6 tiny DIFF (7 rows)
+        //   Seller Lv2 TIER_PARTIAL mgmt 0.5% → DIRECT rate 7.5% × 5,000 = ฿375
+        //   REFERRAL rate = 0 (TIER_PARTIAL) → skipped, no row
+        //   DIFF walk (TIER_PARTIAL mgmt fees):
+        //     L3 0.6%-0.5% = 0.1% → ฿5
+        //     L5 0.8%-0.6% = 0.2% → ฿10
+        //     L7 1.0%-0.8% = 0.2% → ฿10
+        //     L8 1.1%-1.0% = 0.1% → ฿5
+        //     L9 1.2%-1.1% = 0.1% → ฿5
+        //     L10 1.3%-1.2% = 0.1% → ฿5
+        $p3 = $this->makeProduct('SCN11_PROD_PRB', $carrier, 'PORROR_CAR');
+        $pol3 = $this->makePolicy('SCN11_POL_PORROR', $customer, $p3, $carrier, $seller);
+        $this->makePayment($pol3, 5000, 'SCN11_PAY_PORROR');
+
+        // P4 — TIER_DIRECT_ONLY IAR: DIRECT + no referral + 6 zero-audit DIFF (7 rows)
+        //   Seller Lv2 TIER_DIRECT_ONLY mgmt 0% → DIRECT rate 9% × 100,000 = ฿9,000
+        //   REFERRAL rate = 0 → skipped, no row
+        //   All uplines mgmt fee = 0% → every DIFF row = ฿0 (audit trail per spec)
+        //   L3 ฿0 | L5 ฿0 | L7 ฿0 | L8 ฿0 | L9 ฿0 | L10 ฿0
+        $p4 = $this->makeProduct('SCN11_PROD_IAR', $carrier, 'IAR_CAR_EAR');
+        $pol4 = $this->makePolicy('SCN11_POL_IAR', $customer, $p4, $carrier, $seller);
+        $this->makePayment($pol4, 100000, 'SCN11_PAY_IAR');
     }
 
     // ─────────────────────────────────────────────────────────────────────

@@ -301,41 +301,51 @@ touched.
 
 **D.1 — Discover known-good IDs**
 
+Use carrier `AXA`, product-type `HEALTH_ADULT`. The seeded matrix cell
+`AXA × HEALTH_ADULT = 0.09000` is verified. (`AIG × HEALTH_ADULT` and
+`Allianz/ALI × HEALTH_ADULT` are both null in the default seed — do NOT
+use those.)
+
 ```
 docker exec insurehub-mysql-1 mysql -uroot -prootpw insurehub -Nse "
-  SELECT id FROM carriers WHERE tenant_id=1 AND code='AIG';
+  SELECT id FROM carriers WHERE tenant_id=1 AND code='AXA';
   SELECT id FROM product_types WHERE tenant_id=1 AND code='HEALTH_ADULT';
   SELECT id FROM customers WHERE tenant_id=1 AND customer_code='SCN_CUST';
   SELECT id, has_license, rank_id FROM agents WHERE tenant_id=1 AND agent_code='SCN1_L2';
 "
 ```
-Save the four IDs as `AIG_ID`, `HEALTH_TYPE_ID`, `CUST_ID`, `AGENT_ID`.
+Save the four IDs as `CARRIER_ID`, `HEALTH_TYPE_ID`, `CUST_ID`, `AGENT_ID`.
 
-Also confirm the AIG × HEALTH_ADULT matrix cell exists and its rate:
+Confirm the matrix cell:
 ```
 docker exec insurehub-mysql-1 mysql -uroot -prootpw insurehub -Nse "
   SELECT CAST(standard_rate AS DECIMAL(6,5))
   FROM carrier_product_type_rates
-  WHERE tenant_id=1 AND carrier_id=$AIG_ID AND product_type_id=$HEALTH_TYPE_ID
+  WHERE tenant_id=1 AND carrier_id=$CARRIER_ID AND product_type_id=$HEALTH_TYPE_ID
 "
 ```
-Save this value as `EXPECTED_STANDARD_RATE`. If empty, use `SET @rate=null`
-handling — but on the default seed AIG × HEALTH_ADULT should be null (Health
-is not sold by all non-life carriers). If null, skip D and set section
-verdict to N/A ("test needs a different carrier × type pair — try MSIG").
-
-If the cell is null, redo D.1 using carrier `Allianz` (which has
-HEALTH_ADULT = 0.05) instead. Save `AIG_ID` as `ALLIANZ_ID`.
+Expected: `0.09000`. Save as `EXPECTED_STANDARD_RATE`. If empty, the seed
+drifted — pick any non-null cell from
+`SELECT c.code, CAST(cptr.standard_rate AS DECIMAL(6,5)) FROM
+carrier_product_type_rates cptr JOIN carriers c ON c.id=cptr.carrier_id
+JOIN product_types pt ON pt.id=cptr.product_type_id WHERE cptr.tenant_id=1
+AND pt.code='HEALTH_ADULT' AND cptr.standard_rate IS NOT NULL`.
 
 **D.2 — Insert the Product + Policy + Payment**
 
+Two steps. Product and Policy can be raw SQL (no observer we care about).
+`policy_payments` MUST go through Eloquent so `PolicyPaymentObserver::created()`
+fires — a raw `INSERT INTO policy_payments` bypasses the observer and the
+engine will never see the payment (silent zero-row failure).
+
+Step (a) — Product + Policy via SQL:
 ```
 docker exec insurehub-mysql-1 mysql -uroot -prootpw insurehub -e "
   INSERT INTO products (tenant_id, carrier_id, code, name, product_type_id,
     coverage, duration_years, pay_years, premium_mode, min_premium, max_premium,
     min_age, max_age, gender, require_medical, smoker_accepted, preexisting_excluded,
     active, created_at, updated_at)
-  VALUES (1, $AIG_ID, 'TESTD_PROD', 'Section D Test Product', $HEALTH_TYPE_ID,
+  VALUES (1, $CARRIER_ID, 'TESTD_PROD', 'Section D Test Product', $HEALTH_TYPE_ID,
     100000, 1, 1, 'annual', 0, 1000000, 0, 99, 'all', 0, 1, 0, 1, NOW(), NOW());
   SET @pid = LAST_INSERT_ID();
 
@@ -343,15 +353,25 @@ docker exec insurehub-mysql-1 mysql -uroot -prootpw insurehub -e "
     carrier_id, writing_agent_id, effective_date, expiry_date, policy_year,
     act_year, new_or_renew, coverage, annual_premium, main_premium, net_premium,
     premium_mode, status, vehicle_on_non_motor, created_at, updated_at)
-  VALUES (1, 'TESTD_POL', $CUST_ID, @pid, $AIG_ID, $AGENT_ID,
+  VALUES (1, 'TESTD_POL', $CUST_ID, @pid, $CARRIER_ID, $AGENT_ID,
     CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 YEAR), 1, 1, 'new',
     100000, 5000, 5000, 5000, 'annual', 'active', 0, NOW(), NOW());
-  SET @polid = LAST_INSERT_ID();
-
-  INSERT INTO policy_payments (policy_id, payment_date, amount, method,
-    reference, created_at, updated_at)
-  VALUES (@polid, CURDATE(), 5000, 'bankTransfer', 'TESTD_PAY', NOW(), NOW());
 "
+```
+
+Step (b) — Payment via Eloquent (fires the observer):
+```
+docker exec -i insurehub-backend-1 php artisan tinker --no-interaction <<'PHP'
+$policy = App\Models\Policy::where('policy_no','TESTD_POL')->first();
+$p = App\Models\PolicyPayment::create([
+  'policy_id' => $policy->id,
+  'payment_date' => now()->toDateString(),
+  'amount' => 5000,
+  'method' => 'bankTransfer',
+  'reference' => 'TESTD_PAY',
+]);
+echo "created payment id={$p->id}\n";
+PHP
 ```
 
 Wait 1 second (observer runs synchronously but give it a beat).
