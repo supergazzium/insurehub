@@ -411,15 +411,24 @@ Product. The engine must NOT produce ledger rows AND must NOT throw. Check
 `docker compose logs backend --tail=100` after each sub-test to confirm
 no unhandled exceptions.
 
+Reminder: `policy_payments` inserts must go through Eloquent so the
+observer fires. Raw SQL will silently produce zero rows and look identical
+to a real "engine correctly skipped it" pass — a false PASS.
+
 **E.1 — Amount 0**
 
 ```
-docker exec insurehub-mysql-1 mysql -uroot -prootpw insurehub -e "
-  INSERT INTO policy_payments (policy_id, payment_date, amount, method,
-    reference, created_at, updated_at)
-  SELECT policy_id, CURDATE(), 0, 'bankTransfer', 'TESTE1_PAY', NOW(), NOW()
-  FROM policy_payments WHERE reference='SCN1_PAY' LIMIT 1;
-"
+docker exec -i insurehub-backend-1 php artisan tinker --no-interaction <<'PHP'
+$scn1 = App\Models\PolicyPayment::where('reference','SCN1_PAY')->first();
+$p = App\Models\PolicyPayment::create([
+  'policy_id' => $scn1->policy_id,
+  'payment_date' => now()->toDateString(),
+  'amount' => 0,
+  'method' => 'bankTransfer',
+  'reference' => 'TESTE1_PAY',
+]);
+echo "created payment id={$p->id}\n";
+PHP
 ```
 
 Assert zero ledger rows for TESTE1_PAY:
@@ -434,6 +443,7 @@ Expected: `0`.
 
 **E.2 — Product with product_type_id = NULL**
 
+Step (a) — Product + Policy via SQL:
 ```
 docker exec insurehub-mysql-1 mysql -uroot -prootpw insurehub -e "
   INSERT INTO products (tenant_id, carrier_id, code, name, product_type_id,
@@ -453,12 +463,22 @@ docker exec insurehub-mysql-1 mysql -uroot -prootpw insurehub -e "
     CURDATE(), DATE_ADD(CURDATE(), INTERVAL 1 YEAR), 1, 1, 'new',
     100000, 5000, 5000, 5000, 'annual', 'active', 0, NOW(), NOW()
   FROM policies WHERE policy_no='SCN1_POL' LIMIT 1;
-  SET @polid = LAST_INSERT_ID();
-
-  INSERT INTO policy_payments (policy_id, payment_date, amount, method,
-    reference, created_at, updated_at)
-  VALUES (@polid, CURDATE(), 5000, 'bankTransfer', 'TESTE2_PAY', NOW(), NOW());
 "
+```
+
+Step (b) — Payment via Eloquent (fires the observer):
+```
+docker exec -i insurehub-backend-1 php artisan tinker --no-interaction <<'PHP'
+$policy = App\Models\Policy::where('policy_no','TESTE2_POL')->first();
+$p = App\Models\PolicyPayment::create([
+  'policy_id' => $policy->id,
+  'payment_date' => now()->toDateString(),
+  'amount' => 5000,
+  'method' => 'bankTransfer',
+  'reference' => 'TESTE2_PAY',
+]);
+echo "created payment id={$p->id}\n";
+PHP
 ```
 
 Assert zero ledger rows for TESTE2_PAY (same query pattern as E.1).
@@ -466,16 +486,21 @@ Expected: `0`.
 
 **E.3 — Missing matrix cell (product_type_id set but no rate)**
 
-Use the SCN6ORPH orphan carrier + any product_type_id. Reuse SCN6_POL /
-SCN6_PROD which was designed for exactly this case.
+Reuse SCN6_POL (which uses the SCN6ORPH orphan carrier with no matrix
+cells). Payment via Eloquent:
 
 ```
-docker exec insurehub-mysql-1 mysql -uroot -prootpw insurehub -e "
-  INSERT INTO policy_payments (policy_id, payment_date, amount, method,
-    reference, created_at, updated_at)
-  SELECT policy_id, CURDATE(), 5000, 'bankTransfer', 'TESTE3_PAY', NOW(), NOW()
-  FROM policy_payments WHERE reference='SCN6_PAY' LIMIT 1;
-"
+docker exec -i insurehub-backend-1 php artisan tinker --no-interaction <<'PHP'
+$policy = App\Models\Policy::where('policy_no','SCN6_POL')->first();
+$p = App\Models\PolicyPayment::create([
+  'policy_id' => $policy->id,
+  'payment_date' => now()->toDateString(),
+  'amount' => 5000,
+  'method' => 'bankTransfer',
+  'reference' => 'TESTE3_PAY',
+]);
+echo "created payment id={$p->id}\n";
+PHP
 ```
 
 Assert zero rows for TESTE3_PAY. Expected: `0`.
