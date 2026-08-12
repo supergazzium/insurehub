@@ -125,6 +125,7 @@ class MgmScenarioSeeder extends Seeder
             $this->scenario9($nonLifeCarrier, $customer);
             $this->scenario10($nonLifeCarrier, $customer);
             $this->scenario11($nonLifeCarrier, $customer);
+            $this->scenario12($nonLifeCarrier, $customer);
         });
 
         $this->printSummary();
@@ -505,6 +506,76 @@ class MgmScenarioSeeder extends Seeder
         $p4 = $this->makeProduct('SCN11_PROD_IAR', $carrier, 'IAR_CAR_EAR');
         $pol4 = $this->makePolicy('SCN11_POL_IAR', $customer, $p4, $carrier, $seller);
         $this->makePayment($pol4, 100000, 'SCN11_PAY_IAR');
+    }
+
+    /**
+     * S12 — Portfolio for SCN10_L5B as seller. Middle-of-chain seller in
+     * the S10 tree, so commission only flows to 2 uplines (SCN10_L7,
+     * SCN10_L8). Downlines below L5B (SCN10_L5A, SCN10_L2) get nothing —
+     * demonstrates that MGM commission flows STRICTLY UPWARD.
+     *
+     * Reuses S10's tree — this scenario does NOT create new agents. It
+     * adds 4 policies + 4 payments where SCN10_L5B is the writing agent.
+     *
+     * The 4 policies (same product/tier mix as S11):
+     *   P1  MOTOR_CLASS1_GARAGE (AIG 10%) TIER_FULL       ฿20,000  → 4 rows
+     *   P2  FIRE_HOUSE_BASIC    (AIG 9%)  TIER_FULL       ฿50,000  → 4 rows
+     *   P3  PORROR_CAR          (AIG 7%)  TIER_PARTIAL    ฿5,000   → 3 rows (no referral)
+     *   P4  IAR_CAR_EAR         (AIG 9%)  TIER_DIRECT_ONLY ฿100,000 → 3 rows (DIRECT + 2 audit zeros)
+     *
+     * Expected 14 ledger rows total. SCN10_L5B direct income: ฿19,390
+     *   (P1: ฿3,000 + P2: ฿7,000 + P3: ฿390 + P4: ฿9,000)
+     *
+     * Contrast with S11 (SCN9_L2 seller): S11 fans out to 6 uplines because
+     * L2 is near the bottom of an 8-agent chain, while S12 fans out to only
+     * 2 uplines because L5B is only 2 levels below the root.
+     */
+    private function scenario12(Carrier $carrier, Customer $customer): void
+    {
+        $seller = Agent::query()
+            ->where('tenant_id', $this->tenantId)
+            ->where('agent_code', 'SCN10_L5B')
+            ->first();
+        if ($seller === null) {
+            $this->command?->warn('  S12 skipped: SCN10_L5B not found (run S10 first).');
+
+            return;
+        }
+
+        // P1 — TIER_FULL Motor: DIRECT + REFERRAL + 2 DIFF (4 rows)
+        //   Seller Lv5 mgmt 5% → DIRECT rate 15% × 20,000 = ฿3,000
+        //   REFERRAL 1% × 20,000 = ฿200 to SCN10_L7
+        //   DIFF walk: L7 mgmt 6%, diff 1% → ฿200 | L8 mgmt 6.25%, diff 0.25% → ฿50
+        $p1 = $this->makeProduct('SCN12_PROD_MOTOR', $carrier, 'MOTOR_CLASS1_GARAGE');
+        $pol1 = $this->makePolicy('SCN12_POL_MOTOR', $customer, $p1, $carrier, $seller);
+        $this->makePayment($pol1, 20000, 'SCN12_PAY_MOTOR');
+
+        // P2 — TIER_FULL Fire: DIRECT + REFERRAL + 2 DIFF (4 rows)
+        //   Seller Lv5 mgmt 5% → DIRECT rate 14% × 50,000 = ฿7,000
+        //   REFERRAL 1% × 50,000 = ฿500 to SCN10_L7
+        //   DIFF walk: L7 diff 1% → ฿500 | L8 diff 0.25% → ฿125
+        $p2 = $this->makeProduct('SCN12_PROD_FIRE', $carrier, 'FIRE_HOUSE_BASIC');
+        $pol2 = $this->makePolicy('SCN12_POL_FIRE', $customer, $p2, $carrier, $seller);
+        $this->makePayment($pol2, 50000, 'SCN12_PAY_FIRE');
+
+        // P3 — TIER_PARTIAL PORROR: DIRECT + no referral + 2 tiny DIFF (3 rows)
+        //   Seller Lv5 TIER_PARTIAL mgmt 0.8% → DIRECT rate 7.8% × 5,000 = ฿390
+        //   REFERRAL rate = 0 (TIER_PARTIAL) → skipped
+        //   DIFF walk (TIER_PARTIAL):
+        //     L7 mgmt 1.0%, diff 0.2% → ฿10
+        //     L8 mgmt 1.1%, diff 0.1% → ฿5
+        $p3 = $this->makeProduct('SCN12_PROD_PRB', $carrier, 'PORROR_CAR');
+        $pol3 = $this->makePolicy('SCN12_POL_PORROR', $customer, $p3, $carrier, $seller);
+        $this->makePayment($pol3, 5000, 'SCN12_PAY_PORROR');
+
+        // P4 — TIER_DIRECT_ONLY IAR: DIRECT + no referral + 2 zero-audit DIFF (3 rows)
+        //   Seller Lv5 TIER_DIRECT_ONLY mgmt 0% → DIRECT rate 9% × 100,000 = ฿9,000
+        //   REFERRAL rate = 0 → skipped
+        //   Uplines mgmt fee = 0% → both DIFF rows = ฿0 audit trail
+        //   L7 ฿0 | L8 ฿0
+        $p4 = $this->makeProduct('SCN12_PROD_IAR', $carrier, 'IAR_CAR_EAR');
+        $pol4 = $this->makePolicy('SCN12_POL_IAR', $customer, $p4, $carrier, $seller);
+        $this->makePayment($pol4, 100000, 'SCN12_PAY_IAR');
     }
 
     // ─────────────────────────────────────────────────────────────────────
