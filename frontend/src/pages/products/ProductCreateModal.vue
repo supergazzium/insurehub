@@ -65,11 +65,19 @@ const form = reactive({
   commissionPercent: null as number | null,
 })
 
-/** Carriers matching the chosen insureType — empties when nothing is picked. */
+/**
+ * Carriers matching the chosen insureType — empties when nothing is picked.
+ * DB stores `Life` / `Non-Life` / `Tax`; UI radio uses `life` / `non-life` /
+ * `tax`. Normalize both sides before compare so casing / hyphen drift can't
+ * silently hide the carrier list.
+ */
+function normalizeInsureType(v: string): string {
+  return v.toLowerCase().replace(/\s+/g, '-')
+}
 const availableCarriers = computed<CarrierListRow[]>(() =>
   form.insureType === ''
     ? []
-    : carriers.value.filter((c) => c.insureType === form.insureType),
+    : carriers.value.filter((c) => normalizeInsureType(c.insureType) === form.insureType),
 )
 
 const needsMainRiderChoice = computed(() => form.insureType === 'life')
