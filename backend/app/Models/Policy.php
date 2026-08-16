@@ -22,6 +22,7 @@ class Policy extends Model
         'app_date' => 'date',
         'create_date' => 'date',
         'effective_date' => 'date',
+        'insured_person_birth_date' => 'date',
         'expiry_date' => 'date',
         'issue_date' => 'date',
         'next_premium_due' => 'date',

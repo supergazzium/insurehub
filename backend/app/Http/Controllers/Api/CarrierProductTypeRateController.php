@@ -80,90 +80,25 @@ class CarrierProductTypeRateController extends ApiController
         ]);
     }
 
-    /**
-     * Create a new rate cell. Fails if (carrier, type, valid_start=null)
-     * already exists — use update instead.
-     */
+    // POST/PATCH/DELETE are frozen — the (carrier × type) matrix is now a
+    // read-only view; commission rates are edited per-product via
+    // ProductController and land in product_commission_rates. Returning 410
+    // rather than removing the routes so any stale caller gets a clear
+    // signal instead of a 404.
+
     public function store(Request $request): JsonResponse
     {
-        $tenantId = $this->tenantId($request);
-        $data = $request->validate([
-            'carrierId' => ['required', 'integer', 'exists:carriers,id'],
-            'productTypeId' => ['required', 'integer', 'exists:product_types,id'],
-            'standardRate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
-            'notes' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
-        $this->assertCarrierInTenant($request, (int) $data['carrierId']);
-        $this->assertTypeInTenant($request, (int) $data['productTypeId']);
-
-        $rate = CarrierProductTypeRate::create([
-            'tenant_id' => $tenantId,
-            'carrier_id' => $data['carrierId'],
-            'product_type_id' => $data['productTypeId'],
-            'standard_rate' => $data['standardRate'] ?? null,
-            'notes' => $data['notes'] ?? null,
-        ]);
-
-        return response()->json([
-            'id' => (string) $rate->id,
-            'carrierId' => (string) $rate->carrier_id,
-            'productTypeId' => (string) $rate->product_type_id,
-            'standardRate' => $rate->standard_rate !== null ? (float) $rate->standard_rate : null,
-        ], 201);
+        abort(410, 'The carrier × product-type matrix is read-only. Edit commission rates on the product.');
     }
 
     public function update(Request $request, CarrierProductTypeRate $rate): JsonResponse
     {
-        $this->authorizeRate($request, $rate);
-        $data = $request->validate([
-            'standardRate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
-            'notes' => ['sometimes', 'nullable', 'string', 'max:255'],
-        ]);
-        $payload = [];
-        if (array_key_exists('standardRate', $data)) {
-            $payload['standard_rate'] = $data['standardRate'];
-        }
-        if (array_key_exists('notes', $data)) {
-            $payload['notes'] = $data['notes'];
-        }
-        $rate->update($payload);
-
-        return response()->json([
-            'id' => (string) $rate->id,
-            'carrierId' => (string) $rate->carrier_id,
-            'productTypeId' => (string) $rate->product_type_id,
-            'standardRate' => $rate->standard_rate !== null ? (float) $rate->standard_rate : null,
-        ]);
+        abort(410, 'The carrier × product-type matrix is read-only. Edit commission rates on the product.');
     }
 
     public function destroy(Request $request, CarrierProductTypeRate $rate): JsonResponse
     {
-        $this->authorizeRate($request, $rate);
-        $rate->delete();
-
-        return response()->json(['message' => 'Deleted.']);
+        abort(410, 'The carrier × product-type matrix is read-only. Edit commission rates on the product.');
     }
 
-    private function authorizeRate(Request $request, CarrierProductTypeRate $rate): void
-    {
-        if ((int) $rate->tenant_id !== $this->tenantId($request)) {
-            abort(404);
-        }
-    }
-
-    private function assertCarrierInTenant(Request $request, int $carrierId): void
-    {
-        $carrier = Carrier::query()->find($carrierId);
-        if ($carrier === null || (int) $carrier->tenant_id !== $this->tenantId($request)) {
-            abort(422, 'Carrier not in tenant.');
-        }
-    }
-
-    private function assertTypeInTenant(Request $request, int $typeId): void
-    {
-        $type = ProductType::query()->find($typeId);
-        if ($type === null || (int) $type->tenant_id !== $this->tenantId($request)) {
-            abort(422, 'Product type not in tenant.');
-        }
-    }
 }

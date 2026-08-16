@@ -68,21 +68,74 @@ export interface ProductDetail extends ProductListRow {
   preexistingExcluded: boolean
   occupationClasses: string[]
   notes: string
+  commissionRates: ProductCommissionRatesBlock
+  commissionBands: ProductCommissionBandsBlock
+}
+
+/** One row in a Life product's banded commission table. All rate fields
+ *  are fractions 0..1 (0.30 = 30 %). Nullable min/max = unbounded on that
+ *  side (min=null → 0; max=null → +∞). Age fields are integer years. */
+export interface ProductCommissionBandRow {
+  sumAssuredMin: number | null
+  sumAssuredMax: number | null
+  entryAgeMin: number | null
+  entryAgeMax: number | null
+  yr1: number | null
+  yr2: number | null
+  yr3: number | null
+  yr4: number | null
+  yr5: number | null
+  yr6Up: number | null
+}
+
+/** Bands grouped by direction. Both arrays present but empty when the
+ *  product has no banded rates configured (typical for non-Life). */
+export interface ProductCommissionBandsBlock {
+  carrierToHub: ProductCommissionBandRow[]
+  hubToAgent: ProductCommissionBandRow[]
+}
+
+/** Payload for writing bands via POST/PATCH products. Replace-all
+ *  semantics: passing an array replaces every band on that direction; not
+ *  passing the key leaves them untouched. */
+export interface ProductCommissionBandsPayload {
+  carrierToHub?: ProductCommissionBandRow[]
+  hubToAgent?: ProductCommissionBandRow[]
+}
+
+/** One direction of commission on a product. Every value is a fraction
+ *  0..1 (0.10 = 10 %). Which fields are used depends on the scheme —
+ *  `flat` uses `flatRate`, `life_years` uses the per-year vector. */
+export interface ProductCommissionRatePanel {
+  flatRate: number | null
+  yr1: number | null
+  yr2: number | null
+  yr3: number | null
+  yr4: number | null
+  yr5: number | null
+  yr6_10: number | null
+  yr11Up: number | null
+}
+
+/** Both directions plus the scheme derived from the product group. The
+ *  panels are null when the product has no saved rate row yet (fresh
+ *  product before admin fills in the rates). */
+export interface ProductCommissionRatesBlock {
+  scheme: 'flat' | 'life_years'
+  carrierToHub: ProductCommissionRatePanel | null
+  hubToAgent: ProductCommissionRatePanel | null
+}
+
+/** Payload shape when writing rates via POST/PATCH products. Matches
+ *  ProductRequest's commissionRates validation. Fields left undefined
+ *  are treated as "no change"; explicit nulls clear a field. */
+export interface ProductCommissionRatesPayload {
+  carrierToHub?: Partial<ProductCommissionRatePanel>
+  hubToAgent?: Partial<ProductCommissionRatePanel>
 }
 
 export function fetchProduct(id: string) {
   return api.get<{ data: ProductDetail }>(`products/${id}`)
-}
-
-export interface CommissionRateRow {
-  id: string
-  party: string
-  installmentTerm: string | null
-  rate: number
-}
-
-export function fetchProductCommissionRates(productId: string) {
-  return api.get<{ data: CommissionRateRow[] }>(`products/${productId}/commission-rates`)
 }
 
 /** Next available `PD{carrierCode}{NNNN}` code for a carrier. */

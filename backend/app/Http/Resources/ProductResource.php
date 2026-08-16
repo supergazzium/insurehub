@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\Product;
+use App\Models\ProductCommissionBand;
+use App\Models\ProductCommissionRate;
 use App\Support\ProductKind;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -58,6 +60,98 @@ class ProductResource extends JsonResource
             'occupationClasses' => $this->occupation_classes ?? [],
             'notes' => $this->notes ?? '',
             'active' => (bool) $this->active,
+            'commissionRates' => $this->serializeCommissionRates(),
+            'commissionBands' => $this->serializeCommissionBands(),
+        ];
+    }
+
+    /**
+     * Return banded rates grouped by direction. Only meaningful for Life /
+     * Rider products; other groups get empty arrays. Rows are ordered by
+     * band_seq so the frontend renders them in author-defined order.
+     *
+     * @return array{
+     *   carrierToHub: list<array<string,mixed>>,
+     *   hubToAgent: list<array<string,mixed>>,
+     * }
+     */
+    private function serializeCommissionBands(): array
+    {
+        if (! $this->relationLoaded('commissionBands')) {
+            return ['carrierToHub' => [], 'hubToAgent' => []];
+        }
+
+        $grouped = ['carrierToHub' => [], 'hubToAgent' => []];
+        foreach ($this->commissionBands->sortBy('band_seq') as $band) {
+            $key = $band->direction === ProductCommissionBand::DIRECTION_CARRIER_TO_HUB
+                ? 'carrierToHub'
+                : 'hubToAgent';
+            $grouped[$key][] = [
+                'sumAssuredMin' => $band->sum_assured_min !== null ? (float) $band->sum_assured_min : null,
+                'sumAssuredMax' => $band->sum_assured_max !== null ? (float) $band->sum_assured_max : null,
+                'entryAgeMin' => $band->entry_age_min !== null ? (int) $band->entry_age_min : null,
+                'entryAgeMax' => $band->entry_age_max !== null ? (int) $band->entry_age_max : null,
+                'yr1' => $band->yr_1 !== null ? (float) $band->yr_1 : null,
+                'yr2' => $band->yr_2 !== null ? (float) $band->yr_2 : null,
+                'yr3' => $band->yr_3 !== null ? (float) $band->yr_3 : null,
+                'yr4' => $band->yr_4 !== null ? (float) $band->yr_4 : null,
+                'yr5' => $band->yr_5 !== null ? (float) $band->yr_5 : null,
+                'yr6Up' => $band->yr_6_up !== null ? (float) $band->yr_6_up : null,
+            ];
+        }
+
+        return $grouped;
+    }
+
+    /**
+     * Return the two-panel commission-rate shape the frontend expects.
+     * Missing rows serialize as null (frontend uses that to show empty inputs
+     * rather than 0 %). Only reads pre-loaded `commissionRates` — controllers
+     * eager-load; other callers get {carrierToHub:null, hubToAgent:null}.
+     *
+     * @return array{
+     *   scheme: string,
+     *   carrierToHub: array<string,float|null>|null,
+     *   hubToAgent: array<string,float|null>|null,
+     * }
+     */
+    private function serializeCommissionRates(): array
+    {
+        $scheme = in_array($this->type, ['Life', 'Rider'], true)
+            ? ProductCommissionRate::SCHEME_LIFE_YEARS
+            : ProductCommissionRate::SCHEME_FLAT;
+
+        if (! $this->relationLoaded('commissionRates')) {
+            return ['scheme' => $scheme, 'carrierToHub' => null, 'hubToAgent' => null];
+        }
+
+        $rows = $this->commissionRates->keyBy('direction');
+
+        return [
+            'scheme' => $scheme,
+            'carrierToHub' => $this->rowToPanel($rows->get(ProductCommissionRate::DIRECTION_CARRIER_TO_HUB)),
+            'hubToAgent' => $this->rowToPanel($rows->get(ProductCommissionRate::DIRECTION_HUB_TO_AGENT)),
+        ];
+    }
+
+    /**
+     * @return array<string,float|null>|null
+     */
+    private function rowToPanel(?ProductCommissionRate $row): ?array
+    {
+        if ($row === null) {
+            return null;
+        }
+
+        return [
+            'flatRate' => $row->flat_rate !== null ? (float) $row->flat_rate : null,
+            'yr1' => $row->yr_1 !== null ? (float) $row->yr_1 : null,
+            'yr2' => $row->yr_2 !== null ? (float) $row->yr_2 : null,
+            'yr3' => $row->yr_3 !== null ? (float) $row->yr_3 : null,
+            'yr4' => $row->yr_4 !== null ? (float) $row->yr_4 : null,
+            'yr5' => $row->yr_5 !== null ? (float) $row->yr_5 : null,
+            'yr6_10' => $row->yr_6_10 !== null ? (float) $row->yr_6_10 : null,
+            'yr11Up' => $row->yr_11_up !== null ? (float) $row->yr_11_up : null,
         ];
     }
 }

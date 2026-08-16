@@ -6,6 +6,7 @@ namespace App\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
 class Product extends Model
@@ -37,5 +38,15 @@ class Product extends Model
     public function productType(): BelongsTo
     {
         return $this->belongsTo(ProductType::class);
+    }
+
+    public function commissionRates(): HasMany
+    {
+        return $this->hasMany(ProductCommissionRate::class);
+    }
+
+    public function commissionBands(): HasMany
+    {
+        return $this->hasMany(ProductCommissionBand::class);
     }
 }

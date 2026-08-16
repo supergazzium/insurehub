@@ -1,23 +1,19 @@
 <script setup lang="ts">
-// MGM (carrier × product-type) standard commission matrix admin.
+// MGM (carrier × product-type) standard commission matrix.
 //
-// Rows = carriers (~24), columns = product-types (~21).  Each cell is a
-// percentage (0..100%) or blank (null, meaning "carrier doesn't sell
-// this type" — the "-" cells in the source Excel).
+// READ-ONLY as of the per-product commission rewrite. The MGM engine now
+// reads its base rate from product_commission_rates(direction='hub_to_agent')
+// which is edited on the Product form; the matrix here is preserved as a
+// reference / historical view.
 //
-// Interaction: click a cell to edit; save on blur/change. Blank input
-// clears the cell (null standard_rate). Non-existent cells are created
-// on first save (POST); existing cells are patched (PATCH).
-//
-// Filters: pick a product-type group (Motor / Fire / Health / ...) to
-// narrow the columns and reduce horizontal scroll on wide screens.
+// Cells are still populated via the seeder + backfill, but the input fields
+// are disabled — operators must edit rates on the individual product.
 
 import { computed, onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { ApiError } from '../../api/client'
 import {
-  createCarrierProductTypeRate, fetchCarrierProductTypeRates,
-  updateCarrierProductTypeRate,
+  fetchCarrierProductTypeRates,
   type MatrixCarrier, type MatrixProductType, type MatrixRate,
 } from '../../api/mgm'
 
@@ -28,8 +24,6 @@ const productTypes = ref<MatrixProductType[]>([])
 const rates = ref<MatrixRate[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
-// Per-cell saving indicator: "{carrierId}:{productTypeId}"
-const savingCellKey = ref<string | null>(null)
 
 // Filter: null = show all groups; otherwise show only product-types in that group.
 const groupFilter = ref<string | null>(null)
@@ -79,44 +73,9 @@ const groups = computed<string[]>(() => {
   return [...set].sort()
 })
 
-// ── Cell edit: upsert (POST if no row exists, PATCH if it does) ──────────
-async function saveCell(carrier: MatrixCarrier, type: MatrixProductType, valuePct: string): Promise<void> {
-  const key = `${carrier.id}:${type.id}`
-  savingCellKey.value = key
-  try {
-    // Parse "8.5" → 0.085. Blank → null (clear the cell).
-    let rate: number | null = null
-    if (valuePct.trim() !== '') {
-      const parsed = Number(valuePct)
-      if (Number.isNaN(parsed) || parsed < 0 || parsed > 100) {
-        throw new Error(t('adminMatrix.invalidRate'))
-      }
-      rate = parsed / 100
-    }
-    const existing = findRate(carrier.id, type.id)
-    if (existing) {
-      const res = await updateCarrierProductTypeRate(existing.id, { standardRate: rate })
-      Object.assign(existing, res)
-    } else {
-      const res = await createCarrierProductTypeRate({
-        carrierId: Number(carrier.id),
-        productTypeId: Number(type.id),
-        standardRate: rate,
-      })
-      rates.value.push(res)
-    }
-  } catch (e: unknown) {
-    error.value = e instanceof ApiError ? e.message : e instanceof Error ? e.message : 'Save failed.'
-    // Reload the matrix to roll back the failed edit.
-    void load()
-  } finally {
-    savingCellKey.value = null
-  }
-}
-
-// Format a rate for display: 0.085 → "8.50", null → ""
+// Format a rate for display: 0.085 → "8.50", null → "—"
 function fmt(rate: number | null | undefined): string {
-  if (rate === null || rate === undefined) return ''
+  if (rate === null || rate === undefined) return '—'
   return (rate * 100).toFixed(2)
 }
 </script>
@@ -127,6 +86,14 @@ function fmt(rate: number | null | undefined): string {
       <h1 class="text-2xl font-semibold text-slate-900">{{ t('adminMatrix.title') }}</h1>
       <p class="text-sm text-slate-500 mt-1">{{ t('adminMatrix.subtitle') }}</p>
     </header>
+
+    <div class="card p-3 bg-amber-50 border border-amber-200 text-amber-800 text-sm flex items-start gap-2">
+      <i class="pi pi-info-circle mt-0.5" />
+      <div>
+        มุมมองอ่านอย่างเดียว — ค่าคอมมิชชั่นถูกย้ายไปแก้ที่หน้ารายการสินค้าเป็นรายการ ๆ ไป
+        ระบบ MGM ใช้ค่าจาก product_commission_rates ไม่ได้อ่านตารางนี้แล้ว
+      </div>
+    </div>
 
     <div v-if="error" class="card p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm">
       {{ error }}
@@ -192,16 +159,10 @@ function fmt(rate: number | null | undefined): string {
                 v-for="type in visibleTypes"
                 :key="type.id"
                 class="px-1 py-1 text-center"
-                :class="{ 'opacity-60': savingCellKey === `${carrier.id}:${type.id}` }"
               >
-                <input
-                  :value="fmt(findRate(carrier.id, type.id)?.standardRate)"
-                  type="text"
-                  inputmode="decimal"
-                  placeholder="-"
-                  class="w-16 border border-transparent hover:border-slate-200 focus:border-brand-400 focus:outline-none bg-transparent text-right px-1 py-0.5 rounded text-xs font-mono"
-                  @change="(e) => saveCell(carrier, type, (e.target as HTMLInputElement).value)"
-                />
+                <span class="inline-block w-16 text-right px-1 py-0.5 text-xs font-mono text-slate-700">
+                  {{ fmt(findRate(carrier.id, type.id)?.standardRate) }}
+                </span>
               </td>
             </tr>
           </tbody>
