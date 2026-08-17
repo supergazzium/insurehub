@@ -17,33 +17,50 @@ onMounted(async () => {
 })
 
 /**
- * Group-Life and Group-NL both surface as "Group" in the UI. The storage
- * value depends on the current product's carrier: life carriers save
- * Group-Life, non-life save Group-NL. When building the group dropdown for
- * a given product we collapse the two into a single "Group" option and
- * pick the storage value that matches this product's carrier.
+ * Insure-type helpers. DB stores `Life` / `Non-Life` / `Tax` (capitalized,
+ * hyphenated) while the create modal's radio uses `life` / `non-life` /
+ * `tax`. Normalizing both sides keeps the drawer's conditionals in sync
+ * with the modal's regardless of drift.
  */
-function groupStorageForCarrier(insureType: string): 'Group-Life' | 'Group-NL' {
-  return insureType === 'life' ? 'Group-Life' : 'Group-NL'
+function normalizeInsureType(v: string): 'life' | 'non-life' | 'tax' | '' {
+  const s = (v || '').toLowerCase().replace(/\s+/g, '-')
+  return s === 'life' || s === 'non-life' || s === 'tax' ? s : ''
 }
-function groupOptionsForProduct(insureType: string): { value: string; label: string }[] {
-  const rows = new Set<string>()
-  for (const r of taxonomy.value) rows.add(r.group)
-  const collapsed: { value: string; label: string }[] = []
-  const seenLabels = new Set<string>()
-  for (const g of rows) {
-    // Group-Life / Group-NL → collapse to single "Group" using the carrier's storage side.
-    if (g === 'Group-Life' || g === 'Group-NL') {
-      if (seenLabels.has('Group')) continue
-      collapsed.push({ value: groupStorageForCarrier(insureType), label: 'Group' })
-      seenLabels.add('Group')
-    } else {
-      collapsed.push({ value: g, label: g })
-      seenLabels.add(g)
-    }
+function isLifeCarrier(insureType: string): boolean {
+  return normalizeInsureType(insureType) === 'life'
+}
+function needsMainRiderChoice(insureType: string): boolean {
+  // Same rule as the create modal — only Life carriers ask the operator
+  // to pick Main vs Rider. Non-Life is forced Main; Tax is forced TAX.
+  return normalizeInsureType(insureType) === 'life'
+}
+
+/**
+ * Product-group options mirror ProductCreateModal's `productGroupOptions`
+ * computed exactly. Life+Main → Life / PA / Group-Life; Non-Life+Main →
+ * Group-NL / Motor / Non-Motor; Life+Rider → Rider auto; Tax → Tax auto.
+ * When the auto value applies we return an empty list so the drawer
+ * renders a static label instead of a select.
+ */
+function productGroupOptionsFor(insureType: string, mainRider: string | null): { value: string; label: string }[] {
+  const t = normalizeInsureType(insureType)
+  if (t === 'life' && mainRider === 'Main') {
+    return [
+      { value: 'Life', label: 'Life' },
+      { value: 'PA', label: 'PA' },
+      { value: 'Group-Life', label: 'Group' },
+    ]
   }
-  return collapsed
+  if (t === 'non-life' && mainRider === 'Main') {
+    return [
+      { value: 'Group-NL', label: 'Group' },
+      { value: 'Motor', label: 'Motor' },
+      { value: 'Non-Motor', label: 'Non-Motor' },
+    ]
+  }
+  return []
 }
+
 function categoriesForGroup(group: string): { value: string; label: string }[] {
   const seen = new Set<string>()
   for (const r of taxonomy.value) if (r.group === group) seen.add(r.category)
@@ -259,10 +276,6 @@ watch(
   { immediate: true },
 )
 
-function fmtBaht(n: number | null | undefined): string {
-  if (n === null || n === undefined) return '—'
-  return new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(n)
-}
 </script>
 
 <template>
@@ -288,52 +301,112 @@ function fmtBaht(n: number | null | undefined): string {
       </div>
 
       <div v-if="product" class="flex-1 p-6 space-y-6">
-        <!-- Overview (editable) -->
+        <!--
+          Details section — mirrors the "+ New Product" modal 1:1 so the
+          drawer is the exact edit view of the create form. Every field
+          the create modal writes is here and editable; every field it
+          doesn't touch is intentionally hidden. Carrier itself is
+          read-only — moving a product between carriers is a different
+          operation, not a field edit.
+        -->
         <section>
-          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Overview</h3>
+          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Details</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
-            <div><div class="text-xs text-slate-400">Code</div>
-              <EditableField entity="products" :id="product.id" field="code" :value="product.code" @update="v => apply('code', v)" /></div>
-            <div><div class="text-xs text-slate-400">Carrier</div>
-              <div class="text-slate-500">{{ product.carrierCode || '—' }}</div></div>
-            <div class="md:col-span-2"><div class="text-xs text-slate-400">Carrier name</div>
-              <div class="text-slate-500">{{ product.carrierName || '—' }}</div></div>
-            <div class="md:col-span-2"><div class="text-xs text-slate-400">Name</div>
-              <EditableField entity="products" :id="product.id" field="name" :value="product.name" @update="v => apply('name', v)" /></div>
-            <div class="md:col-span-2"><div class="text-xs text-slate-400">Name (English)</div>
-              <EditableField entity="products" :id="product.id" field="nameEn" :value="product.nameEn" @update="v => apply('nameEn', v)" /></div>
-            <div><div class="text-xs text-slate-400">Product Group</div>
-              <EditableField entity="products" :id="product.id" field="type" type="select" :options="groupOptionsForProduct(product.carrierInsureType)" :value="product.type" @update="v => apply('type', v)" /></div>
-            <div><div class="text-xs text-slate-400">Main / Rider</div>
-              <div class="text-slate-500">{{ product.mainRider || '—' }}</div></div>
-            <div class="md:col-span-2"><div class="text-xs text-slate-400">Category</div>
-              <EditableField entity="products" :id="product.id" field="category" type="select" :options="categoriesForGroup(product.type)" :value="product.category" @update="v => apply('category', v)" /></div>
-            <div class="md:col-span-2"><div class="text-xs text-slate-400">Sub-category</div>
-              <EditableField v-if="subcategoriesFor(product.type, product.category).length" entity="products" :id="product.id" field="subCategory" type="select" :options="subcategoriesFor(product.type, product.category)" :value="product.subCategory" @update="v => apply('subCategory', v)" />
-              <div v-else class="text-slate-500">—</div></div>
-            <div><div class="text-xs text-slate-400">Valid from</div>
-              <div class="text-slate-500">{{ product.validStart || '—' }}</div></div>
-            <div><div class="text-xs text-slate-400">Valid to</div>
-              <div class="text-slate-500">{{ product.validEnd || '—' }}</div></div>
-            <div class="col-span-2"><div class="text-xs text-slate-400">Status</div>
+            <div>
+              <div class="text-xs text-slate-400">ประเภทประกัน</div>
+              <span :class="['inline-flex px-2 py-0.5 rounded-md text-xs',
+                product.carrierInsureType === 'Life' || product.carrierInsureType === 'life'
+                  ? 'bg-brand-50 text-brand-700'
+                  : product.carrierInsureType === 'Tax' || product.carrierInsureType === 'tax'
+                    ? 'bg-amber-50 text-amber-700'
+                    : 'bg-slate-100 text-slate-700']">
+                {{ product.carrierInsureType || '—' }}
+              </span>
+            </div>
+            <div>
+              <div class="text-xs text-slate-400">Status</div>
               <span v-if="product.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">active</span>
               <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">inactive</span>
+            </div>
+            <div class="md:col-span-2">
+              <div class="text-xs text-slate-400">Carrier</div>
+              <div class="text-slate-700">
+                <span class="font-mono">{{ product.carrierCode || '—' }}</span>
+                <span v-if="product.carrierName" class="text-slate-500"> · {{ product.carrierName }}</span>
+              </div>
+            </div>
+
+            <div>
+              <div class="text-xs text-slate-400">Code</div>
+              <EditableField entity="products" :id="product.id" field="code" :value="product.code" @update="v => apply('code', v)" />
+            </div>
+            <div>
+              <div class="text-xs text-slate-400">Main / Rider</div>
+              <EditableField
+                v-if="needsMainRiderChoice(product.carrierInsureType)"
+                entity="products" :id="product.id" field="mainRider" type="select"
+                :options="[{ value: 'Main', label: 'Main' }, { value: 'Rider', label: 'Rider' }]"
+                :value="product.mainRider" @update="v => apply('mainRider', v)"
+              />
+              <div v-else class="text-slate-500">{{ product.mainRider || '—' }}</div>
+            </div>
+
+            <div>
+              <div class="text-xs text-slate-400">Product Group</div>
+              <EditableField
+                v-if="productGroupOptionsFor(product.carrierInsureType, product.mainRider).length > 0"
+                entity="products" :id="product.id" field="type" type="select"
+                :options="productGroupOptionsFor(product.carrierInsureType, product.mainRider)"
+                :value="product.type" @update="v => apply('type', v)"
+              />
+              <div v-else class="text-slate-500">{{ product.type || '—' }}</div>
+            </div>
+            <div class="md:col-span-3">
+              <div class="text-xs text-slate-400">Category</div>
+              <EditableField
+                v-if="categoriesForGroup(product.type).length > 0"
+                entity="products" :id="product.id" field="category" type="select"
+                :options="categoriesForGroup(product.type)"
+                :value="product.category" @update="v => apply('category', v)"
+              />
+              <div v-else class="text-slate-500">{{ product.category || '—' }}</div>
+            </div>
+
+            <div class="md:col-span-4">
+              <div class="text-xs text-slate-400">Sub-category</div>
+              <EditableField
+                v-if="subcategoriesFor(product.type, product.category).length > 0"
+                entity="products" :id="product.id" field="subCategory" type="select"
+                :options="subcategoriesFor(product.type, product.category)"
+                :value="product.subCategory" @update="v => apply('subCategory', v)"
+              />
+              <div v-else class="text-slate-500">—</div>
+            </div>
+
+            <div class="md:col-span-4">
+              <div class="text-xs text-slate-400">Name (Thai)</div>
+              <EditableField entity="products" :id="product.id" field="name" :value="product.name" @update="v => apply('name', v)" />
             </div>
           </div>
         </section>
 
-        <!-- Age + sum assured (editable) -->
-        <section>
-          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Eligibility &amp; coverage</h3>
+        <!--
+          Age band — Life only, mirroring the modal's conditional. The
+          modal skips the age fields entirely for non-Life products
+          because Motor / Fire / etc. don't gate on insured age at the
+          product level; we do the same here.
+        -->
+        <section v-if="isLifeCarrier(product.carrierInsureType)">
+          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Age band</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
-            <div><div class="text-xs text-slate-400">Min age</div>
-              <EditableField entity="products" :id="product.id" field="minAge" type="number" :value="product.minAge" @update="v => apply('minAge', v)" /></div>
-            <div><div class="text-xs text-slate-400">Max age</div>
-              <EditableField entity="products" :id="product.id" field="maxAge" type="number" :value="product.maxAge" @update="v => apply('maxAge', v)" /></div>
-            <div><div class="text-xs text-slate-400">Min sum assured</div>
-              <div class="text-slate-500">{{ fmtBaht(product.minSumAssure) }}</div></div>
-            <div><div class="text-xs text-slate-400">Max sum assured</div>
-              <div class="text-slate-500">{{ fmtBaht(product.maxSumAssure) }}</div></div>
+            <div>
+              <div class="text-xs text-slate-400">Min age (0–99)</div>
+              <EditableField entity="products" :id="product.id" field="minAge" type="number" :value="product.minAge" @update="v => apply('minAge', v)" />
+            </div>
+            <div>
+              <div class="text-xs text-slate-400">Max age (0–99)</div>
+              <EditableField entity="products" :id="product.id" field="maxAge" type="number" :value="product.maxAge" @update="v => apply('maxAge', v)" />
+            </div>
           </div>
         </section>
 
