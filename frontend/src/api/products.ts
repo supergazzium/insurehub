@@ -52,6 +52,8 @@ export function fetchProductList(filters: ProductListFilters = {}) {
  *  with every editable field so the create-wizard can prefill from an
  *  existing product ("duplicate from…"). */
 export interface ProductDetail extends ProductListRow {
+  productTypeId: string | null
+  commissionTierId: string | null
   summary: string
   coverage: number
   coverageClass: '1' | '2+' | '2' | '3+' | '3' | null
