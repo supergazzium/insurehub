@@ -103,6 +103,35 @@ class CustomerController extends ApiController
         return CustomerListResource::collection($paginator);
     }
 
+    /**
+     * GET /customers/next-code — return the next available customer_code
+     * following the `C0000000` scheme (max numeric suffix + 1, zero-padded
+     * to 7 digits). Mirrors the legacy Access `GetNextClientCode()` VBA.
+     *
+     * Scans both active and soft-deleted rows so codes never collide with
+     * previously-deleted customers. Padding grows naturally past 9,999,999.
+     */
+    public function nextCode(Request $request): JsonResponse
+    {
+        $tenantId = $this->tenantId($request);
+
+        // Match only strict `C\d+` codes; ignore historical rows with
+        // legacy schemes like `CUS-2020-042` so max() picks the right one.
+        $maxNum = (int) DB::table('customers')
+            ->where('tenant_id', $tenantId)
+            ->where('customer_code', 'like', 'C%')
+            ->whereRaw("SUBSTRING(customer_code, 2) REGEXP '^[0-9]+$'")
+            ->max(DB::raw('CAST(SUBSTRING(customer_code, 2) AS UNSIGNED)'));
+
+        $next = $maxNum + 1;
+        $padded = str_pad((string) $next, 7, '0', STR_PAD_LEFT);
+
+        return response()->json([
+            'code' => 'C'.$padded,
+            'next' => $next,
+        ]);
+    }
+
     public function store(CustomerRequest $request): JsonResponse
     {
         $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];

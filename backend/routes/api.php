@@ -145,6 +145,9 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // Business entities — REST resource routes.
     Route::apiResource('agents', AgentController::class);
+    // Registered before apiResource so 'next-code' doesn't get parsed as
+    // a customer id by the {customer} route parameter.
+    Route::get('customers/next-code', [CustomerController::class, 'nextCode']);
     Route::apiResource('customers', CustomerController::class);
     Route::apiResource('carriers', CarrierController::class);
     Route::apiResource('carriers.bank-accounts', CarrierBankAccountController::class)

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use App\Models\EmailVerificationToken;
+use App\Support\ThaiIdentifier;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Support\Carbon;
@@ -85,7 +86,7 @@ class AgentRegisterRequest extends FormRequest
     {
         $validator->after(function (Validator $v): void {
             $id = (string) ($this->input('idCard') ?? '');
-            if (preg_match('/^\d{13}$/', $id) === 1 && !self::isValidThaiId13($id)) {
+            if (preg_match('/^\d{13}$/', $id) === 1 && !ThaiIdentifier::isValid($id)) {
                 $v->errors()->add(
                     'idCard',
                     $this->input('signupType') === 'corporate'
@@ -116,13 +117,4 @@ class AgentRegisterRequest extends FormRequest
         });
     }
 
-    private static function isValidThaiId13(string $digits): bool
-    {
-        $sum = 0;
-        for ($i = 0; $i < 12; $i++) {
-            $sum += ((int) $digits[$i]) * (13 - $i);
-        }
-        $check = (11 - ($sum % 11)) % 10;
-        return $check === (int) $digits[12];
-    }
 }
