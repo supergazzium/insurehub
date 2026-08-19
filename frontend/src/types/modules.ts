@@ -376,16 +376,6 @@ export const MODULES: ModuleDef[] = [
     functions: [],
   },
   {
-    key: 'admin-carrier-product-type-rates',
-    number: 96,
-    routePath: '/admin/carrier-product-type-rates',
-    routeName: 'admin-carrier-product-type-rates',
-    icon: 'pi pi-table',
-    i18nKey: 'adminMatrix',
-    group: 'commission',
-    functions: [],
-  },
-  {
     key: 'admin-agent-commission-detail',
     number: 97,
     // Parameterized route — sidebar entry is a placeholder linking to first seeded scenario agent.

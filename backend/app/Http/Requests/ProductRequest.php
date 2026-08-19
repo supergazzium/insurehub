@@ -34,10 +34,17 @@ class ProductRequest extends FormRequest
                 Rule::exists('carriers', 'id')->where('tenant_id', $tenantId),
             ],
             'type' => ['sometimes', 'nullable', 'string', 'max:32'],
-            // MGM product-type assignment — drives which commission tier applies.
-            // Nullable during transition; PR-D's engine treats null as
-            // "no commission accrual until classified".
+            // MGM product-type assignment — descriptive / reporting only.
+            // The engine no longer resolves the commission tier through
+            // product_types; it reads products.commission_tier_id directly
+            // (see commissionTierId below). product_type_id kept nullable
+            // so operators can add products without picking a type.
             'productTypeId' => ['sometimes', 'nullable', 'integer', 'exists:product_types,id'],
+            // ระดับค่าคอม — required for the MGM engine to compute
+            // REFERRAL_FEE and MANAGEMENT_DIFFERENTIAL. Nullable at the
+            // schema layer (legacy products still exist without one) but
+            // the create modal enforces it as required.
+            'commissionTierId' => ['sometimes', 'nullable', 'integer', 'exists:commission_tiers,id'],
             'mainRider' => ['sometimes', 'nullable', 'string', 'max:32'],
             'category' => ['sometimes', 'nullable', 'string', 'max:255'],
             'subCategory' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -136,6 +143,7 @@ class ProductRequest extends FormRequest
             'carrierId' => 'carrier_id',
             'type' => 'type',
             'productTypeId' => 'product_type_id',
+            'commissionTierId' => 'commission_tier_id',
             'mainRider' => 'main_rider',
             'category' => 'category',
             'subCategory' => 'sub_category',

@@ -30,8 +30,12 @@ class ProductResource extends JsonResource
             'carrierName' => $this->carrier?->name,
             'carrierInsureType' => $this->carrier?->insure_type ?? '',
             'type' => $this->type ?? '',
-            // MGM product-type FK — nullable during transition (see PR-A3).
+            // MGM product-type FK — descriptive/reporting only after the
+            // commission tier moved directly onto the product.
             'productTypeId' => $this->product_type_id !== null ? (string) $this->product_type_id : null,
+            // ระดับค่าคอม — the tier the MGM engine reads for
+            // referral_fee_rate + mgmt_fee_rate lookups.
+            'commissionTierId' => $this->commission_tier_id !== null ? (string) $this->commission_tier_id : null,
             'category' => $this->category ?? '',
             'subCategory' => $this->sub_category ?? '',
             'subCategory2' => $this->sub_category_2 ?? '',

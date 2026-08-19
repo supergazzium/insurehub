@@ -2,18 +2,24 @@
 // Product detail drawer — full spec + two-panel commission-rate editor.
 import { ref, watch, computed, onMounted, reactive } from 'vue'
 import { fetchProduct, fetchProductTaxonomy, type ProductDetail, type ProductTaxonomyRow, type ProductCommissionRatePanel, type ProductCommissionBandRow } from '../../api/products'
+import { fetchCommissionTiers, type CommissionTier } from '../../api/mgm'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import { api, ApiError } from '../../api/client'
 import { useProductStore } from '../../stores/products'
 
 const taxonomy = ref<ProductTaxonomyRow[]>([])
+const commissionTiers = ref<CommissionTier[]>([])
+const commissionTierOptions = computed(() =>
+  commissionTiers.value.map((t) => ({ value: t.id, label: `${t.nameTh} (${t.code})` })),
+)
 
 onMounted(async () => {
   try {
-    const res = await fetchProductTaxonomy()
-    taxonomy.value = res.data
-  } catch { /* silent */ }
+    const [taxRes, tierRes] = await Promise.all([fetchProductTaxonomy(), fetchCommissionTiers()])
+    taxonomy.value = taxRes.data
+    commissionTiers.value = tierRes.data
+  } catch { /* silent — dropdowns just stay empty */ }
 })
 
 /**
@@ -379,6 +385,17 @@ watch(
                 entity="products" :id="product.id" field="subCategory" type="select"
                 :options="subcategoriesFor(product.type, product.category)"
                 :value="product.subCategory" @update="v => apply('subCategory', v)"
+              />
+              <div v-else class="text-slate-500">—</div>
+            </div>
+
+            <div class="md:col-span-4">
+              <div class="text-xs text-slate-400">ระดับค่าคอม (Commission tier)</div>
+              <EditableField
+                v-if="commissionTierOptions.length > 0"
+                entity="products" :id="product.id" field="commissionTierId" type="select"
+                :options="commissionTierOptions"
+                :value="product.commissionTierId" @update="v => apply('commissionTierId', v)"
               />
               <div v-else class="text-slate-500">—</div>
             </div>

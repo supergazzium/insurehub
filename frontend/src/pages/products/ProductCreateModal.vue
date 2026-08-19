@@ -8,6 +8,7 @@ import CreateModal from '../../components/CreateModal.vue'
 import FormField from '../../components/FormField.vue'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchNextProductCode, fetchProductTaxonomy, type ProductTaxonomyRow } from '../../api/products'
+import { fetchCommissionTiers, type CommissionTier } from '../../api/mgm'
 import { lookupTemplate, fillCarrier } from './productNamePresets'
 
 const props = defineProps<{ open: boolean }>()
@@ -22,6 +23,11 @@ const carriers = ref<CarrierListRow[]>([])
 const carriersLoading = ref(false)
 const taxonomy = ref<ProductTaxonomyRow[]>([])
 const taxonomyLoaded = ref(false)
+// ระดับค่าคอม — commission tier chosen directly on the product. The
+// engine reads products.commission_tier_id for referral / mgmt-fee
+// resolution, so the operator must pick one for MGM accrual to fire.
+const commissionTiers = ref<CommissionTier[]>([])
+const commissionTiersLoaded = ref(false)
 
 async function loadTaxonomy(): Promise<void> {
   if (taxonomyLoaded.value) return
@@ -31,6 +37,17 @@ async function loadTaxonomy(): Promise<void> {
     taxonomyLoaded.value = true
   } catch {
     // Silent — category/subcategory dropdowns will just be empty.
+  }
+}
+async function loadCommissionTiers(): Promise<void> {
+  if (commissionTiersLoaded.value) return
+  try {
+    const res = await fetchCommissionTiers()
+    commissionTiers.value = res.data
+    commissionTiersLoaded.value = true
+  } catch {
+    // Silent — dropdown will be empty and canSubmit will stay false,
+    // blocking submit until the operator can retry.
   }
 }
 
@@ -45,7 +62,7 @@ async function loadCarriers(): Promise<void> {
   }
 }
 
-onMounted(() => { void loadCarriers(); void loadTaxonomy() })
+onMounted(() => { void loadCarriers(); void loadTaxonomy(); void loadCommissionTiers() })
 
 /**
  * One direction of commission rates on the form. Fields are entered by the
@@ -99,6 +116,9 @@ const form = reactive({
   mainRider: '',
   category: '',
   subCategory: '',
+  // ระดับค่าคอม — required. Links product to a commission_tiers row so
+  // the MGM engine can resolve referral_fee_rate + mgmt_fee_rate.
+  commissionTierId: '',
   minAge: 0,
   maxAge: 99,
   // Non-life uses the flat panels (one rate per direction).
@@ -353,6 +373,7 @@ const canSubmit = computed(() =>
   (!needsProductGroupChoice.value || form.type !== '') &&
   (form.category !== '') &&
   (!subcategoryRequired.value || form.subCategory !== '') &&
+  form.commissionTierId !== '' &&
   ageError.value === null,
 )
 
@@ -405,6 +426,7 @@ const payload = computed(() => {
     mainRider: form.mainRider || null,
     category: form.category.trim() || null,
     subCategory: form.subCategory.trim() || null,
+    commissionTierId: form.commissionTierId ? Number(form.commissionTierId) : null,
     active: true,
   }
   // Age band is Life-only — omit for non-life so we don't persist stale
@@ -439,6 +461,7 @@ watch(
       Object.assign(form, {
         insureType: '', code: '', name: '', carrierId: '',
         type: '', mainRider: '', category: '', subCategory: '',
+        commissionTierId: '',
         minAge: 0, maxAge: 99,
         carrierToHub: blankPanel(),
         hubToAgent: blankPanel(),
@@ -448,6 +471,7 @@ watch(
       codeAutoFilled.value = false
       nameTouched.value = false
       void loadCarriers()
+      void loadCommissionTiers()
     }
   },
 )
@@ -464,6 +488,7 @@ function onCreated(row: Record<string, unknown>): void {
   form.type = ''
   form.category = ''
   form.subCategory = ''
+  form.commissionTierId = ''
   form.minAge = 0
   form.maxAge = 99
   form.carrierToHub = blankPanel()
@@ -565,6 +590,22 @@ function onCreated(row: Record<string, unknown>): void {
           </select>
           <input v-else disabled value="—"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-slate-50 text-slate-500 focus:outline-none" />
+        </FormField>
+        <!--
+          ระดับค่าคอม — required. This is what the MGM engine reads to
+          resolve referral_fee_rate + mgmt_fee_rate. Without a tier the
+          entire upline chain accrues zero, so we block save until picked.
+        -->
+        <FormField label="ระดับค่าคอม (Commission tier)" required class="col-span-2"
+          error-key="commissionTierId" :errors="fieldErrors"
+          hint="กำหนดสูตรจ่าย REFERRAL / MANAGEMENT DIFFERENTIAL — เลือกให้ตรงกับ carrier tariff">
+          <select v-model="form.commissionTierId"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option value="">— select —</option>
+            <option v-for="t in commissionTiers" :key="t.id" :value="t.id">
+              {{ t.nameTh }} ({{ t.code }})
+            </option>
+          </select>
         </FormField>
         <FormField label="Name (Thai)" required class="col-span-2" error-key="name" :errors="fieldErrors"
           hint="ระบบเติมชื่อให้อัตโนมัติจากประเภทที่เลือก — แก้ [???] เป็นชื่อจริงได้เลย">

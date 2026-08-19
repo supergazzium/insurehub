@@ -1,9 +1,13 @@
 // Typed clients for the MGM commission admin surface.
 //
-// Three groups of endpoints (backend PR-A2..PR-A4):
-//   • commission-tiers          — 3 tiers × 10 rank rates each
-//   • product-types             — taxonomy (~26 rows), assignable to a tier
-//   • carrier-product-type-rates — 24 × ~21 matrix (standard commission)
+// Endpoints:
+//   • commission-tiers  — 3 tiers × 10 rank rates each
+//   • product-types     — taxonomy (~26 rows), assignable to a tier
+//
+// The old (carrier × product-type) matrix is no longer part of the admin
+// surface — commission rates are edited on the product itself. The backend
+// route + controller still exist (frozen 410 on writes) pending physical
+// teardown of the table.
 
 import { api } from './client'
 
@@ -102,63 +106,6 @@ export function updateProductType(id: string, payload: Partial<{
 
 export function deleteProductType(id: string) {
   return api.delete<{ message: string }>(`product-types/${id}`)
-}
-
-// ── Carrier × product-type matrix ────────────────────────────────────────
-
-export interface MatrixCarrier {
-  id: string
-  code: string
-  name: string
-  insureType: string
-}
-
-export interface MatrixProductType {
-  id: string
-  code: string
-  nameTh: string
-  nameEn: string
-  subOf: string | null
-  tierId: string
-  sortOrder: number
-}
-
-export interface MatrixRate {
-  id: string
-  carrierId: string
-  productTypeId: string
-  standardRate: number | null
-  validStart: string | null
-}
-
-export interface MatrixResponse {
-  carriers: MatrixCarrier[]
-  productTypes: MatrixProductType[]
-  rates: MatrixRate[]
-}
-
-export function fetchCarrierProductTypeRates() {
-  return api.get<MatrixResponse>('carrier-product-type-rates')
-}
-
-export function createCarrierProductTypeRate(payload: {
-  carrierId: number
-  productTypeId: number
-  standardRate?: number | null
-  notes?: string | null
-}) {
-  return api.post<MatrixRate>('carrier-product-type-rates', payload)
-}
-
-export function updateCarrierProductTypeRate(id: string, payload: {
-  standardRate?: number | null
-  notes?: string | null
-}) {
-  return api.patch<MatrixRate>(`carrier-product-type-rates/${id}`, payload)
-}
-
-export function deleteCarrierProductTypeRate(id: string) {
-  return api.delete<{ message: string }>(`carrier-product-type-rates/${id}`)
 }
 
 // ── Per-agent commission detail (read-only) ──────────────────────────────

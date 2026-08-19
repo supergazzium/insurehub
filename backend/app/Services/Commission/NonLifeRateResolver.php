@@ -4,28 +4,26 @@ declare(strict_types=1);
 
 namespace App\Services\Commission;
 
-use App\Models\CarrierProductTypeRate;
 use App\Models\Policy;
 use App\Models\PolicyPayment;
 use App\Models\ProductCommissionRate;
 
 /**
- * Resolves standard commission rate for non-life policies. As of the
- * per-product commission rewrite, the primary source is
+ * Resolves standard commission rate for non-life policies from
  * product_commission_rates(direction='hub_to_agent', scheme='flat'), which
- * is edited on the Product form. Matrix (carrier_product_type_rates)
- * remains as a fallback so unpopulated products keep accruing at the old
- * rate — soft cutover; the matrix admin page is now read-only.
+ * is edited on the Product form.
  *
- * Resolution order:
- *   1. policy → product → product_commission_rates row for hub_to_agent.
- *      If found AND scheme=flat AND flat_rate is non-null → use it.
- *   2. Fall back to carrier_product_type_rates matrix cell for
- *      (policy.carrier_id, product.product_type_id).
- *   3. Both missing → null (engine skips DIRECT accrual).
+ * The carrier × product-type matrix (carrier_product_type_rates) used to
+ * serve as a fallback here. It's now retired as a rate source — every
+ * product must carry its own rate. The
+ * 2027_02_09_000100_backfill_hub_to_agent_from_matrix.php migration
+ * copied historical matrix values into hub_to_agent so existing products
+ * don't lose their rate at cutover. The matrix table and its controller
+ * survive for now (frozen 410 on writes) but the engine no longer reads
+ * them; a follow-up PR will drop the table entirely.
  *
- * The `source` field on the returned BaseRate identifies which layer
- * answered so the ledger snapshot preserves provenance.
+ * Missing hub_to_agent row → null → engine skips DIRECT accrual and logs
+ * a warning; admin must set the rate on the product page.
  */
 class NonLifeRateResolver implements BaseRateResolver
 {
@@ -36,7 +34,6 @@ class NonLifeRateResolver implements BaseRateResolver
             return null;
         }
 
-        // Primary — per-product row.
         $row = ProductCommissionRate::query()
             ->where('tenant_id', $policy->tenant_id)
             ->where('product_id', $product->id)
@@ -45,32 +42,24 @@ class NonLifeRateResolver implements BaseRateResolver
             ->orderByDesc('id')
             ->first();
 
-        if ($row !== null && $row->scheme === ProductCommissionRate::SCHEME_FLAT && $row->flat_rate !== null) {
-            return new BaseRate(
-                rate: (float) $row->flat_rate,
-                source: "product_commission_rates:{$row->id}",
-            );
-        }
-
-        // Fallback — matrix cell. Only meaningful when product_type_id is set.
-        if ($product->product_type_id === null) {
+        if ($row === null) {
             return null;
         }
 
-        $matrix = CarrierProductTypeRate::query()
-            ->where('tenant_id', $policy->tenant_id)
-            ->where('carrier_id', $policy->carrier_id)
-            ->where('product_type_id', $product->product_type_id)
-            ->orderByDesc('id')
-            ->first();
+        if ($row->scheme !== ProductCommissionRate::SCHEME_FLAT) {
+            // Product classified as Non-Life but rate row is life_years —
+            // shouldn't happen with today's ProductController, but bail
+            // rather than silently reading a per-year rate as flat.
+            return null;
+        }
 
-        if ($matrix === null || $matrix->standard_rate === null) {
+        if ($row->flat_rate === null) {
             return null;
         }
 
         return new BaseRate(
-            rate: (float) $matrix->standard_rate,
-            source: "carrier_product_type_rates:{$matrix->id}",
+            rate: (float) $row->flat_rate,
+            source: "product_commission_rates:{$row->id}",
         );
     }
 }

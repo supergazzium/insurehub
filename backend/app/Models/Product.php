@@ -40,6 +40,11 @@ class Product extends Model
         return $this->belongsTo(ProductType::class);
     }
 
+    public function commissionTier(): BelongsTo
+    {
+        return $this->belongsTo(CommissionTier::class);
+    }
+
     public function commissionRates(): HasMany
     {
         return $this->hasMany(ProductCommissionRate::class);

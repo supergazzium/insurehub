@@ -140,23 +140,38 @@ class MgmCommissionEngine
     }
 
     /**
-     * Look up the tier for a policy's product-type and its referral rate.
+     * Look up the tier for a policy and its referral rate.
+     *
+     * Tier resolution order:
+     *   1. products.commission_tier_id — the operator-set "ระดับค่าคอม"
+     *      on the product form.
+     *   2. Fallback: product_types.tier_id via the product's product_type_id.
+     *      Retained for rollout safety; legacy products that had a
+     *      product_type_id but were never re-saved through the new form
+     *      keep working.
      *
      * @return array{0: int|null, 1: float} [tier_id, referral_fee_rate].
      *                                      referral_fee_rate defaults to 0 when tier missing.
      */
     private function resolveTierAndReferralRate(Policy $policy): array
     {
-        $productTypeId = $policy->product?->product_type_id;
-        if ($productTypeId === null) {
-            return [null, 0.0];
-        }
+        $tierId = $policy->product?->commission_tier_id !== null
+            ? (int) $policy->product->commission_tier_id
+            : null;
 
-        $tierId = DB::table('product_types')
-            ->where('id', $productTypeId)
-            ->value('tier_id');
         if ($tierId === null) {
-            return [null, 0.0];
+            $productTypeId = $policy->product?->product_type_id;
+            if ($productTypeId === null) {
+                return [null, 0.0];
+            }
+
+            $tierId = DB::table('product_types')
+                ->where('id', $productTypeId)
+                ->value('tier_id');
+            if ($tierId === null) {
+                return [null, 0.0];
+            }
+            $tierId = (int) $tierId;
         }
 
         // Referral rate lives on the tier×rank grid. It's tier-scoped

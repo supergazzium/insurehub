@@ -633,6 +633,12 @@ class MgmScenarioSeeder extends Seeder
                 'carrier_id' => $carrier->id,
                 'name' => "Scenario product {$code}",
                 'product_type_id' => $type->id,
+                // Commission tier moved onto the product; the scenario
+                // seeder pre-populates it from the product-type's tier so
+                // a fresh docker-compose-down-v boot preserves the
+                // scenario ledger totals without relying on the backfill
+                // migration to run first.
+                'commission_tier_id' => $type->tier_id,
                 'coverage' => 100000,
                 'duration_years' => 1,
                 'pay_years' => 1,
