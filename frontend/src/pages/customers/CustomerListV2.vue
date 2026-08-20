@@ -42,7 +42,7 @@ function handleCreated(row: Record<string, unknown>): void {
 
 const filters = reactive({
   q: '',
-  customerType: '' as '' | 'individual' | 'corporate' | 'other',
+  customerType: '' as '' | 'individual' | 'foreign_individual' | 'corporate' | 'other',
   unassigned: false,
   withPolicies: false,
   active: '' as '' | 'true' | 'false',
@@ -158,6 +158,20 @@ function initials(first: string, last: string): string {
   const b = (last || '').trim().charAt(0)
   return (a + b) || '?'
 }
+
+/**
+ * Map the raw customer_type enum (as stored) to the Thai display label
+ * the list renders. Unknown values fall through to the raw enum so bad
+ * data is visible instead of being silently hidden as a dash.
+ */
+function customerTypeLabel(t: string): string {
+  switch (t) {
+    case 'individual': return 'บุคคลธรรมดา'
+    case 'foreign_individual': return 'ชาวต่างชาติ'
+    case 'corporate': return 'นิติบุคคล'
+    default: return t
+  }
+}
 </script>
 
 <template>
@@ -189,9 +203,10 @@ function initials(first: string, last: string): string {
       <div>
         <label class="text-xs font-medium text-slate-500 mb-1 block">ประเภท</label>
         <select v-model="filters.customerType" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
-          <option value="">All</option>
-          <option value="individual">Individual</option>
-          <option value="corporate">Corporate</option>
+          <option value="">ทั้งหมด</option>
+          <option value="individual">บุคคลธรรมดา</option>
+          <option value="foreign_individual">ชาวต่างชาติ</option>
+          <option value="corporate">นิติบุคคล</option>
         </select>
       </div>
       <div>
@@ -275,7 +290,7 @@ function initials(first: string, last: string): string {
                   </div>
                 </div>
               </td>
-              <td class="px-4 py-2 text-slate-600">{{ c.customerType }}</td>
+              <td class="px-4 py-2 text-slate-600">{{ customerTypeLabel(c.customerType) }}</td>
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ c.idCard || '—' }}</td>
               <td class="px-4 py-2 text-slate-700">{{ c.phone || '—' }}</td>
               <td class="px-4 py-2 text-slate-700">{{ c.province || '—' }}</td>

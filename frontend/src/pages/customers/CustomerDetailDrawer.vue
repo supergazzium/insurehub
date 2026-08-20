@@ -378,11 +378,18 @@ function statusBadge(s: string): string {
               <tbody class="divide-y divide-slate-100">
                 <tr v-for="p in policies" :key="p.id" class="hover:bg-slate-50">
                   <td class="px-4 py-2 font-mono text-xs">
-                    <router-link v-if="p.applicationNo"
-                      :to="{ name: 'policies', query: { open: p.id } }"
-                      class="text-brand-600 hover:text-brand-800 hover:underline">
+                    <!-- Open policy detail in a NEW TAB so the operator
+                         doesn't lose the customer context they're in.
+                         Prev/next navigation between the customer's
+                         policies would live in the policy drawer; the
+                         quick win is a fresh tab per click. -->
+                    <a v-if="p.applicationNo"
+                      :href="`/insurehub/policies?open=${p.id}`"
+                      target="_blank" rel="noopener"
+                      class="text-brand-600 hover:text-brand-800 hover:underline inline-flex items-center gap-1">
                       {{ p.applicationNo }}
-                    </router-link>
+                      <i class="pi pi-external-link text-[10px] opacity-60" />
+                    </a>
                     <span v-else class="text-slate-400">—</span>
                   </td>
                   <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ p.policyNo ?? '—' }}</td>

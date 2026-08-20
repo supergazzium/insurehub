@@ -72,11 +72,6 @@ class PolicyRequest extends FormRequest
             'status' => ['sometimes', 'string', 'in:quote,application,submitted,issued,active,lapsed,cancelled,reinstated,expired'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'internalNote' => ['sometimes', 'nullable', 'string', 'max:255'],
-            // Per-policy commission overrides (see CommissionEngine::accrueForPayment).
-            'mainComRateInh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
-            'mainComAmtInh' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'mainComRateAg' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
-            'mainComAmtAg' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             // Motor block — sent when the picked product is motor.
             'motorTypeDriver' => ['sometimes', 'nullable', 'string', 'max:64'],
             'motorTypeVehicle' => ['sometimes', 'nullable', 'string', 'max:64'],
@@ -190,10 +185,6 @@ class PolicyRequest extends FormRequest
             'status' => 'status',
             'notes' => 'notes',
             'internalNote' => 'internal_note',
-            'mainComRateInh' => 'main_com_rate_inh',
-            'mainComAmtInh' => 'main_com_amt_inh',
-            'mainComRateAg' => 'main_com_rate_ag',
-            'mainComAmtAg' => 'main_com_amt_ag',
             'motorTypeDriver' => 'motor_type_driver',
             'motorTypeVehicle' => 'motor_type_vehicle',
             'motorVehicleBrand' => 'motor_vehicle_brand',
@@ -237,6 +228,7 @@ class PolicyRequest extends FormRequest
                 $out[$snake] = $v[$camel];
             }
         }
+
         return $out;
     }
 }

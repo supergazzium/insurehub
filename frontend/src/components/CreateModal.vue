@@ -17,6 +17,14 @@ const props = defineProps<{
   payload: Record<string, unknown>
   /** True if the form's required fields are filled. */
   canSubmit: boolean
+  /**
+   * Optional pre-submit gate. Returning a non-empty array of messages
+   * blocks the POST and surfaces the messages via `window.alert()` so
+   * the operator sees WHY the save was refused instead of a silently
+   * disabled button. When provided, the Save buttons stay clickable
+   * even while `canSubmit` is false so this gate can run.
+   */
+  validate?: () => string[]
 }>()
 
 const emit = defineEmits<{
@@ -31,7 +39,15 @@ const flash = ref<string | null>(null)
 const fieldErrors = ref<Record<string, string[]>>({})
 
 async function submit(keepOpen = false): Promise<void> {
-  if (!props.canSubmit || saving.value) return
+  if (saving.value) return
+  if (props.validate) {
+    const problems = props.validate()
+    if (problems.length > 0) {
+      window.alert(`กรอกข้อมูลไม่ครบหรือไม่ถูกต้อง:\n\n• ${problems.join('\n• ')}`)
+      return
+    }
+  }
+  if (!props.canSubmit) return
   saving.value = true
   error.value = null
   flash.value = null
@@ -123,14 +139,14 @@ watch(
           </button>
           <button type="button"
             class="px-3 py-1.5 rounded-lg border border-brand-500 text-brand-600 hover:bg-brand-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-            :disabled="!canSubmit || saving" @click="submit(true)"
+            :disabled="(!canSubmit && !validate) || saving" @click="submit(true)"
             title="บันทึกแล้วเปิดฟอร์มใหม่โดยคงประเภทประกันและบริษัทไว้">
             <i class="pi pi-plus text-xs" />
             บันทึกและเพิ่มอีก
           </button>
           <button type="button"
             class="px-4 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
-            :disabled="!canSubmit || saving" @click="submit(false)">
+            :disabled="(!canSubmit && !validate) || saving" @click="submit(false)">
             <i class="pi pi-check text-xs" v-if="!saving" />
             <i class="pi pi-spin pi-spinner text-xs" v-else />
             {{ saving ? 'Saving…' : 'Create' }}

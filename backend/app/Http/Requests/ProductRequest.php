@@ -34,6 +34,17 @@ class ProductRequest extends FormRequest
                 Rule::exists('carriers', 'id')->where('tenant_id', $tenantId),
             ],
             'type' => ['sometimes', 'nullable', 'string', 'max:32'],
+            // MGM product-type assignment — descriptive / reporting only.
+            // The engine no longer resolves the commission tier through
+            // product_types; it reads products.commission_tier_id directly
+            // (see commissionTierId below). product_type_id kept nullable
+            // so operators can add products without picking a type.
+            'productTypeId' => ['sometimes', 'nullable', 'integer', 'exists:product_types,id'],
+            // ระดับค่าคอม — required for the MGM engine to compute
+            // REFERRAL_FEE and MANAGEMENT_DIFFERENTIAL. Nullable at the
+            // schema layer (legacy products still exist without one) but
+            // the create modal enforces it as required.
+            'commissionTierId' => ['sometimes', 'nullable', 'integer', 'exists:commission_tiers,id'],
             'mainRider' => ['sometimes', 'nullable', 'string', 'max:32'],
             'category' => ['sometimes', 'nullable', 'string', 'max:255'],
             'subCategory' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -61,11 +72,63 @@ class ProductRequest extends FormRequest
             'occupationClasses.*' => ['string', 'in:class1,class2,class3,class4'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'active' => ['sometimes', 'boolean'],
-            // Shorthand: seed a product_commission_rates row where every
-            // year (com_rate_yr_1..10 + _11up) is set to this percent.
-            // Consumed by ProductController::store — NOT persisted onto
-            // the products table itself.
-            'commissionPercent' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:100'],
+
+            // Per-product standard commission rates. Two directions:
+            //   carrierToHub — what the carrier pays InsureHub
+            //   hubToAgent   — what InsureHub pays the selling agent
+            //     (MGM engine DIRECT base rate)
+            // Scheme per direction is inferred from the product group at
+            // persist time (Life/Rider → life_years, else flat). Fields are
+            // decimals in the "rate" scale — 0.10 = 10%. Nullable.
+            'commissionRates' => ['sometimes', 'array'],
+            'commissionRates.carrierToHub' => ['sometimes', 'array'],
+            'commissionRates.hubToAgent' => ['sometimes', 'array'],
+            'commissionRates.carrierToHub.flatRate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.carrierToHub.yr1' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.carrierToHub.yr2' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.carrierToHub.yr3' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.carrierToHub.yr4' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.carrierToHub.yr5' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.carrierToHub.yr6_10' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.carrierToHub.yr11Up' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.hubToAgent.flatRate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.hubToAgent.yr1' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.hubToAgent.yr2' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.hubToAgent.yr3' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.hubToAgent.yr4' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.hubToAgent.yr5' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.hubToAgent.yr6_10' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionRates.hubToAgent.yr11Up' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+
+            // Banded rates. One entry per band; used for Life products where
+            // the rate depends on sum-assured range + entry-age range +
+            // policy year. Absent = don't touch existing bands. Empty array
+            // = wipe all bands for that direction.
+            'commissionBands' => ['sometimes', 'array'],
+            'commissionBands.carrierToHub' => ['sometimes', 'array'],
+            'commissionBands.hubToAgent' => ['sometimes', 'array'],
+            'commissionBands.carrierToHub.*' => ['array'],
+            'commissionBands.hubToAgent.*' => ['array'],
+            'commissionBands.carrierToHub.*.sumAssuredMin' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commissionBands.carrierToHub.*.sumAssuredMax' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commissionBands.carrierToHub.*.entryAgeMin' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:120'],
+            'commissionBands.carrierToHub.*.entryAgeMax' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:120'],
+            'commissionBands.carrierToHub.*.yr1' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.carrierToHub.*.yr2' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.carrierToHub.*.yr3' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.carrierToHub.*.yr4' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.carrierToHub.*.yr5' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.carrierToHub.*.yr6Up' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.hubToAgent.*.sumAssuredMin' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commissionBands.hubToAgent.*.sumAssuredMax' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commissionBands.hubToAgent.*.entryAgeMin' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:120'],
+            'commissionBands.hubToAgent.*.entryAgeMax' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:120'],
+            'commissionBands.hubToAgent.*.yr1' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.hubToAgent.*.yr2' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.hubToAgent.*.yr3' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.hubToAgent.*.yr4' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.hubToAgent.*.yr5' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commissionBands.hubToAgent.*.yr6Up' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
         ];
     }
 
@@ -79,6 +142,8 @@ class ProductRequest extends FormRequest
             'nameEn' => 'name_en',
             'carrierId' => 'carrier_id',
             'type' => 'type',
+            'productTypeId' => 'product_type_id',
+            'commissionTierId' => 'commission_tier_id',
             'mainRider' => 'main_rider',
             'category' => 'category',
             'subCategory' => 'sub_category',
@@ -111,6 +176,7 @@ class ProductRequest extends FormRequest
                 $out[$snake] = $v[$camel];
             }
         }
+
         return $out;
     }
 }

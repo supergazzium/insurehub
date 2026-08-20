@@ -27,6 +27,7 @@ class Agent extends Model
         'company_register_date' => 'date',
         'doc_status' => 'boolean',
         'active' => 'boolean',
+        'has_license' => 'boolean',
         'commission_pct' => 'decimal:4',
         'approved_at' => 'datetime',
         'rejected_at' => 'datetime',
@@ -47,6 +48,11 @@ class Agent extends Model
     public function bank(): BelongsTo
     {
         return $this->belongsTo(Bank::class);
+    }
+
+    public function rank(): BelongsTo
+    {
+        return $this->belongsTo(Rank::class);
     }
 
     public function parent(): BelongsTo

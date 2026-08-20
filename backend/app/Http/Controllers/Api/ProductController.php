@@ -9,6 +9,7 @@ use App\Http\Resources\ProductListResource;
 use App\Http\Resources\ProductResource;
 use App\Models\Carrier;
 use App\Models\Product;
+use App\Models\ProductCommissionBand;
 use App\Models\ProductCommissionRate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -81,42 +82,54 @@ class ProductController extends ApiController
 
     public function store(ProductRequest $request): JsonResponse
     {
-        $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];
-        $product = Product::create($payload);
+        $tenantId = $this->tenantId($request);
+        $payload = $request->toModel() + ['tenant_id' => $tenantId];
+        $validated = $request->validated();
+        $rates = $validated['commissionRates'] ?? null;
+        $bands = $validated['commissionBands'] ?? null;
 
-        // If the caller passed `commissionPercent`, seed a single
-        // product_commission_rates row where every year's com_rate slot is
-        // set to that percent. Agent/insurer split (`ag_rate_*`, `in_rate_*`)
-        // is left null — the commission engine or a later edit can populate.
-        $percent = $request->input('commissionPercent');
-        if ($percent !== null && $percent !== '') {
-            $rateRow = ['product_id' => $product->id];
-            foreach ([1, 2, 3, 4, 5, 6, 7, 8, 9, 10, '11up'] as $year) {
-                $rateRow["com_rate_yr_{$year}"] = $percent;
-            }
-            ProductCommissionRate::create($rateRow);
-        }
+        $product = DB::transaction(function () use ($payload, $rates, $bands, $tenantId): Product {
+            $product = Product::create($payload);
+            $this->upsertCommissionRates($tenantId, $product, $rates);
+            $this->replaceCommissionBands($tenantId, $product, $bands);
 
-        return (new ProductResource($product))->response()->setStatusCode(201);
+            return $product;
+        });
+
+        return (new ProductResource($product->load(['commissionRates', 'commissionBands'])))
+            ->response()
+            ->setStatusCode(201);
     }
 
     public function show(Request $request, Product $product): ProductResource
     {
         $this->authorizeTenant($request, $product);
-        return new ProductResource($product->load('carrier'));
+
+        return new ProductResource($product->load(['carrier', 'commissionRates', 'commissionBands']));
     }
 
     public function update(ProductRequest $request, Product $product): ProductResource
     {
         $this->authorizeTenant($request, $product);
-        $product->update($request->toModel());
-        return new ProductResource($product->fresh());
+        $tenantId = $this->tenantId($request);
+        $validated = $request->validated();
+        $rates = $validated['commissionRates'] ?? null;
+        $bands = $validated['commissionBands'] ?? null;
+
+        DB::transaction(function () use ($request, $product, $rates, $bands, $tenantId): void {
+            $product->update($request->toModel());
+            $this->upsertCommissionRates($tenantId, $product, $rates);
+            $this->replaceCommissionBands($tenantId, $product, $bands);
+        });
+
+        return new ProductResource($product->fresh(['commissionRates', 'commissionBands']));
     }
 
     public function destroy(Request $request, Product $product): JsonResponse
     {
         $this->authorizeTenant($request, $product);
         $product->delete();
+
         return response()->json(['message' => 'Deleted.']);
     }
 
@@ -133,7 +146,7 @@ class ProductController extends ApiController
             abort(404);
         }
 
-        $prefix = 'PD' . $carrier->code;
+        $prefix = 'PD'.$carrier->code;
         $prefixLen = strlen($prefix);
 
         // Match every existing product code for this carrier that follows the
@@ -142,41 +155,17 @@ class ProductController extends ApiController
         $maxNum = (int) DB::table('products')
             ->where('tenant_id', $this->tenantId($request))
             ->where('carrier_id', $carrier->id)
-            ->where('code', 'like', $prefix . '%')
+            ->where('code', 'like', $prefix.'%')
             ->whereRaw('SUBSTRING(code, ?) REGEXP \'^[0-9]+$\'', [$prefixLen + 1])
-            ->max(DB::raw('CAST(SUBSTRING(code, ' . ($prefixLen + 1) . ') AS UNSIGNED)'));
+            ->max(DB::raw('CAST(SUBSTRING(code, '.($prefixLen + 1).') AS UNSIGNED)'));
 
         $next = $maxNum + 1;
         $padded = str_pad((string) $next, 4, '0', STR_PAD_LEFT);
 
         return response()->json([
-            'code' => $prefix . $padded,
+            'code' => $prefix.$padded,
             'carrierCode' => $carrier->code,
             'next' => $next,
-        ]);
-    }
-
-    /**
-     * GET /products/{product}/commission-rates — returns all rows from
-     * product_commission_rate_installments for this product.
-     */
-    public function commissionRates(Request $request, Product $product): JsonResponse
-    {
-        $this->authorizeTenant($request, $product);
-
-        $rows = DB::table('product_commission_rate_installments')
-            ->where('product_id', $product->id)
-            ->orderByRaw("FIELD(party, 'com', 'ag', 'in')")
-            ->orderBy('installment_term')
-            ->get(['id', 'party', 'installment_term', 'rate']);
-
-        return response()->json([
-            'data' => $rows->map(fn ($r) => [
-                'id' => (string) $r->id,
-                'party' => $r->party,
-                'installmentTerm' => $r->installment_term,
-                'rate' => (float) $r->rate,
-            ]),
         ]);
     }
 
@@ -184,6 +173,127 @@ class ProductController extends ApiController
     {
         if ((int) $product->tenant_id !== $this->tenantId($request)) {
             abort(404);
+        }
+    }
+
+    /**
+     * Upsert both commission-rate rows for a product. Scheme is derived from
+     * the current product group so it stays in sync when the operator changes
+     * the group. `flat_rate` is used only for scheme='flat'; the per-year
+     * columns only for scheme='life_years'. Any incoming value for the wrong
+     * scheme is dropped, so switching a product from Life to Non-Life doesn't
+     * leak stale per-year rates onto the flat row.
+     *
+     * Passing $rates=null leaves existing rows untouched (partial updates on
+     * PATCH). Passing an empty {carrierToHub:{}, hubToAgent:{}} clears all
+     * fields on that direction — the operator explicitly blanked the panel.
+     */
+    private function upsertCommissionRates(int $tenantId, Product $product, ?array $rates): void
+    {
+        if ($rates === null) {
+            return;
+        }
+
+        $scheme = in_array($product->type, ['Life', 'Rider'], true)
+            ? ProductCommissionRate::SCHEME_LIFE_YEARS
+            : ProductCommissionRate::SCHEME_FLAT;
+
+        foreach ([
+            'carrierToHub' => ProductCommissionRate::DIRECTION_CARRIER_TO_HUB,
+            'hubToAgent' => ProductCommissionRate::DIRECTION_HUB_TO_AGENT,
+        ] as $requestKey => $direction) {
+            if (! array_key_exists($requestKey, $rates)) {
+                continue;
+            }
+
+            $panel = $rates[$requestKey] ?? [];
+            $values = [
+                'flat_rate' => $scheme === ProductCommissionRate::SCHEME_FLAT
+                    ? ($panel['flatRate'] ?? null)
+                    : null,
+                'yr_1' => $scheme === ProductCommissionRate::SCHEME_LIFE_YEARS
+                    ? ($panel['yr1'] ?? null)
+                    : null,
+                'yr_2' => $scheme === ProductCommissionRate::SCHEME_LIFE_YEARS
+                    ? ($panel['yr2'] ?? null)
+                    : null,
+                'yr_3' => $scheme === ProductCommissionRate::SCHEME_LIFE_YEARS
+                    ? ($panel['yr3'] ?? null)
+                    : null,
+                'yr_4' => $scheme === ProductCommissionRate::SCHEME_LIFE_YEARS
+                    ? ($panel['yr4'] ?? null)
+                    : null,
+                'yr_5' => $scheme === ProductCommissionRate::SCHEME_LIFE_YEARS
+                    ? ($panel['yr5'] ?? null)
+                    : null,
+                'yr_6_10' => $scheme === ProductCommissionRate::SCHEME_LIFE_YEARS
+                    ? ($panel['yr6_10'] ?? null)
+                    : null,
+                'yr_11_up' => $scheme === ProductCommissionRate::SCHEME_LIFE_YEARS
+                    ? ($panel['yr11Up'] ?? null)
+                    : null,
+                'scheme' => $scheme,
+            ];
+
+            ProductCommissionRate::updateOrCreate(
+                [
+                    'tenant_id' => $tenantId,
+                    'product_id' => $product->id,
+                    'direction' => $direction,
+                    'effective_from' => null,
+                ],
+                $values,
+            );
+        }
+    }
+
+    /**
+     * Replace-all semantics for banded rates. Passing null leaves existing
+     * bands untouched (partial update). Passing an explicit {carrierToHub:[]}
+     * wipes all bands for that direction; a non-empty array wipes and
+     * rewrites. Bands are only meaningful for Life/Rider products but the
+     * server doesn't enforce that — the resolver won't read them for flat-
+     * scheme products anyway, so extra data is harmless.
+     */
+    private function replaceCommissionBands(int $tenantId, Product $product, ?array $bands): void
+    {
+        if ($bands === null) {
+            return;
+        }
+
+        foreach ([
+            'carrierToHub' => ProductCommissionBand::DIRECTION_CARRIER_TO_HUB,
+            'hubToAgent' => ProductCommissionBand::DIRECTION_HUB_TO_AGENT,
+        ] as $requestKey => $direction) {
+            if (! array_key_exists($requestKey, $bands)) {
+                continue;
+            }
+
+            $incoming = $bands[$requestKey] ?? [];
+            ProductCommissionBand::where('tenant_id', $tenantId)
+                ->where('product_id', $product->id)
+                ->where('direction', $direction)
+                ->delete();
+
+            foreach (array_values($incoming) as $i => $row) {
+                ProductCommissionBand::create([
+                    'tenant_id' => $tenantId,
+                    'product_id' => $product->id,
+                    'direction' => $direction,
+                    'band_seq' => $i + 1,
+                    'sum_assured_min' => $row['sumAssuredMin'] ?? null,
+                    'sum_assured_max' => $row['sumAssuredMax'] ?? null,
+                    'entry_age_min' => $row['entryAgeMin'] ?? null,
+                    'entry_age_max' => $row['entryAgeMax'] ?? null,
+                    'yr_1' => $row['yr1'] ?? null,
+                    'yr_2' => $row['yr2'] ?? null,
+                    'yr_3' => $row['yr3'] ?? null,
+                    'yr_4' => $row['yr4'] ?? null,
+                    'yr_5' => $row['yr5'] ?? null,
+                    'yr_6_up' => $row['yr6Up'] ?? null,
+                    'effective_from' => null,
+                ]);
+            }
         }
     }
 }

@@ -8,6 +8,7 @@ import CreateModal from '../../components/CreateModal.vue'
 import FormField from '../../components/FormField.vue'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchNextProductCode, fetchProductTaxonomy, type ProductTaxonomyRow } from '../../api/products'
+import { fetchCommissionTiers, type CommissionTier } from '../../api/mgm'
 import { lookupTemplate, fillCarrier } from './productNamePresets'
 
 const props = defineProps<{ open: boolean }>()
@@ -22,6 +23,11 @@ const carriers = ref<CarrierListRow[]>([])
 const carriersLoading = ref(false)
 const taxonomy = ref<ProductTaxonomyRow[]>([])
 const taxonomyLoaded = ref(false)
+// ระดับค่าคอม — commission tier chosen directly on the product. The
+// engine reads products.commission_tier_id for referral / mgmt-fee
+// resolution, so the operator must pick one for MGM accrual to fire.
+const commissionTiers = ref<CommissionTier[]>([])
+const commissionTiersLoaded = ref(false)
 
 async function loadTaxonomy(): Promise<void> {
   if (taxonomyLoaded.value) return
@@ -31,6 +37,17 @@ async function loadTaxonomy(): Promise<void> {
     taxonomyLoaded.value = true
   } catch {
     // Silent — category/subcategory dropdowns will just be empty.
+  }
+}
+async function loadCommissionTiers(): Promise<void> {
+  if (commissionTiersLoaded.value) return
+  try {
+    const res = await fetchCommissionTiers()
+    commissionTiers.value = res.data
+    commissionTiersLoaded.value = true
+  } catch {
+    // Silent — dropdown will be empty and canSubmit will stay false,
+    // blocking submit until the operator can retry.
   }
 }
 
@@ -45,7 +62,48 @@ async function loadCarriers(): Promise<void> {
   }
 }
 
-onMounted(() => { void loadCarriers(); void loadTaxonomy() })
+onMounted(() => { void loadCarriers(); void loadTaxonomy(); void loadCommissionTiers() })
+
+/**
+ * One direction of commission rates on the form. Fields are entered by the
+ * operator as PERCENT (0..100); we convert to fractions (0..1) at submit
+ * time to match the backend contract. Which fields are used depends on the
+ * product group's scheme (flat vs life_years).
+ */
+type CommissionRatePanel = {
+  flatRate: number | null
+  yr1: number | null
+  yr2: number | null
+  yr3: number | null
+  yr4: number | null
+  yr5: number | null
+  yr6_10: number | null
+  yr11Up: number | null
+}
+function blankPanel(): CommissionRatePanel {
+  return { flatRate: null, yr1: null, yr2: null, yr3: null, yr4: null, yr5: null, yr6_10: null, yr11Up: null }
+}
+
+/**
+ * One row in a Life product's banded commission table. Rate fields entered
+ * as PERCENT (0..100); SA fields as ฿ integer; ages as year integers.
+ * Blank = unbounded (null → -∞ for min, +∞ for max).
+ */
+type CommissionBandRow = {
+  sumAssuredMin: number | null
+  sumAssuredMax: number | null
+  entryAgeMin: number | null
+  entryAgeMax: number | null
+  yr1: number | null
+  yr2: number | null
+  yr3: number | null
+  yr4: number | null
+  yr5: number | null
+  yr6Up: number | null
+}
+function blankBand(): CommissionBandRow {
+  return { sumAssuredMin: null, sumAssuredMax: null, entryAgeMin: null, entryAgeMax: null, yr1: null, yr2: null, yr3: null, yr4: null, yr5: null, yr6Up: null }
+}
 
 const form = reactive({
   // Chosen up-front via radio, drives everything below (carrier list,
@@ -58,18 +116,34 @@ const form = reactive({
   mainRider: '',
   category: '',
   subCategory: '',
+  // ระดับค่าคอม — required. Links product to a commission_tiers row so
+  // the MGM engine can resolve referral_fee_rate + mgmt_fee_rate.
+  commissionTierId: '',
   minAge: 0,
   maxAge: 99,
-  // Blank = don't seed a commission-rate row on create. When present it
-  // becomes the flat percent applied across all years (yr_1..yr_11up).
-  commissionPercent: null as number | null,
+  // Non-life uses the flat panels (one rate per direction).
+  carrierToHub: blankPanel(),
+  hubToAgent: blankPanel(),
+  // Life uses banded tables — multiple bands per direction, each with
+  // SA/age ranges + yr1..yr5 + yr6+ columns. Empty until operator adds
+  // a row.
+  carrierToHubBands: [] as CommissionBandRow[],
+  hubToAgentBands: [] as CommissionBandRow[],
 })
 
-/** Carriers matching the chosen insureType — empties when nothing is picked. */
+/**
+ * Carriers matching the chosen insureType — empties when nothing is picked.
+ * DB stores `Life` / `Non-Life` / `Tax`; UI radio uses `life` / `non-life` /
+ * `tax`. Normalize both sides before compare so casing / hyphen drift can't
+ * silently hide the carrier list.
+ */
+function normalizeInsureType(v: string): string {
+  return v.toLowerCase().replace(/\s+/g, '-')
+}
 const availableCarriers = computed<CarrierListRow[]>(() =>
   form.insureType === ''
     ? []
-    : carriers.value.filter((c) => c.insureType === form.insureType),
+    : carriers.value.filter((c) => normalizeInsureType(c.insureType) === form.insureType),
 )
 
 const needsMainRiderChoice = computed(() => form.insureType === 'life')
@@ -248,6 +322,41 @@ function clampAge(v: number): number {
   return Math.max(0, Math.min(99, Math.round(v)))
 }
 
+/**
+ * Which commission-rate shape applies to the current product group.
+ *   'life_years' — 7 per-year inputs per direction (Life + Rider groups)
+ *   'flat'       — 1 flat % per direction (everything else)
+ *   ''           — no group picked yet, so the whole commission section is
+ *                  hidden until the user picks a product group
+ */
+const commissionScheme = computed<'life_years' | 'flat' | ''>(() => {
+  if (form.type === 'Life' || form.type === 'Rider') return 'life_years'
+  if (form.type === '') return ''
+  return 'flat'
+})
+
+/**
+ * Group-change cleanup: if the operator switched between life and flat
+ * schemes, blank the panels so a stale per-year value doesn't leak into a
+ * flat product's payload (and vice versa).
+ */
+watch(commissionScheme, (next, prev) => {
+  if (prev !== next) {
+    form.carrierToHub = blankPanel()
+    form.hubToAgent = blankPanel()
+    form.carrierToHubBands = []
+    form.hubToAgentBands = []
+  }
+})
+
+/** Add/remove bands per direction — used by the two Life tables. */
+function addBand(direction: 'carrierToHubBands' | 'hubToAgentBands'): void {
+  form[direction] = [...form[direction], blankBand()]
+}
+function removeBand(direction: 'carrierToHubBands' | 'hubToAgentBands', index: number): void {
+  form[direction] = form[direction].filter((_, i) => i !== index)
+}
+
 const ageError = computed<string | null>(() => {
   const min = form.minAge
   const max = form.maxAge
@@ -264,8 +373,49 @@ const canSubmit = computed(() =>
   (!needsProductGroupChoice.value || form.type !== '') &&
   (form.category !== '') &&
   (!subcategoryRequired.value || form.subCategory !== '') &&
+  form.commissionTierId !== '' &&
   ageError.value === null,
 )
+
+/**
+ * Convert operator-typed percent (0..100) to the fraction (0..1) the
+ * backend expects. Blank input stays null; anything else divides by 100
+ * and rounds to 5 dp so ".33333" doesn't drift into DECIMAL(8,5) overflow.
+ */
+function percentToFraction(v: number | null): number | null {
+  if (v === null || Number.isNaN(v)) return null
+  return Math.round((v / 100) * 100000) / 100000
+}
+
+function panelToPayload(p: CommissionRatePanel, scheme: 'life_years' | 'flat'): Record<string, number | null> {
+  if (scheme === 'flat') {
+    return { flatRate: percentToFraction(p.flatRate) }
+  }
+  return {
+    yr1: percentToFraction(p.yr1),
+    yr2: percentToFraction(p.yr2),
+    yr3: percentToFraction(p.yr3),
+    yr4: percentToFraction(p.yr4),
+    yr5: percentToFraction(p.yr5),
+    yr6_10: percentToFraction(p.yr6_10),
+    yr11Up: percentToFraction(p.yr11Up),
+  }
+}
+/** Serialize a band row for the backend — percents → fractions, nulls stay null. */
+function bandToPayload(b: CommissionBandRow): Record<string, number | null> {
+  return {
+    sumAssuredMin: b.sumAssuredMin,
+    sumAssuredMax: b.sumAssuredMax,
+    entryAgeMin: b.entryAgeMin,
+    entryAgeMax: b.entryAgeMax,
+    yr1: percentToFraction(b.yr1),
+    yr2: percentToFraction(b.yr2),
+    yr3: percentToFraction(b.yr3),
+    yr4: percentToFraction(b.yr4),
+    yr5: percentToFraction(b.yr5),
+    yr6Up: percentToFraction(b.yr6Up),
+  }
+}
 
 const payload = computed(() => {
   const base: Record<string, unknown> = {
@@ -276,7 +426,7 @@ const payload = computed(() => {
     mainRider: form.mainRider || null,
     category: form.category.trim() || null,
     subCategory: form.subCategory.trim() || null,
-    commissionPercent: form.commissionPercent,
+    commissionTierId: form.commissionTierId ? Number(form.commissionTierId) : null,
     active: true,
   }
   // Age band is Life-only — omit for non-life so we don't persist stale
@@ -284,6 +434,22 @@ const payload = computed(() => {
   if (form.insureType === 'life') {
     base.minAge = form.minAge
     base.maxAge = form.maxAge
+  }
+  // Only include commissionRates once a scheme is known (product group
+  // chosen). Panels are always sent as a pair so the backend can clear
+  // either side to blank by upserting a null-filled row. For Life we ALSO
+  // send commissionBands — bands are the real per-year source; the flat
+  // rate rows stay in place as a fallback and stay untouched here.
+  if (commissionScheme.value === 'flat') {
+    base.commissionRates = {
+      carrierToHub: panelToPayload(form.carrierToHub, 'flat'),
+      hubToAgent: panelToPayload(form.hubToAgent, 'flat'),
+    }
+  } else if (commissionScheme.value === 'life_years') {
+    base.commissionBands = {
+      carrierToHub: form.carrierToHubBands.map(bandToPayload),
+      hubToAgent: form.hubToAgentBands.map(bandToPayload),
+    }
   }
   return base
 })
@@ -295,11 +461,17 @@ watch(
       Object.assign(form, {
         insureType: '', code: '', name: '', carrierId: '',
         type: '', mainRider: '', category: '', subCategory: '',
-        minAge: 0, maxAge: 99, commissionPercent: null,
+        commissionTierId: '',
+        minAge: 0, maxAge: 99,
+        carrierToHub: blankPanel(),
+        hubToAgent: blankPanel(),
+        carrierToHubBands: [],
+        hubToAgentBands: [],
       })
       codeAutoFilled.value = false
       nameTouched.value = false
       void loadCarriers()
+      void loadCommissionTiers()
     }
   },
 )
@@ -316,9 +488,13 @@ function onCreated(row: Record<string, unknown>): void {
   form.type = ''
   form.category = ''
   form.subCategory = ''
+  form.commissionTierId = ''
   form.minAge = 0
   form.maxAge = 99
-  form.commissionPercent = null
+  form.carrierToHub = blankPanel()
+  form.hubToAgent = blankPanel()
+  form.carrierToHubBands = []
+  form.hubToAgentBands = []
   form.code = ''
   codeAutoFilled.value = false
   nameTouched.value = false
@@ -415,6 +591,22 @@ function onCreated(row: Record<string, unknown>): void {
           <input v-else disabled value="—"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-slate-50 text-slate-500 focus:outline-none" />
         </FormField>
+        <!--
+          ระดับค่าคอม — required. This is what the MGM engine reads to
+          resolve referral_fee_rate + mgmt_fee_rate. Without a tier the
+          entire upline chain accrues zero, so we block save until picked.
+        -->
+        <FormField label="ระดับค่าคอม (Commission tier)" required class="col-span-2"
+          error-key="commissionTierId" :errors="fieldErrors"
+          hint="กำหนดสูตรจ่าย REFERRAL / MANAGEMENT DIFFERENTIAL — เลือกให้ตรงกับ carrier tariff">
+          <select v-model="form.commissionTierId"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option value="">— select —</option>
+            <option v-for="t in commissionTiers" :key="t.id" :value="t.id">
+              {{ t.nameTh }} ({{ t.code }})
+            </option>
+          </select>
+        </FormField>
         <FormField label="Name (Thai)" required class="col-span-2" error-key="name" :errors="fieldErrors"
           hint="ระบบเติมชื่อให้อัตโนมัติจากประเภทที่เลือก — แก้ [???] เป็นชื่อจริงได้เลย">
           <input v-model.trim="form.name" placeholder="ประกันสุขภาพ ..."
@@ -439,15 +631,102 @@ function onCreated(row: Record<string, unknown>): void {
           </FormField>
           <p v-if="ageError" class="col-span-2 -mt-2 text-xs text-rose-600">{{ ageError }}</p>
         </template>
-        <FormField label="ค่าคอมมิชชั่น (%)" class="col-span-2" error-key="commissionPercent" :errors="fieldErrors"
-          hint="เว้นว่างได้ — ระบบจะบันทึกอัตราเดียวกันนี้สำหรับทุกปี (ปีที่ 1–10 และปีที่ 11 ขึ้นไป)">
-          <div class="relative w-40">
-            <input v-model.number="form.commissionPercent" type="number" min="0" max="100" step="0.01"
-              placeholder="เช่น 15"
-              class="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+        <!--
+          Commission rates. Shown once the product group has been chosen so
+          the scheme (flat vs per-year) is known. Two side-by-side panels:
+             Carrier → InsureHub   |   InsureHub → Agent
+          The right panel (hub→agent) is the number the MGM engine uses for
+          DIRECT accrual. Left panel is for reporting / reconciliation.
+        -->
+        <div v-if="commissionScheme !== ''" class="col-span-2 mt-2 border-t border-slate-200 pt-4">
+          <div class="text-sm font-semibold text-slate-700 mb-1">ค่าคอมมิชชั่นมาตรฐาน</div>
+          <div class="text-xs text-slate-500 mb-3">
+            เว้นว่างได้ — ค่าที่บันทึกจะถูกใช้ในระบบ MGM แทนตารางบริษัท×ประเภทสินค้า
           </div>
-        </FormField>
+          <!-- Flat scheme (Non-Life, PA, Group, Tax): one % per direction. -->
+          <div v-if="commissionScheme === 'flat'" class="grid grid-cols-2 gap-4">
+            <div class="border border-slate-200 rounded-lg p-3">
+              <div class="text-sm font-medium text-slate-800 mb-2">บริษัท → InsureHub</div>
+              <div class="relative w-32">
+                <input v-model.number="form.carrierToHub.flatRate" type="number" min="0" max="100" step="0.01"
+                  placeholder="เช่น 15"
+                  class="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+              </div>
+            </div>
+            <div class="border border-brand-200 bg-brand-50/40 rounded-lg p-3">
+              <div class="text-sm font-medium text-brand-800 mb-2">InsureHub → Agent (MGM)</div>
+              <div class="relative w-32">
+                <input v-model.number="form.hubToAgent.flatRate" type="number" min="0" max="100" step="0.01"
+                  placeholder="เช่น 10"
+                  class="w-full border border-brand-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+              </div>
+            </div>
+          </div>
+          <!-- Life scheme: two banded tables. Each band is (SA range, age
+               range) + yr1..yr5 + yr6+ commission. Add as many bands as
+               the product's tariff sheet lists. -->
+          <div v-else class="space-y-4">
+            <div v-for="direction in [
+              { key: 'carrierToHubBands' as const, label: 'บริษัท → InsureHub', tone: 'slate' },
+              { key: 'hubToAgentBands' as const, label: 'InsureHub → Agent (MGM)', tone: 'brand' },
+            ]" :key="direction.key" :class="['rounded-lg p-3 border',
+              direction.tone === 'brand' ? 'border-brand-200 bg-brand-50/40' : 'border-slate-200']">
+              <div :class="['text-sm font-medium mb-2',
+                direction.tone === 'brand' ? 'text-brand-800' : 'text-slate-800']">
+                {{ direction.label }}
+              </div>
+              <div class="overflow-x-auto">
+                <table class="min-w-full text-xs">
+                  <thead class="text-[10px] uppercase text-slate-500">
+                    <tr>
+                      <th class="px-1 py-1 text-left">SA ต่ำสุด (฿)</th>
+                      <th class="px-1 py-1 text-left">SA สูงสุด (฿)</th>
+                      <th class="px-1 py-1 text-left">อายุ ต่ำสุด</th>
+                      <th class="px-1 py-1 text-left">อายุ สูงสุด</th>
+                      <th class="px-1 py-1 text-right">ปี 1</th>
+                      <th class="px-1 py-1 text-right">ปี 2</th>
+                      <th class="px-1 py-1 text-right">ปี 3</th>
+                      <th class="px-1 py-1 text-right">ปี 4</th>
+                      <th class="px-1 py-1 text-right">ปี 5</th>
+                      <th class="px-1 py-1 text-right">ปี 6+</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    <tr v-if="form[direction.key].length === 0">
+                      <td colspan="11" class="px-1 py-3 text-center text-slate-400 italic">
+                        ยังไม่มีช่วงราคา / อายุ — กด "+ เพิ่มช่วง"
+                      </td>
+                    </tr>
+                    <tr v-for="(band, i) in form[direction.key]" :key="i" class="border-t border-slate-100">
+                      <td class="px-1 py-1"><input v-model.number="band.sumAssuredMin" type="number" min="0" step="1000" placeholder="ไม่จำกัด" class="w-24 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
+                      <td class="px-1 py-1"><input v-model.number="band.sumAssuredMax" type="number" min="0" step="1000" placeholder="ไม่จำกัด" class="w-24 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
+                      <td class="px-1 py-1"><input v-model.number="band.entryAgeMin" type="number" min="0" max="120" step="1" placeholder="0" class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
+                      <td class="px-1 py-1"><input v-model.number="band.entryAgeMax" type="number" min="0" max="120" step="1" placeholder="120" class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
+                      <td v-for="y in ['yr1','yr2','yr3','yr4','yr5','yr6Up']" :key="y" class="px-1 py-1">
+                        <input :value="(band as any)[y]" type="number" min="0" max="100" step="0.01"
+                          @input="(band as any)[y] = ($event.target as HTMLInputElement).valueAsNumber || null"
+                          class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs text-right" />
+                      </td>
+                      <td class="px-1 py-1">
+                        <button type="button" @click="removeBand(direction.key, i)"
+                          class="text-rose-500 hover:text-rose-700 text-xs">
+                          <i class="pi pi-trash" />
+                        </button>
+                      </td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+              <button type="button" @click="addBand(direction.key)"
+                class="mt-2 px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50 text-xs">
+                + เพิ่มช่วง
+              </button>
+            </div>
+          </div>
+        </div>
       </div>
     </template>
   </CreateModal>

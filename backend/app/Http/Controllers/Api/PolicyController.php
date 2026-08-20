@@ -7,11 +7,17 @@ namespace App\Http\Controllers\Api;
 use App\Http\Requests\PolicyRequest;
 use App\Http\Resources\PolicyListResource;
 use App\Http\Resources\PolicyResource;
+use App\Mail\PolicyRenewalNoticeMail;
 use App\Models\Policy;
+use App\Models\PolicyEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
+use Illuminate\Support\Facades\Validator;
+use Illuminate\Validation\ValidationException;
 
 class PolicyController extends ApiController
 {
@@ -130,14 +136,17 @@ class PolicyController extends ApiController
             $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];
             $policy = Policy::create($payload);
             $this->syncChildren($request, $policy);
+
             return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus']);
         });
+
         return (new PolicyResource($policy))->response()->setStatusCode(201);
     }
 
     public function show(Request $request, Policy $policy): PolicyResource
     {
         $this->authorizeTenant($request, $policy);
+
         return new PolicyResource(
             $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus'])
         );
@@ -150,6 +159,7 @@ class PolicyController extends ApiController
             $policy->update($request->toModel());
             $this->syncChildren($request, $policy);
         });
+
         return new PolicyResource(
             $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus'])
         );
@@ -159,6 +169,7 @@ class PolicyController extends ApiController
     {
         $this->authorizeTenant($request, $policy);
         $policy->delete();
+
         return response()->json(['message' => 'Deleted.']);
     }
 
@@ -249,15 +260,6 @@ class PolicyController extends ApiController
             'motorNoPassenger' => 'motor_no_passenger',
             'motorNotes' => 'motor_notes',
         ],
-        // Phase 9b — main-policy commission entry (per-rider commissions live
-        // on policy_riders and use the /riders sync endpoint).
-        'commission' => [
-            'mainComRateInh' => 'main_com_rate_inh',
-            'mainComAmtInh' => 'main_com_amt_inh',
-            'mainComRateAg' => 'main_com_rate_ag',
-            'mainComAmtAg' => 'main_com_amt_ag',
-            'comRecCheck' => 'com_rec_check',
-        ],
     ];
 
     /**
@@ -324,14 +326,6 @@ class PolicyController extends ApiController
             'motorNoPassenger' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:200'],
             'motorNotes' => ['sometimes', 'nullable', 'string'],
         ],
-        'commission' => [
-            // Rates stored as decimal (0.12 = 12%). Accept 0..1.
-            'mainComRateInh' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
-            'mainComAmtInh' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'mainComRateAg' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
-            'mainComAmtAg' => ['sometimes', 'nullable', 'numeric', 'min:0'],
-            'comRecCheck' => ['sometimes', 'nullable', 'string', 'in:Complete,Pending,'],
-        ],
     ];
 
     public function patchSection(Request $request, Policy $policy, string $section): PolicyResource
@@ -341,7 +335,7 @@ class PolicyController extends ApiController
         $rules = self::SECTION_RULES[$section] ?? abort(404, "Unknown section: {$section}");
         $map = self::SECTION_MAPS[$section];
 
-        $v = \Illuminate\Support\Facades\Validator::make($request->all(), $rules)->validate();
+        $v = Validator::make($request->all(), $rules)->validate();
 
         $updates = [];
         foreach ($map as $camel => $snake) {
@@ -351,7 +345,7 @@ class PolicyController extends ApiController
             // Q4 lock — reject writes to locked columns once the policy is in force.
             if (in_array($policy->status, self::LOCK_TRIGGER_STATUSES, true)
                 && in_array($snake, self::LOCKED_AFTER_ISSUED, true)) {
-                throw \Illuminate\Validation\ValidationException::withMessages([
+                throw ValidationException::withMessages([
                     $camel => ["Field is locked because policy status is '{$policy->status}'. Use an endorsement to change it."],
                 ]);
             }
@@ -389,7 +383,7 @@ class PolicyController extends ApiController
             'riders.*.notes' => ['sometimes', 'nullable', 'string'],
         ]);
 
-        \Illuminate\Support\Facades\DB::transaction(function () use ($policy, $data): void {
+        DB::transaction(function () use ($policy, $data): void {
             $policy->riders()->delete();
             foreach ($data['riders'] as $i => $r) {
                 $policy->riders()->create([
@@ -429,12 +423,12 @@ class PolicyController extends ApiController
 
         $totalShare = array_sum(array_column($data['beneficiaries'], 'share'));
         if ($totalShare > 100.001) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'beneficiaries' => ["Beneficiary shares must sum to 100 or less (got {$totalShare})."],
             ]);
         }
 
-        \Illuminate\Support\Facades\DB::transaction(function () use ($policy, $data): void {
+        DB::transaction(function () use ($policy, $data): void {
             $policy->beneficiaries()->delete();
             foreach ($data['beneficiaries'] as $i => $b) {
                 $policy->beneficiaries()->create([
@@ -498,7 +492,7 @@ class PolicyController extends ApiController
      * renewal pipeline UI computes "last contacted N days ago" from the
      * most recent event of this type.
      */
-    public function markRenewalContacted(Request $request, Policy $policy): \Illuminate\Http\JsonResponse
+    public function markRenewalContacted(Request $request, Policy $policy): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
         $data = $request->validate([
@@ -506,7 +500,7 @@ class PolicyController extends ApiController
             'note' => ['sometimes', 'nullable', 'string', 'max:500'],
         ]);
 
-        $event = \App\Models\PolicyEvent::create([
+        $event = PolicyEvent::create([
             'policy_id' => $policy->id,
             'type' => 'renewalContacted',
             'occurred_at' => now(),
@@ -534,11 +528,11 @@ class PolicyController extends ApiController
      * customer/product pre-filled. Sets `ref_app_to_id` if a new_policy_id is
      * provided (rare — usually the new quote gets created and links itself).
      */
-    public function markRenewalStarted(Request $request, Policy $policy): \Illuminate\Http\JsonResponse
+    public function markRenewalStarted(Request $request, Policy $policy): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
 
-        \App\Models\PolicyEvent::create([
+        PolicyEvent::create([
             'policy_id' => $policy->id,
             'type' => 'renewalStarted',
             'occurred_at' => now(),
@@ -566,7 +560,7 @@ class PolicyController extends ApiController
      * Send the renewal notice email. Falls back to the writing agent when the
      * customer has no email. Refuses if there's nowhere to send.
      */
-    public function sendRenewalNotice(Request $request, Policy $policy): \Illuminate\Http\JsonResponse
+    public function sendRenewalNotice(Request $request, Policy $policy): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
         $policy->loadMissing(['customer', 'writingAgent']);
@@ -582,24 +576,24 @@ class PolicyController extends ApiController
             $to = $agentEmail;
             $sentToAgent = true;
         } else {
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'email' => ['Neither the customer nor the writing agent has an email on file.'],
             ]);
         }
 
         try {
-            \Illuminate\Support\Facades\Mail::to($to)
-                ->send(new \App\Mail\PolicyRenewalNoticeMail($policy, $sentToAgent));
+            Mail::to($to)
+                ->send(new PolicyRenewalNoticeMail($policy, $sentToAgent));
         } catch (\Throwable $e) {
-            \Illuminate\Support\Facades\Log::warning('Renewal notice send failed', [
+            Log::warning('Renewal notice send failed', [
                 'policy_id' => $policy->id, 'to' => $to, 'error' => $e->getMessage(),
             ]);
-            throw \Illuminate\Validation\ValidationException::withMessages([
+            throw ValidationException::withMessages([
                 'email' => ['Failed to send email: '.$e->getMessage()],
             ]);
         }
 
-        \App\Models\PolicyEvent::create([
+        PolicyEvent::create([
             'policy_id' => $policy->id,
             'type' => 'renewalNoticeSent',
             'occurred_at' => now(),
@@ -616,48 +610,6 @@ class PolicyController extends ApiController
                 : 'Notice sent to the customer.',
             'sentTo' => $to,
             'sentToAgent' => $sentToAgent,
-        ]);
-    }
-
-    /**
-     * Recompute all commission accruals for this policy at current rates.
-     * Reverses every existing txn, then re-accrues each payment. Result
-     * always nets to the *new* rate; the full ledger preserves history.
-     */
-    public function recomputeCommission(Request $request, Policy $policy): \Illuminate\Http\JsonResponse
-    {
-        $this->authorizeTenant($request, $policy);
-
-        // Refuse if any of this policy's txns are already settled (part of a
-        // paid payout) — reversing those would break the agent's bank record.
-        // Admin must void the payout first.
-        $settledCount = \DB::table('commission_transactions')
-            ->where('policy_id', $policy->id)
-            ->where('status', 'settled')
-            ->count();
-        if ($settledCount > 0) {
-            throw \Illuminate\Validation\ValidationException::withMessages([
-                'settled' => ["Cannot recompute — {$settledCount} txn(s) are already settled to a payout. Void the payout first."],
-            ]);
-        }
-
-        $result = app(\App\Services\Commission\CommissionEngine::class)->recomputeForPolicy($policy);
-
-        \App\Models\AuditEntry::create([
-            'tenant_id' => $policy->tenant_id,
-            'user_id' => $request->user()->id,
-            'occurred_at' => now(),
-            'actor' => $request->user()->name,
-            'action' => 'commission.recomputed',
-            'target' => 'policy:'.$policy->id,
-            'ip' => $request->ip(),
-            'result' => 'success',
-            'metadata' => $result,
-        ]);
-
-        return response()->json([
-            'message' => "Recomputed at current rates. {$result['reversed']} reversed, {$result['created']} fresh txns created.",
-            ...$result,
         ]);
     }
 }

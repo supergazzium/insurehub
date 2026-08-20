@@ -130,6 +130,38 @@ export function unmaskIdCard() {
   return api.get<{ idCard: string }>('me/agent/id-card-unmask')
 }
 
+/** One row from lookups/name-prefixes — the LookupController::prefixes shape. */
+export interface NamePrefixRow {
+  id: string
+  insuredType: 'Individual' | 'Corporate'
+  descriptionTh: string
+  descriptionEn: string | null
+}
+
+/** Full list of name prefixes (คำนำหน้าชื่อ). Both individual and corporate
+ *  rows come back; caller filters by insuredType. Not cached — the list is
+ *  small (~200 rows) and the lookup runs behind auth so browser caching
+ *  wouldn't help across sessions anyway. */
+export function fetchNamePrefixes() {
+  return api.get<{ data: NamePrefixRow[] }>('lookups/name-prefixes')
+}
+
+/** One row from lookups/nationalities — LookupController::nationalities
+ *  shape. Storage on customers uses the Thai name (nameTh) as the
+ *  persisted value, matching the existing `customers.nationality`
+ *  varchar column. */
+export interface NationalityRow {
+  id: string
+  iso2: string | null
+  iso3: string | null
+  nameTh: string
+  nameEn: string | null
+}
+
+export function fetchNationalities() {
+  return api.get<{ data: NationalityRow[] }>('lookups/nationalities')
+}
+
 export function fetchReferralLink() {
   return api.get<ReferralLinkInfo>('me/agent/referral-link')
 }

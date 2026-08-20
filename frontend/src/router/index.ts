@@ -20,8 +20,10 @@ import PortalSettings from '../pages/portal/PortalSettings.vue'
 import PortalEarnings from '../pages/portal/PortalEarnings.vue'
 import AdminAgentApprovals from '../pages/admin/AdminAgentApprovals.vue'
 import AdminDownlineTree from '../pages/admin/AdminDownlineTree.vue'
-import AdminPayouts from '../pages/admin/AdminPayouts.vue'
 import AdminMotorTariffs from '../pages/admin/AdminMotorTariffs.vue'
+import AdminCommissionTiers from '../pages/admin/AdminCommissionTiers.vue'
+import AdminProductTypes from '../pages/admin/AdminProductTypes.vue'
+import AdminAgentCommissionDetail from '../pages/admin/AdminAgentCommissionDetail.vue'
 import FreelookReport from '../pages/reports/FreelookReport.vue'
 import MailingReport from '../pages/reports/MailingReport.vue'
 import PaymentHistoryReport from '../pages/reports/PaymentHistoryReport.vue'
@@ -44,8 +46,6 @@ import CustomerList from '../pages/customers/CustomerListV2.vue'
 import CustomerReferral from '../pages/customers/CustomerReferral.vue'
 import PolicyList from '../pages/policies/PolicyListV2.vue'
 import ExpiringSoon from '../pages/policies/ExpiringSoon.vue'
-import CommissionEngine from '../pages/commissions/CommissionEngine.vue'
-import CommissionLedger from '../pages/commissions/CommissionLedger.vue'
 import RebateReconciliation from '../pages/commissions/RebateReconciliation.vue'
 import ImportFailures from '../pages/settings/ImportFailures.vue'
 import AgentSupport from '../pages/support/AgentSupport.vue'
@@ -56,7 +56,7 @@ import { MODULES } from '../types/modules'
 const IMPLEMENTED_MODULES = new Set([
   'tenant-settings', 'carriers', 'products', 'contracts',
   'agents', 'customers', 'policies', 'renewal-pipeline',
-  'commission-engine', 'commission-ledger', 'rebate-reconciliation',
+  'rebate-reconciliation',
   'import-failures',
   'agent-support', 'agent-operation-support',
   // Phase 2 (agent portal)
@@ -67,6 +67,9 @@ const IMPLEMENTED_MODULES = new Set([
   'admin-payouts',
   // Phase 9 (motor tariff admin)
   'admin-motor-tariffs',
+  'admin-commission-tiers',
+  'admin-product-types',
+  'admin-agent-commission-detail',
   // Phase 5 (quotation)
   'quotes',
   // Phase 8a (operational reports)
@@ -147,8 +150,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'customers/referrals', name: 'customers-referrals', component: CustomerReferral, meta: { moduleKey: 'customers' } },
       { path: 'policies', name: 'policies', component: PolicyList, meta: { moduleKey: 'policies' } },
       { path: 'policies/expiring', name: 'policies-expiring', component: ExpiringSoon, meta: { moduleKey: 'renewal-pipeline' } },
-      { path: 'commissions/engine', name: 'commission-engine', component: CommissionEngine, meta: { moduleKey: 'commission-engine' } },
-      { path: 'commissions/ledger', name: 'commission-ledger', component: CommissionLedger, meta: { moduleKey: 'commission-ledger' } },
       { path: 'commissions/rebates', name: 'commission-rebates', component: RebateReconciliation, meta: { moduleKey: 'rebate-reconciliation' } },
       { path: 'settings/import-failures', name: 'settings-import-failures', component: ImportFailures, meta: { moduleKey: 'import-failures' } },
       { path: 'support', name: 'agent-support', component: AgentSupport, meta: { moduleKey: 'agent-support' } },
@@ -160,8 +161,10 @@ const routes: RouteRecordRaw[] = [
       // Legacy /admin/roles URL keeps working.
       { path: 'admin/roles', redirect: { name: 'admin-access', query: { tab: 'roles' } } },
       { path: 'admin/downline-tree', name: 'admin-downline-tree', component: AdminDownlineTree, meta: { moduleKey: 'admin-downline-tree' } },
-      { path: 'admin/payouts', name: 'admin-payouts', component: AdminPayouts, meta: { moduleKey: 'admin-payouts' } },
       { path: 'admin/motor-tariffs', name: 'admin-motor-tariffs', component: AdminMotorTariffs, meta: { moduleKey: 'admin-motor-tariffs' } },
+      { path: 'admin/commission-tiers', name: 'admin-commission-tiers', component: AdminCommissionTiers, meta: { moduleKey: 'admin-commission-tiers' } },
+      { path: 'admin/product-types', name: 'admin-product-types', component: AdminProductTypes, meta: { moduleKey: 'admin-product-types' } },
+      { path: 'admin/agents/:code/commission-detail', name: 'admin-agent-commission-detail', component: AdminAgentCommissionDetail, meta: { moduleKey: 'admin-agent-commission-detail' }, props: true },
       // Phase 8a — operational reports
       { path: 'reports/freelook', name: 'report-freelook', component: FreelookReport, meta: { moduleKey: 'report-freelook' } },
       { path: 'reports/mailing', name: 'report-mailing', component: MailingReport, meta: { moduleKey: 'report-mailing' } },

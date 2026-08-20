@@ -2,38 +2,44 @@
 
 declare(strict_types=1);
 
+use App\Http\Controllers\Api\AdminAgentApprovalController;
+use App\Http\Controllers\Api\AdminRoleController;
+use App\Http\Controllers\Api\AdminUserController;
+use App\Http\Controllers\Api\AgentCommissionController;
 use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CarrierBankAccountController;
-use App\Http\Controllers\Api\CarrierCredentialController;
+use App\Http\Controllers\Api\CarrierContactController;
 use App\Http\Controllers\Api\CarrierContactGroupController;
 use App\Http\Controllers\Api\CarrierController;
-use App\Http\Controllers\Api\CommissionController;
+use App\Http\Controllers\Api\CarrierCredentialController;
+use App\Http\Controllers\Api\CarrierProductTypeRateController;
+use App\Http\Controllers\Api\CommissionTierController;
 use App\Http\Controllers\Api\ContractController;
 use App\Http\Controllers\Api\CustomerAssignmentController;
 use App\Http\Controllers\Api\CustomerController;
 use App\Http\Controllers\Api\CustomerKycDocController;
-use App\Http\Controllers\Api\AdminAgentApprovalController;
-use App\Http\Controllers\Api\AdminPayoutController;
 use App\Http\Controllers\Api\CustomerReferralLinkController;
-use App\Http\Controllers\Api\MeAgentController;
+use App\Http\Controllers\Api\EmailOtpController;
 use App\Http\Controllers\Api\EmailTemplateController;
+use App\Http\Controllers\Api\EndorsementController;
 use App\Http\Controllers\Api\ImportFailureController;
 use App\Http\Controllers\Api\LookupController;
 use App\Http\Controllers\Api\MailController;
-use App\Http\Controllers\Api\EndorsementController;
+use App\Http\Controllers\Api\MeAgentController;
 use App\Http\Controllers\Api\MotorActTariffController;
 use App\Http\Controllers\Api\PolicyController;
-use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\PolicyDocumentController;
 use App\Http\Controllers\Api\PolicyEventController;
 use App\Http\Controllers\Api\PolicyPaymentController;
 use App\Http\Controllers\Api\PolicyRebateController;
 use App\Http\Controllers\Api\ProductController;
-use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\ProductTaxonomyController;
+use App\Http\Controllers\Api\ProductTypeController;
+use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\RecruitmentLinkController;
+use App\Http\Controllers\Api\ReportController;
 use App\Http\Controllers\Api\TenantController;
 use Illuminate\Support\Facades\Route;
 
@@ -44,8 +50,8 @@ use Illuminate\Support\Facades\Route;
 */
 
 Route::post('auth/login', [AuthController::class, 'login']);
-Route::post('auth/email-otp/send', [\App\Http\Controllers\Api\EmailOtpController::class, 'send']);
-Route::post('auth/email-otp/verify', [\App\Http\Controllers\Api\EmailOtpController::class, 'verify']);
+Route::post('auth/email-otp/send', [EmailOtpController::class, 'send']);
+Route::post('auth/email-otp/verify', [EmailOtpController::class, 'verify']);
 Route::post('auth/check-availability', [AuthController::class, 'checkAvailability']);
 Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/forgot-password', [AuthController::class, 'forgotPassword']);
@@ -87,18 +93,18 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('me/agent/earnings', [MeAgentController::class, 'earnings']);
 
     // RBAC admin — roles, permissions catalog, user role assignment.
-    Route::get('admin/roles', [\App\Http\Controllers\Api\AdminRoleController::class, 'index']);
-    Route::post('admin/roles', [\App\Http\Controllers\Api\AdminRoleController::class, 'store']);
-    Route::get('admin/roles/{role}', [\App\Http\Controllers\Api\AdminRoleController::class, 'show']);
-    Route::patch('admin/roles/{role}', [\App\Http\Controllers\Api\AdminRoleController::class, 'update']);
-    Route::put('admin/roles/{role}/permissions', [\App\Http\Controllers\Api\AdminRoleController::class, 'setPermissions']);
-    Route::delete('admin/roles/{role}', [\App\Http\Controllers\Api\AdminRoleController::class, 'destroy']);
-    Route::get('admin/permissions', [\App\Http\Controllers\Api\AdminRoleController::class, 'permissions']);
-    Route::get('admin/users', [\App\Http\Controllers\Api\AdminUserController::class, 'index']);
-    Route::get('admin/users/{user}', [\App\Http\Controllers\Api\AdminUserController::class, 'show']);
-    Route::patch('admin/users/{user}/role', [\App\Http\Controllers\Api\AdminUserController::class, 'setRole']);
-    Route::post('admin/users/{user}/overrides', [\App\Http\Controllers\Api\AdminUserController::class, 'addOverride']);
-    Route::delete('admin/users/{user}/overrides/{overrideId}', [\App\Http\Controllers\Api\AdminUserController::class, 'removeOverride']);
+    Route::get('admin/roles', [AdminRoleController::class, 'index']);
+    Route::post('admin/roles', [AdminRoleController::class, 'store']);
+    Route::get('admin/roles/{role}', [AdminRoleController::class, 'show']);
+    Route::patch('admin/roles/{role}', [AdminRoleController::class, 'update']);
+    Route::put('admin/roles/{role}/permissions', [AdminRoleController::class, 'setPermissions']);
+    Route::delete('admin/roles/{role}', [AdminRoleController::class, 'destroy']);
+    Route::get('admin/permissions', [AdminRoleController::class, 'permissions']);
+    Route::get('admin/users', [AdminUserController::class, 'index']);
+    Route::get('admin/users/{user}', [AdminUserController::class, 'show']);
+    Route::patch('admin/users/{user}/role', [AdminUserController::class, 'setRole']);
+    Route::post('admin/users/{user}/overrides', [AdminUserController::class, 'addOverride']);
+    Route::delete('admin/users/{user}/overrides/{overrideId}', [AdminUserController::class, 'removeOverride']);
 
     // Admin approval + oversight (role-gated inside the controller).
     Route::get('admin/agents/pending', [AdminAgentApprovalController::class, 'pending']);
@@ -108,14 +114,30 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('admin/agents/{agent}/downline-tree', [AdminAgentApprovalController::class, 'downlineTree']);
 
     // Phase 7b — Admin payout cycle.
-    Route::post('admin/payouts/preview', [AdminPayoutController::class, 'preview']);
-    Route::post('admin/payouts', [AdminPayoutController::class, 'create']);
-    Route::get('admin/payouts', [AdminPayoutController::class, 'index']);
-    Route::get('admin/payouts/{payout}', [AdminPayoutController::class, 'show']);
-    Route::post('admin/payouts/{payout}/issue', [AdminPayoutController::class, 'issue']);
-    Route::post('admin/payouts/{payout}/pay', [AdminPayoutController::class, 'pay']);
-    Route::post('admin/payouts/{payout}/void', [AdminPayoutController::class, 'void']);
-    Route::get('admin/payouts/{payout}/pdf', [AdminPayoutController::class, 'pdf']);
+    // Admin payout routes removed with the old commission engine. The new
+    // MGM commission_ledgers + payout system will re-introduce equivalents.
+
+    // MGM commission tiers — 3 admin-editable tiers (TIER_FULL / TIER_PARTIAL /
+    // TIER_DIRECT_ONLY). Renames + per-cell rate edits only; number of tiers is
+    // fixed. See CommissionTierController.
+    // Per-agent commission detail (ledger rows + upline chain + totals).
+    Route::get('agents/{agentCode}/commission-detail', [AgentCommissionController::class, 'show']);
+
+    Route::get('commission-tiers', [CommissionTierController::class, 'index']);
+    Route::patch('commission-tiers/{commissionTier}', [CommissionTierController::class, 'update']);
+    Route::patch('commission-tiers/{commissionTier}/rates/{rate}', [CommissionTierController::class, 'updateRate']);
+
+    // MGM product-types — full CRUD (unlike tiers which are fixed at 3).
+    Route::apiResource('product-types', ProductTypeController::class)->except(['show']);
+
+    // MGM (carrier × product-type) standard commission matrix. GET returns
+    // the full grid pre-shaped for the admin UI; POST creates a new cell;
+    // PATCH edits standard_rate on an existing cell; DELETE marks a
+    // (carrier, type) as "not sold" (same effect as null standard_rate).
+    Route::get('carrier-product-type-rates', [CarrierProductTypeRateController::class, 'index']);
+    Route::post('carrier-product-type-rates', [CarrierProductTypeRateController::class, 'store']);
+    Route::patch('carrier-product-type-rates/{rate}', [CarrierProductTypeRateController::class, 'update']);
+    Route::delete('carrier-product-type-rates/{rate}', [CarrierProductTypeRateController::class, 'destroy']);
 
     // Tenant settings (single resource).
     Route::get('tenant', [TenantController::class, 'show']);
@@ -123,12 +145,15 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // Business entities — REST resource routes.
     Route::apiResource('agents', AgentController::class);
+    // Registered before apiResource so 'next-code' doesn't get parsed as
+    // a customer id by the {customer} route parameter.
+    Route::get('customers/next-code', [CustomerController::class, 'nextCode']);
     Route::apiResource('customers', CustomerController::class);
     Route::apiResource('carriers', CarrierController::class);
     Route::apiResource('carriers.bank-accounts', CarrierBankAccountController::class)
         ->parameters(['bank-accounts' => 'bankAccount'])
         ->only(['index', 'store', 'update', 'destroy']);
-    Route::apiResource('carriers.contacts', \App\Http\Controllers\Api\CarrierContactController::class)
+    Route::apiResource('carriers.contacts', CarrierContactController::class)
         ->only(['index', 'store', 'update', 'destroy']);
     Route::apiResource('carriers.credentials', CarrierCredentialController::class)
         ->parameters(['credentials' => 'credential'])
@@ -138,7 +163,6 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // collision), but kept adjacent so the credentials surface is grouped.
     Route::get('carrier-credentials/labels', [CarrierCredentialController::class, 'labels']);
     Route::apiResource('products', ProductController::class);
-    Route::get('products/{product}/commission-rates', [ProductController::class, 'commissionRates']);
     Route::get('carriers/{carrier}/products/next-code', [ProductController::class, 'nextCode']);
     Route::get('product-categories', [ProductTaxonomyController::class, 'index']);
 
@@ -159,8 +183,6 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('policies/{policy}/renewal/contacted', [PolicyController::class, 'markRenewalContacted']);
     Route::post('policies/{policy}/renewal/started', [PolicyController::class, 'markRenewalStarted']);
     Route::post('policies/{policy}/renewal/send-notice', [PolicyController::class, 'sendRenewalNotice']);
-    // Phase 9c — recompute commission accrual at current per-policy override rates.
-    Route::post('policies/{policy}/commission/recompute', [PolicyController::class, 'recomputeCommission']);
     // Phase 9 — endorsements (event log per policy).
     Route::get('policies/{policy}/endorsements', [EndorsementController::class, 'index']);
     Route::post('policies/{policy}/endorsements', [EndorsementController::class, 'store']);
@@ -211,10 +233,6 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // Editable rebate ledger — inline edits from /commissions/rebates.
     Route::patch('policy-rebates/{rebate}', [PolicyRebateController::class, 'update']);
 
-    // Commission ledger.
-    Route::get('commissions/transactions', [CommissionController::class, 'transactions']);
-    Route::post('commissions/transactions', [CommissionController::class, 'storeTransaction']);
-
     // Mail (Zoho-proxied). Bodies are Zoho-shaped — see useEmailApi.ts on the frontend.
     Route::prefix('mail')->group(function (): void {
         Route::post('send', [MailController::class, 'send']);
@@ -230,7 +248,6 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
         Route::get('expiring-soon', [ReportController::class, 'expiringSoon']);
         Route::get('expiring-soon/pdf', [ReportController::class, 'expiringSoonPdf']);
         Route::get('active-policies', [ReportController::class, 'activePolicies']);
-        Route::get('agent-commission-ledger', [ReportController::class, 'agentCommissionLedger']);
         Route::get('agent-performance', [ReportController::class, 'agentPerformance']);
         Route::get('product-performance', [ReportController::class, 'productPerformance']);
         Route::get('new-vs-renew-by-month', [ReportController::class, 'newVsRenewByMonth']);

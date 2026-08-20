@@ -15,32 +15,22 @@ import {
 } from '../../stores/policies'
 import { useCustomerStore } from '../../stores/customers'
 import { useAgentStore } from '../../stores/agents'
-import { useCommissionStore, type CommissionTxType } from '../../stores/commissions'
 
 const { t } = useI18n()
 const policyStore = usePolicyStore()
 const customerStore = useCustomerStore()
 const agentStore = useAgentStore()
-const commissionStore = useCommissionStore()
 
 onMounted(async () => {
-  // Load core data first so the bootstrap can replay events against real policies.
   await Promise.all([
     policyStore.load(),
     customerStore.load(),
     agentStore.load(),
   ])
-  await commissionStore.bootstrapFromExistingPolicies()
+  // Commission engine bootstrap removed with the MGM rewrite. The new
+  // MgmCommissionEngine (PR-D) writes to commission_ledgers server-side;
+  // the drawer's commission tab will re-render from that when it ships.
 })
-
-function commissionTxBadgeClass(type: CommissionTxType) {
-  return {
-    earning: 'bg-emerald-50 text-emerald-700',
-    override: 'bg-sky-50 text-sky-700',
-    clawback: 'bg-rose-50 text-rose-700',
-    referralBonus: 'bg-violet-50 text-violet-700',
-  }[type]
-}
 
 // Product/carrier catalog (mirrors Sections 3-4)
 const carriers = [
@@ -559,11 +549,8 @@ async function runAction() {
       await policyStore.reinstatePolicy(policy.id, actionForm.reinstateDate)
       break
   }
-  // After the policy mutation completes, ask the engine to process the latest event.
-  // The store's events array was refreshed with the server's authoritative copy.
-  const refreshed = policyStore.getPolicy(policy.id)
-  const latest = refreshed?.events[refreshed.events.length - 1]
-  if (latest) await commissionStore.processPolicyEvent(policy.id, latest.id)
+  // Commission event processing removed with the MGM rewrite — server-side
+  // observer on PolicyPayment will re-fire once PR-D lands.
   actionDialog.value = null
 }
 
@@ -1597,95 +1584,11 @@ function policyDisplayLabel(p: Policy) {
             </div>
           </div>
 
-          <!-- Commission placeholder -->
-          <div v-if="detailTab === 'commission'" class="space-y-4">
-            <!-- Live preview -->
-            <div class="card p-4">
-              <div class="flex items-center justify-between mb-3">
-                <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400">พรีวิวการแบ่งค่าคอมฯ</h4>
-                <RouterLink to="/commissions/engine" class="text-xs text-brand-600 hover:text-brand-700 font-medium">
-                  ดูระบบคำนวณ →
-                </RouterLink>
-              </div>
-
-              <div v-for="(step, i) in commissionStore.previewForPolicy(detail.id).chain" :key="step.agent.id"
-                :class="[
-                  'flex items-center gap-3 p-2 rounded-lg mb-1 text-sm',
-                  step.role === 'writing' ? 'bg-emerald-50' :
-                  step.role === 'override' ? 'bg-sky-50' :
-                  'bg-slate-50 opacity-70',
-                ]"
-              >
-                <span class="text-[10px] font-mono text-slate-400 w-4">{{ i + 1 }}</span>
-                <div class="flex-1 min-w-0">
-                  <div class="text-slate-900 truncate">{{ step.agent.firstName }} {{ step.agent.lastName }}</div>
-                  <div class="text-[10px] text-slate-500">
-                    {{ t(`agents.levelShort.${step.agent.level}`) }} · {{ step.agent.commissionPct }}%
-                  </div>
-                </div>
-                <div class="text-right shrink-0">
-                  <span v-if="step.role === 'writing'" class="text-[10px] text-emerald-700">ผู้ขาย</span>
-                  <span v-else-if="step.role === 'override'" class="text-[10px] text-sky-700">+{{ step.diffPct.toFixed(1) }}%</span>
-                  <span v-else class="text-[10px] text-slate-400">บีบ</span>
-                  <div :class="[
-                    'font-semibold text-sm',
-                    step.role === 'compressed' ? 'text-slate-400 line-through' : 'text-slate-900',
-                  ]">
-                    ฿{{ fmtTHB(step.amount) }}
-                  </div>
-                </div>
-              </div>
-
-              <!-- Referral bonus row -->
-              <div
-                v-if="commissionStore.previewForPolicy(detail.id).referral.eligible"
-                class="flex items-center gap-3 p-2 rounded-lg mb-1 text-sm bg-violet-50"
-              >
-                <i class="pi pi-star text-violet-600 text-xs" />
-                <div class="flex-1 min-w-0">
-                  <div class="text-violet-900">โบนัสแนะนำลูกค้า</div>
-                  <div class="text-[10px] text-violet-700">{{ commissionStore.previewForPolicy(detail.id).referral.note }}</div>
-                </div>
-                <div class="font-semibold text-violet-700">+฿{{ fmtTHB(commissionStore.previewForPolicy(detail.id).referral.amount) }}</div>
-              </div>
-
-              <div class="mt-3 pt-3 border-t border-slate-100 flex items-center justify-between">
-                <span class="text-xs text-slate-500">รวม</span>
-                <span class="font-semibold text-slate-900">
-                  ฿{{ fmtTHB(commissionStore.previewForPolicy(detail.id).chain.reduce((s, c) => s + c.amount, 0) + commissionStore.previewForPolicy(detail.id).referral.amount) }}
-                </span>
-              </div>
-            </div>
-
-            <!-- Actual transactions -->
-            <div>
-              <h4 class="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">รายการที่บันทึกจริง</h4>
-              <div v-if="!commissionStore.transactionsForPolicy(detail.id).length" class="card p-6 text-center text-sm text-slate-400">
-                ยังไม่มีรายการ — รอชำระเบี้ยงวดแรก
-              </div>
-              <div v-else class="space-y-1">
-                <div
-                  v-for="t2 in commissionStore.transactionsForPolicy(detail.id)"
-                  :key="t2.id"
-                  class="card p-3 flex items-center gap-3"
-                >
-                  <span :class="['inline-flex px-2 py-0.5 rounded-md text-[10px] font-medium', commissionTxBadgeClass(t2.type)]">
-                    {{ t(`commissionEngine.transactionTypes.${t2.type}`) }}
-                  </span>
-                  <div class="flex-1 min-w-0">
-                    <div class="text-sm text-slate-900 truncate">{{ agentNameById(t2.agentId) }}</div>
-                    <div class="text-[10px] text-slate-400 font-mono">{{ t2.createdAt }}</div>
-                  </div>
-                  <div :class="[
-                    'font-semibold text-sm shrink-0',
-                    t2.amount < 0 ? 'text-rose-600' : 'text-emerald-600',
-                    t2.status === 'reversed' ? 'opacity-50 line-through' : '',
-                  ]">
-                    {{ t2.amount < 0 ? '−' : '+' }}฿{{ fmtTHB(Math.abs(t2.amount)) }}
-                  </div>
-                </div>
-              </div>
-            </div>
+          <!-- Commission tab — placeholder during the MGM engine rewrite.
+               The live preview + ledger view will be rebuilt from
+               commission_ledgers once PR-D lands. -->
+          <div v-if="detailTab === 'commission'" class="card p-6 text-center text-sm text-slate-400">
+            ค่าคอมมิชชั่นกำลังถูกออกแบบใหม่ในระบบ MGM — ดูรายการจริงในหน้า Rebate หรือ Reports ระหว่างนี้
           </div>
         </div>
       </aside>

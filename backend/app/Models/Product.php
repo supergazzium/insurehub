@@ -35,13 +35,23 @@ class Product extends Model
         return $this->belongsTo(Carrier::class);
     }
 
+    public function productType(): BelongsTo
+    {
+        return $this->belongsTo(ProductType::class);
+    }
+
+    public function commissionTier(): BelongsTo
+    {
+        return $this->belongsTo(CommissionTier::class);
+    }
+
     public function commissionRates(): HasMany
     {
         return $this->hasMany(ProductCommissionRate::class);
     }
 
-    public function commissionRateInstallments(): HasMany
+    public function commissionBands(): HasMany
     {
-        return $this->hasMany(ProductCommissionRateInstallment::class);
+        return $this->hasMany(ProductCommissionBand::class);
     }
 }

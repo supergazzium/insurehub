@@ -184,16 +184,8 @@ const masterDataLinks: MasterDataLink[] = [
     metricValue: '11',
     to: '/products',
   },
-  {
-    key: 'commission',
-    title: 'Edit Commission Rules',
-    desc: 'ระบบคำนวณค่าคอมมิชชั่น override compression และ clawback',
-    icon: 'pi pi-sitemap',
-    iconBg: 'bg-amber-50', iconColor: 'text-amber-600',
-    metricLabel: 'กฎที่ใช้งาน',
-    metricValue: '5',
-    to: '/commissions/engine',
-  },
+  // Commission Rules card removed with the MGM rewrite. Will be replaced
+  // by the tier / matrix admin surface when PR-A2/A4 land.
   {
     key: 'audit',
     title: 'View System Audit Logs',

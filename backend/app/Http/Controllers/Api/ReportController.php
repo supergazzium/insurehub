@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Response;
@@ -127,7 +128,7 @@ class ReportController extends ApiController
      * Build the base joined query for the renewal-pipeline endpoints. Keeps
      * the FROM/JOIN chain identical between the JSON and PDF exports.
      */
-    private function expiringSoonBaseQuery(int $tenantId, string $from, string $to): \Illuminate\Database\Query\Builder
+    private function expiringSoonBaseQuery(int $tenantId, string $from, string $to): Builder
     {
         $latestContacted = DB::table('policy_events')
             ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
@@ -179,7 +180,7 @@ class ReportController extends ApiController
      * Apply the shared filter set (carrier/product/type/insureType/q) to a
      * base query. Mutates the builder in place; also used by the PDF export.
      */
-    private function applyExpiringSoonFilters(\Illuminate\Database\Query\Builder $q, Request $request): void
+    private function applyExpiringSoonFilters(Builder $q, Request $request): void
     {
         if ($carrierId = $request->input('carrierId')) {
             $q->where('p.carrier_id', $carrierId);
@@ -197,7 +198,7 @@ class ReportController extends ApiController
         if ($search !== '') {
             $like = "%{$search}%";
             $digits = preg_replace('/\D/', '', $search) ?? '';
-            $q->where(function ($w) use ($like, $digits, $search): void {
+            $q->where(function ($w) use ($like, $digits): void {
                 $w->where('c.first_name', 'like', $like)
                     ->orWhere('c.last_name', 'like', $like)
                     ->orWhereRaw("CONCAT_WS(' ', c.first_name, c.last_name) LIKE ?", [$like])
@@ -230,10 +231,15 @@ class ReportController extends ApiController
             $from = Carbon::today()->toDateString();
             $to = Carbon::today()->addDays($days)->toDateString();
         } else {
-            if ($from === '') $from = Carbon::today()->toDateString();
-            if ($to === '') $to = Carbon::parse($from)->addDays(60)->toDateString();
+            if ($from === '') {
+                $from = Carbon::today()->toDateString();
+            }
+            if ($to === '') {
+                $to = Carbon::parse($from)->addDays(60)->toDateString();
+            }
             $days = (int) Carbon::parse($from)->diffInDays(Carbon::parse($to));
         }
+
         return [$from, $to, $days];
     }
 
@@ -312,7 +318,7 @@ class ReportController extends ApiController
                 'applicationNo' => $r->application_no,
                 'policyNo' => $r->policy_no,
                 'customerCode' => $r->customer_code,
-                'customerName' => trim(($r->first_name ?? '') . ' ' . ($r->last_name ?? '')),
+                'customerName' => trim(($r->first_name ?? '').' '.($r->last_name ?? '')),
                 'agentCode' => $r->agent_code,
                 'productCode' => $r->code,
                 'productName' => $r->name,
@@ -326,132 +332,6 @@ class ReportController extends ApiController
                 'perPage' => $rows->perPage(),
                 'total' => $rows->total(),
                 'lastPage' => $rows->lastPage(),
-            ],
-        ]);
-    }
-
-    /**
-     * Agent commission ledger — unified InH + AG main + rider commissions.
-     * Analogue of `v_agent_commission_ledger`. Filterable by agent_code,
-     * party (inh|ag), and app_date range.
-     */
-    public function agentCommissionLedger(Request $request): JsonResponse
-    {
-        $tenantId = $this->tenantId($request);
-        $agentCode = $request->string('agentCode')->toString();
-        $party = $request->string('party')->toString();
-        $fromDate = $request->string('fromDate')->toString();
-        $toDate = $request->string('toDate')->toString();
-
-        // Main commissions.
-        $main = DB::table('policies as p')
-            ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
-            ->where('p.tenant_id', $tenantId)
-            ->whereNull('p.deleted_at')
-            ->select([
-                DB::raw("'main' as source"),
-                'p.id as policy_id',
-                'p.application_no',
-                'p.app_date',
-                'a.agent_code',
-                DB::raw("'inh' as party"),
-                DB::raw('p.main_com_rate_inh as com_rate'),
-                DB::raw('p.main_com_amt_inh as com_amount'),
-                'p.main_premium as base_premium',
-            ])
-            ->unionAll(
-                DB::table('policies as p')
-                    ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
-                    ->where('p.tenant_id', $tenantId)
-                    ->whereNull('p.deleted_at')
-                    ->select([
-                        DB::raw("'main' as source"),
-                        'p.id as policy_id',
-                        'p.application_no',
-                        'p.app_date',
-                        'a.agent_code',
-                        DB::raw("'ag' as party"),
-                        DB::raw('p.main_com_rate_ag as com_rate'),
-                        DB::raw('p.main_com_amt_ag as com_amount'),
-                        'p.main_premium as base_premium',
-                    ])
-            );
-
-        // Rider commissions (both parties on each rider).
-        $riders = DB::table('policy_riders as r')
-            ->join('policies as p', 'p.id', '=', 'r.policy_id')
-            ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
-            ->where('p.tenant_id', $tenantId)
-            ->whereNull('p.deleted_at')
-            ->select([
-                DB::raw("'rider' as source"),
-                'r.policy_id',
-                'p.application_no',
-                'p.app_date',
-                'a.agent_code',
-                DB::raw("'inh' as party"),
-                DB::raw('r.com_rate_inh as com_rate'),
-                DB::raw('r.com_amt_inh as com_amount'),
-                'r.premium as base_premium',
-            ])
-            ->unionAll(
-                DB::table('policy_riders as r')
-                    ->join('policies as p', 'p.id', '=', 'r.policy_id')
-                    ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
-                    ->where('p.tenant_id', $tenantId)
-                    ->whereNull('p.deleted_at')
-                    ->select([
-                        DB::raw("'rider' as source"),
-                        'r.policy_id',
-                        'p.application_no',
-                        'p.app_date',
-                        'a.agent_code',
-                        DB::raw("'ag' as party"),
-                        DB::raw('r.com_rate_ag as com_rate'),
-                        DB::raw('r.com_amt_ag as com_amount'),
-                        'r.premium as base_premium',
-                    ])
-            );
-
-        $sub = DB::query()->fromSub($main->unionAll($riders), 'ledger');
-
-        if ($agentCode !== '') {
-            $sub->where('agent_code', $agentCode);
-        }
-        if ($party !== '') {
-            $sub->where('party', $party);
-        }
-        if ($fromDate !== '') {
-            $sub->where('app_date', '>=', $fromDate);
-        }
-        if ($toDate !== '') {
-            $sub->where('app_date', '<=', $toDate);
-        }
-
-        $rows = $sub->orderBy('app_date', 'desc')->orderBy('policy_id')
-            ->limit($this->perPage($request, 200, 1000))
-            ->get();
-
-        return response()->json([
-            'data' => $rows->map(fn ($r) => [
-                'source' => $r->source,
-                'policyId' => (string) $r->policy_id,
-                'applicationNo' => $r->application_no,
-                'appDate' => $r->app_date,
-                'agentCode' => $r->agent_code,
-                'party' => $r->party,
-                'commissionRate' => $r->com_rate !== null ? (float) $r->com_rate : null,
-                'commissionAmount' => $r->com_amount !== null ? (float) $r->com_amount : null,
-                'basePremium' => $r->base_premium !== null ? (float) $r->base_premium : null,
-            ]),
-            'meta' => [
-                'total' => $rows->count(),
-                'filter' => [
-                    'agentCode' => $agentCode ?: null,
-                    'party' => $party ?: null,
-                    'fromDate' => $fromDate ?: null,
-                    'toDate' => $toDate ?: null,
-                ],
             ],
         ]);
     }
@@ -479,7 +359,11 @@ class ReportController extends ApiController
                 DB::raw('COUNT(*) as apps_written'),
                 DB::raw("SUM(CASE WHEN p.status = 'active' THEN 1 ELSE 0 END) as apps_approved"),
                 DB::raw('SUM(COALESCE(p.annual_premium, 0)) as premium_total'),
-                DB::raw('SUM(COALESCE(p.main_com_amt_ag, 0)) as commission_ag_total'),
+                // commission_ag_total intentionally zero — the old
+                // main_com_amt_ag column is dropped in the MGM rewrite. Once
+                // the new commission_ledgers table exists, this SUM will
+                // read from there. See PR-D.
+                DB::raw('0 as commission_ag_total'),
             ])
             ->groupBy(DB::raw("DATE_FORMAT(p.app_date, '%Y-%m'), a.agent_code, a.first_name, a.last_name"))
             ->orderBy('month', 'desc')

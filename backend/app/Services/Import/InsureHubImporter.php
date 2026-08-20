@@ -43,6 +43,7 @@ class InsureHubImporter
 
     /**
      * Cache: legacy code → new PK id, per entity, populated as each step runs.
+     *
      * @var array<string, array<string, int>>
      */
     private array $idCache = [
@@ -86,7 +87,6 @@ class InsureHubImporter
         'lookups',
         'carriers',
         'products',
-        'product_commission_rates',
         'agents_pass1',
         'agents_pass2',
         'customers',
@@ -110,18 +110,21 @@ class InsureHubImporter
     public function setCommand(Command $command): self
     {
         $this->command = $command;
+
         return $this;
     }
 
     public function setTenantId(int $tenantId): self
     {
         $this->tenantId = $tenantId;
+
         return $this;
     }
 
     public function setDryRun(bool $dryRun): self
     {
         $this->dryRun = $dryRun;
+
         return $this;
     }
 
@@ -129,6 +132,7 @@ class InsureHubImporter
     public function setOnly(?array $only): self
     {
         $this->only = $only;
+
         return $this;
     }
 
@@ -142,7 +146,7 @@ class InsureHubImporter
         $this->preloadLegacyLookups($legacy);
 
         foreach ($this->availableSteps as $step) {
-            if ($this->only !== null && !in_array($step, $this->only, true)) {
+            if ($this->only !== null && ! in_array($step, $this->only, true)) {
                 continue;
             }
             $this->runStep($step, $legacy, $primary);
@@ -172,8 +176,6 @@ class InsureHubImporter
             'customers',
             'recruitment_links',
             'agents',
-            'product_commission_rate_installments',
-            'product_commission_rates',
             'contract_schedule_rows',
             'contracts',
             'products',
@@ -196,24 +198,23 @@ class InsureHubImporter
 
         try {
             $counts = match ($step) {
-                'tenant'                     => $this->stepTenant($primary),
-                'lookups'                    => $this->stepLookups($legacy, $primary),
-                'carriers'                   => $this->stepCarriers($legacy, $primary),
-                'products'                   => $this->stepProducts($legacy, $primary),
-                'product_commission_rates'   => $this->stepProductCommissionRates($legacy, $primary),
-                'agents_pass1'               => $this->stepAgentsPass1($legacy, $primary),
-                'agents_pass2'               => $this->stepAgentsPass2($legacy, $primary),
-                'customers'                  => $this->stepCustomers($legacy, $primary),
-                'policies_pass1'             => $this->stepPoliciesPass1($legacy, $primary),
-                'policies_pass2'             => $this->stepPoliciesPass2($legacy, $primary),
-                'policies_motor'             => $this->stepPoliciesMotor($legacy, $primary),
-                'policies_property'          => $this->stepPoliciesProperty($legacy, $primary),
-                'riders'                     => $this->stepRiders($legacy, $primary),
-                'beneficiaries'              => $this->stepBeneficiaries($legacy, $primary),
-                'payments'                   => $this->stepPayments($legacy, $primary),
-                'refunds'                    => $this->stepRefunds($legacy, $primary),
-                'rebates'                    => $this->stepRebates($legacy, $primary),
-                'import_failures'            => $this->stepImportFailures($legacy, $primary),
+                'tenant' => $this->stepTenant($primary),
+                'lookups' => $this->stepLookups($legacy, $primary),
+                'carriers' => $this->stepCarriers($legacy, $primary),
+                'products' => $this->stepProducts($legacy, $primary),
+                'agents_pass1' => $this->stepAgentsPass1($legacy, $primary),
+                'agents_pass2' => $this->stepAgentsPass2($legacy, $primary),
+                'customers' => $this->stepCustomers($legacy, $primary),
+                'policies_pass1' => $this->stepPoliciesPass1($legacy, $primary),
+                'policies_pass2' => $this->stepPoliciesPass2($legacy, $primary),
+                'policies_motor' => $this->stepPoliciesMotor($legacy, $primary),
+                'policies_property' => $this->stepPoliciesProperty($legacy, $primary),
+                'riders' => $this->stepRiders($legacy, $primary),
+                'beneficiaries' => $this->stepBeneficiaries($legacy, $primary),
+                'payments' => $this->stepPayments($legacy, $primary),
+                'refunds' => $this->stepRefunds($legacy, $primary),
+                'rebates' => $this->stepRebates($legacy, $primary),
+                'import_failures' => $this->stepImportFailures($legacy, $primary),
                 default => ['inserted' => 0, 'updated' => 0, 'skipped' => 0],
             };
 
@@ -242,13 +243,13 @@ class InsureHubImporter
 
     private function preloadLegacyLookups(ConnectionInterface $legacy): void
     {
-        $this->luDriverType     = $legacy->table('lu_driver_type')->pluck('label', 'id')->all();
-        $this->luVehicleType    = $legacy->table('lu_vehicle_type')->pluck('label', 'id')->all();
-        $this->luPaymentType    = $legacy->table('lu_payment_type')->pluck('label', 'id')->all();
+        $this->luDriverType = $legacy->table('lu_driver_type')->pluck('label', 'id')->all();
+        $this->luVehicleType = $legacy->table('lu_vehicle_type')->pluck('label', 'id')->all();
+        $this->luPaymentType = $legacy->table('lu_payment_type')->pluck('label', 'id')->all();
         $this->luFinanceCompany = $legacy->table('lu_finance_company')->pluck('label', 'id')->all();
-        $this->luRelation       = $legacy->table('lu_relation')->pluck('label', 'id')->all();
-        $this->luWhtStatus      = $legacy->table('lu_wht_status')->pluck('label', 'id')->all();
-        $this->luCustomerType   = $legacy->table('lu_customer_type')->pluck('label', 'id')->all();
+        $this->luRelation = $legacy->table('lu_relation')->pluck('label', 'id')->all();
+        $this->luWhtStatus = $legacy->table('lu_wht_status')->pluck('label', 'id')->all();
+        $this->luCustomerType = $legacy->table('lu_customer_type')->pluck('label', 'id')->all();
     }
 
     // ---------- Steps ----------
@@ -267,6 +268,7 @@ class InsureHubImporter
             'created_at' => $this->now,
             'updated_at' => $this->now,
         ]);
+
         return ['inserted' => 1, 'updated' => 0, 'skipped' => 0];
     }
 
@@ -284,6 +286,7 @@ class InsureHubImporter
             $existing = $primary->table('banks')->where('name_th', $name)->first();
             if ($existing) {
                 $this->idCache['banks'][$name] = (int) $existing->id;
+
                 continue;
             }
             $id = $primary->table('banks')->insertGetId([
@@ -308,6 +311,7 @@ class InsureHubImporter
                 $code = (string) $row->location_code;
                 if (isset($existingCodes[$code])) {
                     $this->idCache['locations'][$code] = (int) $existingCodes[$code];
+
                     continue;
                 }
                 $rows[] = [
@@ -346,6 +350,7 @@ class InsureHubImporter
             $existing = $primary->table('payment_methods')->where('name_th', $label)->first();
             if ($existing) {
                 $this->idCache['payment_methods'][$label] = (int) $existing->id;
+
                 continue;
             }
             $id = $primary->table('payment_methods')->insertGetId([
@@ -442,11 +447,13 @@ class InsureHubImporter
             $code = $this->normCode($row->product_code);
             if ($code === '') {
                 $skip++;
+
                 continue;
             }
             $carrierId = $this->idCache['carriers'][$this->normCode($row->company_code)] ?? null;
             if ($carrierId === null) {
                 $skip++;
+
                 continue;
             }
 
@@ -512,48 +519,8 @@ class InsureHubImporter
         if (str_contains($cat, 'group') || str_contains($cat, 'กลุ่ม')) {
             return 'group';
         }
+
         return 'other';
-    }
-
-    /** @return array<string, int> */
-    private function stepProductCommissionRates(ConnectionInterface $legacy, ConnectionInterface $primary): array
-    {
-        $ins = 0;
-        $skip = 0;
-
-        // Clear the child table first — this is a bulk load.
-        // DELETE (not TRUNCATE) so it stays inside the transaction.
-        if (!$this->dryRun) {
-            $primary->table('product_commission_rate_installments')->delete();
-        }
-
-        $buffer = [];
-        foreach ($legacy->table('product_commission_rates')->cursor() as $row) {
-            $productId = $this->idCache['products'][$this->normCode($row->product_code)] ?? null;
-            if ($productId === null) {
-                $skip++;
-                continue;
-            }
-            $buffer[] = [
-                'product_id' => $productId,
-                'party' => (string) $row->party,
-                'installment_term' => (string) ($row->installment_term ?? 'main'),
-                'rate' => (float) $row->rate,
-                'created_at' => $this->now,
-                'updated_at' => $this->now,
-            ];
-            if (count($buffer) >= self::BATCH_SIZE) {
-                $primary->table('product_commission_rate_installments')->insert($buffer);
-                $ins += count($buffer);
-                $buffer = [];
-            }
-        }
-        if ($buffer) {
-            $primary->table('product_commission_rate_installments')->insert($buffer);
-            $ins += count($buffer);
-        }
-
-        return ['inserted' => $ins, 'updated' => 0, 'skipped' => $skip];
     }
 
     /** @return array<string, int> */
@@ -660,11 +627,12 @@ class InsureHubImporter
         foreach ($legacy->table('agent_hierarchy')->get() as $row) {
             $agentId = $this->idCache['agents'][$this->normAgent($row->agent_code)] ?? null;
             $uplineId = $this->idCache['agents'][$this->normAgent($row->upline_code)] ?? null;
-            if (!$agentId || !$uplineId) {
+            if (! $agentId || ! $uplineId) {
                 $skip++;
+
                 continue;
             }
-            $level = 'l' . max(1, min(5, (int) $row->level));
+            $level = 'l'.max(1, min(5, (int) $row->level));
             $primary->table('agents')->where('id', $agentId)->update([
                 'parent_agent_id' => $uplineId,
                 'level' => $level,
@@ -794,7 +762,7 @@ class InsureHubImporter
     }
 
     /**
-     * @param array<string, array<string, mixed>> $chunk
+     * @param  array<string, array<string, mixed>>  $chunk
      */
     private function flushCustomerChunk(ConnectionInterface $primary, array $chunk): void
     {
@@ -823,14 +791,16 @@ class InsureHubImporter
             $appNo = $this->normCode($row->application_code);
             if ($appNo === '') {
                 $skip++;
+
                 continue;
             }
 
             $customerId = $this->idCache['customers'][$this->normCode($row->client_code)] ?? null;
             $agentId = $this->idCache['agents'][$this->normAgent($row->agent_code)] ?? null;
             $productId = $this->idCache['products'][$this->normCode($row->product_code)] ?? null;
-            if (!$customerId || !$agentId || !$productId) {
+            if (! $customerId || ! $agentId || ! $productId) {
                 $skip++;
+
                 continue;
             }
 
@@ -841,6 +811,7 @@ class InsureHubImporter
             }
             if ($carrierId === null) {
                 $skip++;
+
                 continue;
             }
 
@@ -907,10 +878,6 @@ class InsureHubImporter
                 'status_note' => $row->policy_status_note,
                 'freelook_active' => strtolower((string) ($row->freelook_status ?? '')) === 'active',
                 'payment_method_id' => $this->resolvePaymentMethodId($row->payment_method_id),
-                'main_com_rate_inh' => $row->main_commission_inh_pct,
-                'main_com_amt_inh' => $row->main_commission_inh_amount,
-                'main_com_rate_ag' => $row->main_commission_ag_pct,
-                'main_com_amt_ag' => $row->main_commission_ag_amount,
                 'mailing_add_by_policy' => $row->mailing_address,
                 'mailing_note' => $row->mailing_note,
                 'internal_note' => $row->internal_note,
@@ -962,6 +929,7 @@ class InsureHubImporter
         $sum = (float) ($row->main_premium ?? 0)
              + (float) ($row->duty_stamp ?? 0)
              + (float) ($row->vat ?? 0);
+
         return abs($total - $sum) > 1.0 ? 'mismatch' : 'ok';
     }
 
@@ -970,6 +938,7 @@ class InsureHubImporter
         if ($legacyId === null || $legacyId === '') {
             return null;
         }
+
         return null; // TODO: wire once payment methods importer resolves label→id
     }
 
@@ -986,8 +955,9 @@ class InsureHubImporter
             ->cursor() as $row) {
             $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
             $refId = $this->idCache['policies'][$this->normCode($row->referred_application_code)] ?? null;
-            if (!$policyId || !$refId) {
+            if (! $policyId || ! $refId) {
                 $skip++;
+
                 continue;
             }
             $primary->table('policies')->where('id', $policyId)->update([
@@ -996,6 +966,7 @@ class InsureHubImporter
             ]);
             $upd++;
         }
+
         return ['inserted' => 0, 'updated' => $upd, 'skipped' => $skip];
     }
 
@@ -1013,12 +984,13 @@ class InsureHubImporter
 
         foreach ($legacy->table('vehicle_details')->cursor() as $row) {
             $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
-            if (!$policyId) {
+            if (! $policyId) {
                 $skip++;
+
                 continue;
             }
             $policyRow = $primary->table('policies')->where('id', $policyId)->first();
-            $isNonMotor = !str_contains(strtolower((string) ($motorFlags[$policyRow->product_id] ?? '')), 'motor');
+            $isNonMotor = ! str_contains(strtolower((string) ($motorFlags[$policyRow->product_id] ?? '')), 'motor');
 
             $primary->table('policies')->where('id', $policyId)->update([
                 'motor_type_driver' => $this->luDriverType[(string) ($row->type_driver ?? '')] ?? null,
@@ -1036,6 +1008,7 @@ class InsureHubImporter
             ]);
             $upd++;
         }
+
         return ['inserted' => 0, 'updated' => $upd, 'skipped' => $skip];
     }
 
@@ -1047,8 +1020,9 @@ class InsureHubImporter
 
         foreach ($legacy->table('property_details')->cursor() as $row) {
             $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
-            if (!$policyId) {
+            if (! $policyId) {
                 $skip++;
+
                 continue;
             }
             $primary->table('policies')->where('id', $policyId)->update([
@@ -1064,6 +1038,7 @@ class InsureHubImporter
             ]);
             $upd++;
         }
+
         return ['inserted' => 0, 'updated' => $upd, 'skipped' => $skip];
     }
 
@@ -1073,7 +1048,7 @@ class InsureHubImporter
         $ins = 0;
         $skip = 0;
 
-        if (!$this->dryRun) {
+        if (! $this->dryRun) {
             $primary->table('policy_riders')
                 ->whereIn('policy_id', array_values($this->idCache['policies']))
                 ->delete();
@@ -1082,8 +1057,9 @@ class InsureHubImporter
         $chunk = [];
         foreach ($legacy->table('application_riders')->cursor() as $row) {
             $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
-            if (!$policyId) {
+            if (! $policyId) {
                 $skip++;
+
                 continue;
             }
             $productId = $this->idCache['products'][$this->normCode($row->rider_code)] ?? null;
@@ -1114,6 +1090,7 @@ class InsureHubImporter
             $primary->table('policy_riders')->insert($chunk);
             $ins += count($chunk);
         }
+
         return ['inserted' => $ins, 'updated' => 0, 'skipped' => $skip];
     }
 
@@ -1123,7 +1100,7 @@ class InsureHubImporter
         $ins = 0;
         $skip = 0;
 
-        if (!$this->dryRun) {
+        if (! $this->dryRun) {
             $primary->table('policy_beneficiaries')
                 ->whereIn('policy_id', array_values($this->idCache['policies']))
                 ->delete();
@@ -1132,8 +1109,9 @@ class InsureHubImporter
         $chunk = [];
         foreach ($legacy->table('application_beneficiaries')->cursor() as $row) {
             $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
-            if (!$policyId) {
+            if (! $policyId) {
                 $skip++;
+
                 continue;
             }
             $relation = $this->luRelation[(string) ($row->relation_id ?? '')] ?? $row->relation_raw;
@@ -1156,6 +1134,7 @@ class InsureHubImporter
             $primary->table('policy_beneficiaries')->insert($chunk);
             $ins += count($chunk);
         }
+
         return ['inserted' => $ins, 'updated' => 0, 'skipped' => $skip];
     }
 
@@ -1165,7 +1144,7 @@ class InsureHubImporter
         $ins = 0;
         $skip = 0;
 
-        if (!$this->dryRun) {
+        if (! $this->dryRun) {
             $primary->table('policy_payments')
                 ->whereIn('policy_id', array_values($this->idCache['policies']))
                 ->delete();
@@ -1174,8 +1153,9 @@ class InsureHubImporter
         $chunk = [];
         foreach ($legacy->table('payments')->cursor() as $row) {
             $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
-            if (!$policyId) {
+            if (! $policyId) {
                 $skip++;
+
                 continue;
             }
             $chunk[] = [
@@ -1201,6 +1181,7 @@ class InsureHubImporter
             $primary->table('policy_payments')->insert($chunk);
             $ins += count($chunk);
         }
+
         return ['inserted' => $ins, 'updated' => 0, 'skipped' => $skip];
     }
 
@@ -1212,8 +1193,9 @@ class InsureHubImporter
 
         foreach ($legacy->table('refunds')->cursor() as $row) {
             $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
-            if (!$policyId) {
+            if (! $policyId) {
                 $skip++;
+
                 continue;
             }
             $primary->table('policies')->where('id', $policyId)->update([
@@ -1229,6 +1211,7 @@ class InsureHubImporter
             ]);
             $upd++;
         }
+
         return ['inserted' => 0, 'updated' => $upd, 'skipped' => $skip];
     }
 
@@ -1238,7 +1221,7 @@ class InsureHubImporter
         $ins = 0;
         $skip = 0;
 
-        if (!$this->dryRun) {
+        if (! $this->dryRun) {
             $primary->table('policy_rebates')
                 ->whereIn('policy_id', array_values($this->idCache['policies']))
                 ->delete();
@@ -1247,8 +1230,9 @@ class InsureHubImporter
         $chunk = [];
         foreach ($legacy->table('rebates_ledger')->cursor() as $row) {
             $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
-            if (!$policyId) {
+            if (! $policyId) {
                 $skip++;
+
                 continue;
             }
             $chunk[] = [
@@ -1282,6 +1266,7 @@ class InsureHubImporter
             $primary->table('policy_rebates')->insert($chunk);
             $ins += count($chunk);
         }
+
         return ['inserted' => $ins, 'updated' => 0, 'skipped' => $skip];
     }
 
@@ -1290,7 +1275,7 @@ class InsureHubImporter
     {
         $ins = 0;
 
-        if (!$this->dryRun) {
+        if (! $this->dryRun) {
             $primary->table('applications_import_failures')->delete();
         }
 
@@ -1342,6 +1327,7 @@ class InsureHubImporter
             $primary->table('applications_import_failures')->insert($chunk);
             $ins += count($chunk);
         }
+
         return ['inserted' => $ins, 'updated' => 0, 'skipped' => 0];
     }
 
@@ -1350,21 +1336,22 @@ class InsureHubImporter
         // Determine which FK didn't resolve. Reuses in-memory legacy tables where cheap.
         $clientCode = trim((string) ($stg->client_code ?? ''));
         $inClientsExists = $clientCode !== '' && $legacy->table('clients')->where('client_code', $clientCode)->exists();
-        if (!$inClientsExists) {
+        if (! $inClientsExists) {
             return 'missing_client';
         }
         $productCode = trim((string) ($stg->product_code ?? ''));
-        if ($productCode === '' || !$legacy->table('products')->where('product_code', $productCode)->exists()) {
+        if ($productCode === '' || ! $legacy->table('products')->where('product_code', $productCode)->exists()) {
             return 'missing_product';
         }
         $agentCode = trim((string) ($stg->insure_influencer_code ?? ''));
-        if ($agentCode === '' || !$legacy->table('agents')->where('agent_code', $agentCode)->exists()) {
+        if ($agentCode === '' || ! $legacy->table('agents')->where('agent_code', $agentCode)->exists()) {
             return 'missing_agent';
         }
         $carrierCode = trim((string) ($stg->inc_code ?? ''));
-        if ($carrierCode === '' || !$legacy->table('insurance_companies')->where('company_code', $carrierCode)->exists()) {
+        if ($carrierCode === '' || ! $legacy->table('insurance_companies')->where('company_code', $carrierCode)->exists()) {
             return 'missing_company';
         }
+
         return 'other';
     }
 
@@ -1395,6 +1382,7 @@ class InsureHubImporter
         // Strip ASCII whitespace + Unicode whitespace incl. NBSP (U+00A0) and
         // zero-width space (U+200B). Access CSV exports have all three.
         $s = (string) ($value ?? '');
+
         return preg_replace('/^[\s\x{00A0}\x{200B}]+|[\s\x{00A0}\x{200B}]+$/u', '', $s) ?? $s;
     }
 
@@ -1403,6 +1391,7 @@ class InsureHubImporter
         if ($value === null || $value === '') {
             return null;
         }
+
         return mb_substr((string) $value, 0, $limit);
     }
 

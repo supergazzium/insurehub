@@ -4,14 +4,11 @@ declare(strict_types=1);
 
 namespace App\Models;
 
-use App\Observers\PolicyObserver;
-use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
-#[ObservedBy([PolicyObserver::class])]
 class Policy extends Model
 {
     use SoftDeletes;
@@ -25,6 +22,7 @@ class Policy extends Model
         'app_date' => 'date',
         'create_date' => 'date',
         'effective_date' => 'date',
+        'insured_person_birth_date' => 'date',
         'expiry_date' => 'date',
         'issue_date' => 'date',
         'next_premium_due' => 'date',
@@ -93,11 +91,6 @@ class Policy extends Model
     public function documents(): HasMany
     {
         return $this->hasMany(PolicyDocument::class);
-    }
-
-    public function commissionTransactions(): HasMany
-    {
-        return $this->hasMany(CommissionTransaction::class);
     }
 
     public function rebate(): HasMany
