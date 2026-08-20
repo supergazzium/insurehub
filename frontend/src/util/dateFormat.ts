@@ -24,11 +24,3 @@ export function toIsoDate(d: Date | null | undefined): string {
   const day = String(d.getDate()).padStart(2, '0')
   return `${y}-${m}-${day}`
 }
-
-/** Parse an ISO `YYYY-MM-DD` string into a Date at local midnight. */
-export function fromIsoDate(iso: string | null | undefined): Date | null {
-  if (!iso) return null
-  const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(iso)
-  if (!m) return null
-  return new Date(Number(m[1]), Number(m[2]) - 1, Number(m[3]))
-}

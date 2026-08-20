@@ -16,7 +16,7 @@ import DateInput from '../../components/DateInput.vue'
 import { toIsoDate } from '../../util/dateFormat'
 import { api } from '../../api/client'
 import { fetchProvinces, fetchDistricts, fetchSubDistricts, fetchNamePrefixes, fetchNationalities, type NamePrefixRow, type NationalityRow } from '../../api/portal'
-import { isThaiName, isThaiId13, isThaiMobile, isThaiLandline, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
+import { isThaiName, isThaiJuristicName, isThaiId13, isThaiMobile, isThaiLandline, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
 
 const props = defineProps<{ open: boolean }>()
 const emit = defineEmits<{
@@ -161,6 +161,9 @@ function validateLastName(): string | null {
 function validateJuristicName(): string | null {
   if (form.customerType !== 'corporate') return null
   if (form.juristicName.trim() === '') return 'จำเป็น'
+  // Same charset gate as individual names — must contain Thai letters and
+  // may include Latin punctuation ("บริษัท เอ.บี.ซี. จำกัด (มหาชน)").
+  if (!isThaiJuristicName(form.juristicName)) return 'ใช้อักษรไทย (และตัวเลข/เครื่องหมายที่จำเป็น)'
   return null
 }
 function validateGender(): string | null {

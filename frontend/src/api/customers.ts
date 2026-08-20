@@ -1,7 +1,6 @@
 // Typed clients for /api/v1/customers list endpoint.
 
-import { api, buildQuery, type Paginated, type Single } from './client'
-import type { Customer } from '../stores/customers'
+import { api, buildQuery, type Paginated } from './client'
 
 /** Lean row returned by CustomerController::index — matches CustomerListResource. */
 export interface CustomerListRow {
@@ -39,9 +38,4 @@ export interface CustomerListFilters {
 
 export function fetchCustomerList(filters: CustomerListFilters = {}) {
   return api.get<Paginated<CustomerListRow>>(`customers${buildQuery({ ...filters })}`)
-}
-
-/** Full detail fetch. */
-export function fetchCustomer(id: string) {
-  return api.get<Single<Customer>>(`customers/${id}`)
 }

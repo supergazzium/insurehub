@@ -1,7 +1,6 @@
 // Typed clients for /api/v1/agents list endpoint.
 
-import { api, buildQuery, type Paginated, type Single } from './client'
-import type { Agent } from '../stores/agents'
+import { api, buildQuery, type Paginated } from './client'
 
 /** Lean row returned by AgentController::index — matches AgentListResource. */
 export interface AgentListRow {
@@ -41,9 +40,4 @@ export interface AgentListFilters {
 
 export function fetchAgentList(filters: AgentListFilters = {}) {
   return api.get<Paginated<AgentListRow>>(`agents${buildQuery({ ...filters })}`)
-}
-
-/** Full detail fetch. */
-export function fetchAgent(id: string) {
-  return api.get<Single<Agent>>(`agents/${id}`)
 }
