@@ -381,6 +381,31 @@ const canSubmit = computed(() => {
   return true
 })
 
+// Pre-submit gate for CreateModal — returning any messages triggers a
+// browser alert that lists every failing field in Thai. Also flips
+// `attemptedSubmit` on so the inline red errors light up in place.
+function collectValidationProblems(): string[] {
+  attemptedSubmit.value = true
+  const problems: string[] = []
+  const push = (label: string, err: string | null): void => {
+    if (err) problems.push(`${label}: ${err}`)
+  }
+  if (form.customerCode.trim() === '') problems.push('รหัสลูกค้า: จำเป็น')
+  push('ชื่อ', errFirstName.value)
+  push('นามสกุล', errLastName.value)
+  push('ชื่อนิติบุคคล', errJuristicName.value)
+  push('เพศ', errGender.value)
+  push('เลขบัตรประชาชน', errIdCard.value)
+  push('เลขประจำตัวผู้เสียภาษี', errTaxId.value)
+  push('เลขหนังสือเดินทาง', errPassport.value)
+  push('สัญชาติ', errNationality.value)
+  push('โทรศัพท์มือถือ', errPhone.value)
+  push('โทรศัพท์บ้าน', errTelPhone.value)
+  push('อีเมล', errEmail.value)
+  push('วันเกิด', errBirth.value)
+  return problems
+}
+
 // ─── Payload ──────────────────────────────────────────────────────────────
 const payload = computed(() => {
   const base: Record<string, unknown> = {
@@ -471,7 +496,7 @@ watch(
 <template>
   <CreateModal
     :open="open" entity="customers" title="New Customer"
-    :payload="payload" :can-submit="canSubmit"
+    :payload="payload" :can-submit="canSubmit" :validate="collectValidationProblems"
     @close="emit('close')" @created="(row) => emit('created', row)"
   >
     <template #default="{ fieldErrors }">
