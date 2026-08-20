@@ -63,8 +63,6 @@ const IMPLEMENTED_MODULES = new Set([
   'portal-dashboard', 'portal-profile', 'portal-referral', 'portal-settings', 'portal-earnings',
   // Phase 4 (admin agent oversight)
   'admin-agent-approvals', 'admin-downline-tree', 'admin-access',
-  // Phase 7b (admin payout cycles)
-  'admin-payouts',
   // Phase 9 (motor tariff admin)
   'admin-motor-tariffs',
   'admin-commission-tiers',
