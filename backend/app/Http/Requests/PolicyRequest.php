@@ -69,7 +69,11 @@ class PolicyRequest extends FormRequest
             'actYear' => ['sometimes', 'integer', 'min:1'],
             'newOrRenew' => ['sometimes', 'string', 'in:new,renew'],
             'freelookActive' => ['sometimes', 'boolean'],
-            'status' => ['sometimes', 'string', 'in:quote,application,submitted,issued,active,lapsed,cancelled,reinstated,expired'],
+            // 7-state model per B1 §1. Legacy codes (quote/application/
+            // reinstated) still accepted on READ paths for the shim window;
+            // writes go through PolicyEventController which enforces the
+            // full transition matrix on top of this basic enum check.
+            'status' => ['sometimes', 'string', 'in:draft,quotation,submitted,approved,issued,active,expired,cancelled,rejected,lapsed'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'internalNote' => ['sometimes', 'nullable', 'string', 'max:255'],
             // Motor block — sent when the picked product is motor.

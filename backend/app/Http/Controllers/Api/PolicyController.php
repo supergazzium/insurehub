@@ -189,7 +189,11 @@ class PolicyController extends ApiController
         'coverage', 'effective_date', 'expiry_date',
     ];
 
-    private const LOCK_TRIGGER_STATUSES = ['issued', 'active', 'lapsed', 'cancelled', 'reinstated', 'expired'];
+    // Statuses that gate LOCKED_AFTER_ISSUED fields (see PATCH section
+    // handlers). Per B1 §3: add `approved` + `rejected`; retire
+    // `reinstated`. Approved locks financial fields; issued/active/
+    // terminal states lock everything except notes + mailing.
+    private const LOCK_TRIGGER_STATUSES = ['approved', 'issued', 'active', 'expired', 'cancelled', 'rejected', 'lapsed'];
 
     /**
      * Per-section update maps: request key (camelCase) → DB column (snake_case).

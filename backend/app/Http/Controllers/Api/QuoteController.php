@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Resources\PolicyResource;
 use App\Models\MotorActTariff;
 use App\Models\Policy;
+use App\Models\PolicyEvent;
 use App\Services\Insurance\PremiumCalculator;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -18,11 +19,11 @@ use Illuminate\Support\Facades\Validator;
  * Quotation module (Phase 5). All new policies begin as a quote — this
  * controller manages the quote lifecycle up to conversion:
  *
- *   POST /quotes                 create a new quote (status='quote')
+ *   POST /quotes                 create a new quote (status='quotation')
  *   GET  /quotes                 list quotes for the current tenant
  *   GET  /quotes/{policy}        show one quote
- *   PATCH /quotes/{policy}       update a draft quote
- *   POST /quotes/{policy}/convert  flip quote → application, assign
+ *   PATCH /quotes/{policy}       update a quotation-status quote
+ *   POST /quotes/{policy}/convert  flip quotation → submitted, assign
  *                                    application_no, keep the quote_no
  *
  * Supporting endpoints:
@@ -36,7 +37,10 @@ class QuoteController extends ApiController
     public function index(Request $request): AnonymousResourceCollection
     {
         $q = $this->scopeTenant(Policy::query(), $request)
-            ->where('status', 'quote')
+            // Accept both `quotation` (new) and `quote` (legacy) so any row
+            // that missed the C-2 backfill still surfaces in the list. C-20
+            // drops the legacy code and simplifies this clause.
+            ->whereIn('status', ['quotation', 'quote'])
             ->whereNull('deleted_at');
 
         if ($search = $request->string('q')->toString()) {
@@ -67,13 +71,26 @@ class QuoteController extends ApiController
 
         $payload = $this->toDbShape($data) + [
             'tenant_id' => $this->tenantId($request),
-            'status' => 'quote',
+            // Renamed `quote → quotation` per B1 §1. The `/quotes` HTTP
+            // route stays; only the persisted enum value changes so the
+            // state machine has a single vocabulary.
+            'status' => 'quotation',
             'quote_no' => $this->nextQuoteNo($this->tenantId($request)),
             'quote_date' => now()->toDateString(),
             'writing_agent_id' => $writingAgentId,
         ];
 
         $policy = Policy::create($payload);
+        // Stamp the creation event so the audit trail knows the row
+        // came in already-minted (not via draft-then-promote).
+        PolicyEvent::create([
+            'policy_id' => $policy->id,
+            'type' => 'quotationMinted',
+            'occurred_at' => now(),
+            'by_user_id' => $request->user()?->id,
+            'payload' => ['quoteNo' => $policy->quote_no, 'source' => 'quote-controller'],
+        ]);
+
         return (new PolicyResource($policy->fresh()))->response()->setStatusCode(201);
     }
 
@@ -86,8 +103,10 @@ class QuoteController extends ApiController
     public function update(Request $request, Policy $policy): PolicyResource
     {
         $this->authorizeTenant($request, $policy);
-        if ($policy->status !== 'quote') {
-            abort(409, 'This policy is no longer a quote and cannot be edited via /quotes.');
+        // Accept both the new `quotation` code and the legacy `quote` code
+        // during the shim window so any partial-deploy state still works.
+        if (! in_array($policy->status, ['quotation', 'quote'], true)) {
+            abort(409, 'This policy is no longer a quotation and cannot be edited via /quotes.');
         }
         $data = $this->validated($request);
         $policy->update($this->toDbShape($data));
@@ -95,21 +114,39 @@ class QuoteController extends ApiController
     }
 
     /**
-     * Convert quote → application. Assigns application_no if missing;
-     * keeps quote_no so the trail from quote to policy is traceable.
+     * Convert quotation → submitted (application). Assigns application_no
+     * if missing; keeps quote_no so the trail from quotation to policy is
+     * traceable. Routes the state change through PolicyEventController so
+     * the transition matrix + audit event fire from the single chokepoint.
      */
     public function convert(Request $request, Policy $policy): PolicyResource
     {
         $this->authorizeTenant($request, $policy);
-        if ($policy->status !== 'quote') {
-            abort(409, 'Only quotes can be converted to applications.');
+        if (! in_array($policy->status, ['quotation', 'quote'], true)) {
+            abort(409, 'Only quotations can be converted to applications.');
         }
 
-        $policy->update([
-            'status' => 'application',
-            'application_no' => $policy->application_no ?? $this->nextApplicationNo($policy->tenant_id),
-            'app_date' => now()->toDateString(),
-        ]);
+        $applicationNo = $policy->application_no ?? $this->nextApplicationNo($policy->tenant_id);
+        $appDate = now()->toDateString();
+
+        DB::transaction(function () use ($policy, $applicationNo, $appDate, $request): void {
+            $policy->update([
+                'status' => 'submitted',
+                'application_no' => $applicationNo,
+                'app_date' => $appDate,
+            ]);
+            PolicyEvent::create([
+                'policy_id' => $policy->id,
+                'type' => 'convertedToApplication',
+                'occurred_at' => now(),
+                'by_user_id' => $request->user()?->id,
+                'payload' => [
+                    'applicationNo' => $applicationNo,
+                    'appDate' => $appDate,
+                    'source' => 'quote-controller',
+                ],
+            ]);
+        });
 
         return new PolicyResource($policy->fresh());
     }
