@@ -37,8 +37,12 @@ class CustomerController extends ApiController
             ->where('c.tenant_id', $tenantId)
             ->whereNull('c.deleted_at')
             ->select([
-                'c.id', 'c.customer_code', 'c.customer_type', 'c.first_name', 'c.last_name',
-                'c.nickname', 'c.id_card', 'c.phone', 'c.email', 'c.province',
+                'c.id', 'c.customer_code', 'c.customer_type',
+                'c.title_th', 'c.first_name', 'c.last_name', 'c.nickname',
+                // juristic + tax + passport are needed so the list row can
+                // render corporate / foreign customer names + identity numbers.
+                'c.juristic_name', 'c.tax_id', 'c.passport',
+                'c.id_card', 'c.phone', 'c.email', 'c.province',
                 'c.assigned_agent_id',
                 'c.active', 'c.registered_at',
                 'a.agent_code as assigned_agent_code',
@@ -54,8 +58,15 @@ class CustomerController extends ApiController
                 $w->where('c.customer_code', 'like', $like)
                     ->orWhere('c.first_name', 'like', $like)
                     ->orWhere('c.last_name', 'like', $like)
-                    ->orWhere('c.email', 'like', $like)
+                    ->orWhere('c.nickname', 'like', $like)
+                    // Corporate & foreign customers weren't matchable by name
+                    // or identity number before — the filter now hits every
+                    // identifier the list column falls back to.
+                    ->orWhere('c.juristic_name', 'like', $like)
                     ->orWhere('c.id_card', 'like', $like)
+                    ->orWhere('c.tax_id', 'like', $like)
+                    ->orWhere('c.passport', 'like', $like)
+                    ->orWhere('c.email', 'like', $like)
                     ->orWhere('c.phone', 'like', $like);
             });
         }
@@ -138,6 +149,20 @@ class CustomerController extends ApiController
         if (! array_key_exists('registered_at', $payload)) {
             $payload['registered_at'] = now();
         }
+        // Stamp the creator so the detail drawer's "Created by" row is never
+        // empty. Agent-linked users fill `created_by_agent_id`; everyone else
+        // (Platform Admin, back-office) falls back to `created_by_user_id`.
+        // The two columns are mutually exclusive and the resource picks the
+        // populated one at read time.
+        $user = $request->user();
+        if ($user !== null) {
+            if (! array_key_exists('created_by_agent_id', $payload) && $user->agent_id !== null) {
+                $payload['created_by_agent_id'] = $user->agent_id;
+            }
+            if (! array_key_exists('created_by_user_id', $payload) && ($payload['created_by_agent_id'] ?? null) === null) {
+                $payload['created_by_user_id'] = $user->id;
+            }
+        }
         $customer = Customer::create($payload);
         return (new CustomerResource($customer))->response()->setStatusCode(201);
     }
@@ -145,7 +170,10 @@ class CustomerController extends ApiController
     public function show(Request $request, Customer $customer): CustomerResource
     {
         $this->authorizeTenant($request, $customer);
-        return new CustomerResource($customer->load(['kycDocs', 'assignmentHistory', 'assignedAgent']));
+        return new CustomerResource($customer->load([
+            'kycDocs', 'assignmentHistory', 'assignedAgent',
+            'createdByAgent', 'createdByUser',
+        ]));
     }
 
     public function update(CustomerRequest $request, Customer $customer): CustomerResource

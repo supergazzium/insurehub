@@ -2,15 +2,24 @@
 
 import { api, buildQuery, type Paginated } from './client'
 
-/** Lean row returned by CustomerController::index — matches CustomerListResource. */
+/** Lean row returned by CustomerController::index — matches CustomerListResource.
+ *
+ *  The identity block (titleTh, juristicName, taxId, passport) is included
+ *  so the list row can render a correct display name and identity number
+ *  for individual / foreign_individual / corporate customers without a
+ *  round-trip to /customers/{id}. */
 export interface CustomerListRow {
   id: string
   customerCode: string
   customerType: string
+  titleTh: string
   firstName: string
   lastName: string
   nickname: string
+  juristicName: string
   idCard: string
+  taxId: string
+  passport: string
   phone: string
   email: string
   province: string

@@ -6,6 +6,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useCustomerStore } from '../../stores/customers'
 import CustomerDetailDrawer from './CustomerDetailDrawer.vue'
 import CustomerCreateModal from './CustomerCreateModal.vue'
+import {
+  customerDisplayName,
+  customerInitials,
+  customerIdentityNumber,
+  customerTypeLabel,
+} from '../../utils/customerDisplay'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -153,25 +159,6 @@ const rangeText = computed(() => {
   return `${from.toLocaleString()}–${to.toLocaleString()} จาก ${meta.total.toLocaleString()}`
 })
 
-function initials(first: string, last: string): string {
-  const a = (first || '').trim().charAt(0)
-  const b = (last || '').trim().charAt(0)
-  return (a + b) || '?'
-}
-
-/**
- * Map the raw customer_type enum (as stored) to the Thai display label
- * the list renders. Unknown values fall through to the raw enum so bad
- * data is visible instead of being silently hidden as a dash.
- */
-function customerTypeLabel(t: string): string {
-  switch (t) {
-    case 'individual': return 'บุคคลธรรมดา'
-    case 'foreign_individual': return 'ชาวต่างชาติ'
-    case 'corporate': return 'นิติบุคคล'
-    default: return t
-  }
-}
 </script>
 
 <template>
@@ -193,7 +180,7 @@ function customerTypeLabel(t: string): string {
 
     <section class="card p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
       <div class="md:col-span-2">
-        <label class="text-xs font-medium text-slate-500 mb-1 block">ค้นหา (ชื่อ / บัตรประชาชน / โทรศัพท์ / อีเมล)</label>
+        <label class="text-xs font-medium text-slate-500 mb-1 block">ค้นหา (รหัส / ชื่อ / นิติบุคคล / บัตรประชาชน / เลขผู้เสียภาษี / passport / โทรศัพท์ / อีเมล)</label>
         <div class="relative">
           <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
           <input v-model.trim="filters.q" placeholder="ชื่อลูกค้า, C0001234, ..."
@@ -282,16 +269,16 @@ function customerTypeLabel(t: string): string {
               <td class="px-4 py-2">
                 <div class="flex items-center gap-2">
                   <div class="w-8 h-8 rounded-full bg-brand-50 text-brand-700 flex items-center justify-center text-xs font-medium shrink-0">
-                    {{ initials(c.firstName, c.lastName) }}
+                    {{ customerInitials(c) }}
                   </div>
                   <div class="text-slate-900">
-                    {{ c.firstName }} {{ c.lastName }}
+                    {{ customerDisplayName(c) || '—' }}
                     <span v-if="c.nickname" class="text-xs text-slate-500 ml-1">({{ c.nickname }})</span>
                   </div>
                 </div>
               </td>
               <td class="px-4 py-2 text-slate-600">{{ customerTypeLabel(c.customerType) }}</td>
-              <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ c.idCard || '—' }}</td>
+              <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ customerIdentityNumber(c) || '—' }}</td>
               <td class="px-4 py-2 text-slate-700">{{ c.phone || '—' }}</td>
               <td class="px-4 py-2 text-slate-700">{{ c.province || '—' }}</td>
               <td class="px-4 py-2">

@@ -31,6 +31,17 @@ class CustomerRequest extends FormRequest
         return $this->user() !== null;
     }
 
+    /** @return array<string, string> */
+    public function messages(): array
+    {
+        return [
+            'idCard.unique' => 'เลขบัตรประชาชนนี้ถูกใช้กับลูกค้ารายอื่นแล้ว',
+            'taxId.unique' => 'เลขประจำตัวผู้เสียภาษีนี้ถูกใช้กับลูกค้ารายอื่นแล้ว',
+            'passport.unique' => 'เลขหนังสือเดินทางนี้ถูกใช้กับลูกค้ารายอื่นแล้ว',
+            'customerCode.unique' => 'รหัสลูกค้านี้ถูกใช้แล้ว',
+        ];
+    }
+
     /** @return array<string, mixed> */
     public function rules(): array
     {
@@ -74,7 +85,15 @@ class CustomerRequest extends FormRequest
                 $isCreate && $isCorporate ? 'required' : 'sometimes',
                 'nullable', 'string', 'max:255',
             ],
-            'taxId' => ['sometimes', 'nullable', 'string', 'regex:/^\d{13}$/'],
+            'taxId' => [
+                'sometimes', 'nullable', 'string', 'regex:/^\d{13}$/',
+                // Unique per tenant — two customers with the same tax_id in the
+                // same org is almost always a duplicate row. Skip NULL/empty so
+                // rows that haven't set a tax_id don't collide with each other.
+                Rule::unique('customers', 'tax_id')
+                    ->where(fn ($q) => $q->where('tenant_id', $tenantId)->whereNull('deleted_at'))
+                    ->ignore($id),
+            ],
             // Thai national ID: only meaningful for Thai individuals + corporate
             // (juristic reg number). Foreign individuals must leave it blank —
             // Thai's mod-11 checksum wouldn't apply to their home-country ID.
@@ -82,6 +101,9 @@ class CustomerRequest extends FormRequest
                 'sometimes', 'nullable', 'string',
                 Rule::when($isForeign, ['prohibited']),
                 Rule::when(! $isForeign, ['regex:/^\d{13}$/']),
+                Rule::unique('customers', 'id_card')
+                    ->where(fn ($q) => $q->where('tenant_id', $tenantId)->whereNull('deleted_at'))
+                    ->ignore($id),
             ],
             'nationalIdExpiry' => ['sometimes', 'nullable', 'date'],
             'passport' => [
@@ -90,6 +112,9 @@ class CustomerRequest extends FormRequest
                 $isCreate && $isForeign ? 'required' : 'sometimes',
                 'nullable', 'string', 'max:32',
                 Rule::when($isForeign, ['regex:/^[A-Z0-9]{6,12}$/']),
+                Rule::unique('customers', 'passport')
+                    ->where(fn ($q) => $q->where('tenant_id', $tenantId)->whereNull('deleted_at'))
+                    ->ignore($id),
             ],
             'nationality' => [
                 // Non-Thai nationality expected on foreign customers so the

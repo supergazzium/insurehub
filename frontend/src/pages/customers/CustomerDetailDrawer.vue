@@ -13,10 +13,15 @@ import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import { api, ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
+import { customerDisplayName, customerTypeLabel } from '../../utils/customerDisplay'
 
+// EditableField uses the `value` as the option's stored form; `label` is what
+// renders in the select. Keep every enum value the backend accepts here or
+// the drawer will render the raw enum string next to the field.
 const CUSTOMER_TYPE_OPTIONS = [
-  { value: 'individual', label: 'Individual' },
-  { value: 'corporate', label: 'Corporate' },
+  { value: 'individual', label: 'บุคคลธรรมดา' },
+  { value: 'foreign_individual', label: 'ชาวต่างชาติ' },
+  { value: 'corporate', label: 'นิติบุคคล' },
 ]
 const GENDER_OPTIONS = [
   { value: 'ชาย', label: 'ชาย' },
@@ -133,11 +138,11 @@ function statusBadge(s: string): string {
           <div class="flex items-center gap-2 text-xs uppercase text-slate-400">
             <span class="font-mono">{{ customer.customerCode }}</span>
             <span>·</span>
-            <span>{{ customer.customerType }}</span>
+            <span>{{ customerTypeLabel(customer.customerType) }}</span>
             <span v-if="customer.legacyId">· legacy id {{ customer.legacyId }}</span>
           </div>
           <div class="text-lg font-semibold text-slate-900 mt-1">
-            {{ customer.titleTh }} {{ customer.firstName }} {{ customer.lastName }}
+            {{ customerDisplayName(customer) || '—' }}
             <span v-if="customer.nickname" class="text-sm text-slate-500 ml-1">({{ customer.nickname }})</span>
           </div>
           <div v-if="customer.firstNameEn || customer.lastNameEn" class="text-xs text-slate-500 mt-0.5">
@@ -223,11 +228,13 @@ function statusBadge(s: string): string {
         <section>
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Contact</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
-            <div><div class="text-xs text-slate-400">Phone</div>
+            <div><div class="text-xs text-slate-400">โทรศัพท์มือถือ</div>
               <EditableField entity="customers" :id="customer.id" field="phone" :value="customer.phone" @update="v => apply('phone', v)" /></div>
+            <div><div class="text-xs text-slate-400">โทรศัพท์บ้าน</div>
+              <EditableField entity="customers" :id="customer.id" field="telPhone" :value="customer.telPhone" @update="v => apply('telPhone', v)" /></div>
             <div><div class="text-xs text-slate-400">Line ID</div>
               <EditableField entity="customers" :id="customer.id" field="lineId" :value="customer.lineId" @update="v => apply('lineId', v)" /></div>
-            <div class="md:col-span-2"><div class="text-xs text-slate-400">Email</div>
+            <div><div class="text-xs text-slate-400">Email</div>
               <EditableField entity="customers" :id="customer.id" field="email" :value="customer.email" @update="v => apply('email', v)" /></div>
           </div>
         </section>
@@ -285,7 +292,7 @@ function statusBadge(s: string): string {
               </router-link>
               <span v-else class="text-slate-400">unassigned</span>
             </div>
-            <div><div class="text-xs text-slate-400">Created by</div><div class="text-slate-900">{{ customer.createdByAgentId || '—' }}</div></div>
+            <div><div class="text-xs text-slate-400">Created by</div><div class="text-slate-900">{{ customer.createdByName || '—' }}</div></div>
             <div><div class="text-xs text-slate-400">Registered</div><div class="text-slate-900">{{ customer.registeredAt || '—' }}</div></div>
             <div><div class="text-xs text-slate-400">Last contact</div><div class="text-slate-900">{{ customer.lastContact || '—' }}</div></div>
             <div><div class="text-xs text-slate-400">Active policies</div><div class="font-medium text-slate-900">{{ customer.activePolicyCount }}</div></div>

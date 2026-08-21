@@ -37,13 +37,17 @@ class CustomerResource extends JsonResource
             'religion' => $this->religion ?? '',
             'birthDate' => $this->birth_date?->toDateString() ?? '',
             'gender' => $this->gender ?? '',
-            'maritalStatus' => $this->marital_status ?? 'single',
+            // Preserve NULL as an empty string — corporate customers have
+            // no marital status, and defaulting to 'single' misrepresented
+            // them in the drawer's read-only view.
+            'maritalStatus' => $this->marital_status ?? '',
             'occupation' => $this->occupation ?? '',
             'position' => $this->position ?? '',
             'employerName' => $this->employer_name ?? '',
             'monthlyIncome' => (float) $this->monthly_income,
             'email' => $this->email ?? '',
             'phone' => $this->phone ?? '',
+            'telPhone' => $this->tel_phone ?? '',
             'lineId' => $this->line_id ?? '',
             'address' => $this->address ?? '',
             'district' => $this->sub_district ?? '',
@@ -65,6 +69,13 @@ class CustomerResource extends JsonResource
                 'position' => $this->contact_position ?? '',
             ],
             'createdByAgentId' => $this->created_by_agent_id !== null ? (string) $this->created_by_agent_id : null,
+            'createdByUserId' => $this->created_by_user_id !== null ? (string) $this->created_by_user_id : null,
+            // Denormalized "who created this?" — agent takes priority when
+            // set; otherwise fall through to the User (Platform Admin,
+            // back-office). Empty when both are NULL (legacy imports).
+            'createdByName' => $this->createdByAgent
+                ? trim(($this->createdByAgent->first_name ?? '') . ' ' . ($this->createdByAgent->last_name ?? ''))
+                : ($this->createdByUser?->name ?? ''),
             'assignedAgentId' => $this->assigned_agent_id !== null ? (string) $this->assigned_agent_id : null,
             // Denormalized agent code/name so the drawer can render a
             // clickable link without a second request.

@@ -91,6 +91,7 @@ export interface Customer {
   monthlyIncome: number
   email: string
   phone: string
+  telPhone: string
   lineId: string
   address: string
   district: string
@@ -101,6 +102,8 @@ export interface Customer {
   mailing: MailingAddress
   contactPerson: CorporateContact
   createdByAgentId: string | null
+  createdByUserId: string | null
+  createdByName: string
   assignedAgentId: string | null
   assignedAgentCode: string | null
   assignedAgentName: string | null

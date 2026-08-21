@@ -6,17 +6,17 @@
 // - Display format: DD/MM/YYYY regardless of browser locale.
 // - `min` / `max` props (ISO strings) constrain the calendar and the
 //   underlying VueDatepicker validation.
+// - Header click on the year opens a full year overlay; click on the
+//   month opens a month overlay — so navigating from 2026 → 1990 is
+//   two clicks, not 430.
 //
-// Design note: v-model is a STRING (ISO), not a Date. When you feed
-// VueDatePicker a Date, it ignores the `format` prop and falls back to
-// its locale-aware formatter (which renders MM/DD/YYYY on en-US locales
-// AND appends the time). Using `model-type="yyyy-MM-dd"` + a string
-// v-model keeps display + parsing in our chosen format.
-//
-// Format is *also* forced via a function-form :format so nothing in the
-// picker's option chain (locale, textInput.format inheritance) can
-// override it. If you see MM/DD/YYYY after editing this file, it's a
-// browser cache — hard-refresh the tab.
+// Design notes:
+// - v-model is a STRING (ISO), not a Date. Feeding VueDatePicker a Date
+//   makes it ignore the `format` prop and fall back to its locale-aware
+//   formatter (MM/DD/YYYY + time on en-US). Using `model-type="yyyy-MM-dd"`
+//   + string v-model keeps display and parsing in our chosen format.
+// - Text-input parse format is passed as an ARRAY. On v14 the string
+//   form is silently ignored, which is why typed dates used to reset.
 import { computed } from 'vue'
 import { VueDatePicker } from '@vuepic/vue-datepicker'
 import '@vuepic/vue-datepicker/dist/main.css'
@@ -44,6 +44,9 @@ const emit = defineEmits<{
 
 const value = computed<string>({
   get: () => props.modelValue ?? '',
+  // VueDatePicker emits `null` on clear and a `yyyy-MM-dd` string when a
+  // date is committed. Normalize both to '' so downstream forms can check
+  // `field !== ''`.
   set: (v) => emit('update:modelValue', v ?? ''),
 })
 
@@ -55,6 +58,14 @@ function formatDate(d: Date): string {
   const yyyy = d.getFullYear()
   return `${dd}/${mm}/${yyyy}`
 }
+
+// Year range for the header year-overlay. Upper bound uses `max` when
+// provided (birthday capped at today), otherwise +5 years for policies.
+const yearRange = computed<[number, number]>(() => {
+  const now = new Date().getFullYear()
+  const upper = props.max ? new Date(props.max).getFullYear() : now + 5
+  return [1900, upper]
+})
 </script>
 
 <template>
@@ -72,8 +83,9 @@ function formatDate(d: Date): string {
     auto-apply
     :teleport="true"
     :input-class-name="inputClass ?? ''"
-    text-input
-    :text-input-options="{ format: 'dd/MM/yyyy' }"
+    :year-range="yearRange"
+    prevent-min-max-navigation
+    :text-input="{ format: ['dd/MM/yyyy', 'd/M/yyyy', 'dd-MM-yyyy'], openMenu: 'toggle' }"
   />
 </template>
 

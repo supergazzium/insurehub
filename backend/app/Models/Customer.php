@@ -51,6 +51,11 @@ class Customer extends Model
         return $this->belongsTo(Agent::class, 'created_by_agent_id');
     }
 
+    public function createdByUser(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'created_by_user_id');
+    }
+
     public function assignedAgent(): BelongsTo
     {
         return $this->belongsTo(Agent::class, 'assigned_agent_id');
