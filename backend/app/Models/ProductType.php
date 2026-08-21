@@ -15,6 +15,11 @@ class ProductType extends Model
     protected $casts = [
         'sort_order' => 'integer',
         'active' => 'boolean',
+        // 'kind' stays a plain string (motor|travel|fire|health|life|misc)
+        // because it drives switch statements in PHP and JS — keep it a
+        // scalar. `risk_schema` is a JSON blob authored per taxonomy row;
+        // cast to array so consumers get a decoded structure.
+        'risk_schema' => 'array',
     ];
 
     public function tenant(): BelongsTo

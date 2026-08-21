@@ -33,6 +33,16 @@ class ProductResource extends JsonResource
             // MGM product-type FK — descriptive/reporting only after the
             // commission tier moved directly onto the product.
             'productTypeId' => $this->product_type_id !== null ? (string) $this->product_type_id : null,
+            // Denormalized product-type block so the wizard can render Step 3
+            // + resolve the risk_schema in a single fetch. `kind` and
+            // `riskSchema` come from the 2027_02_15_000200 migration.
+            'productType' => $this->productType ? [
+                'id' => (string) $this->productType->id,
+                'code' => $this->productType->code,
+                'nameTh' => $this->productType->name_th,
+                'kind' => $this->productType->kind,
+                'riskSchema' => $this->productType->risk_schema,
+            ] : null,
             // ระดับค่าคอม — the tier the MGM engine reads for
             // referral_fee_rate + mgmt_fee_rate lookups.
             'commissionTierId' => $this->commission_tier_id !== null ? (string) $this->commission_tier_id : null,
@@ -40,7 +50,11 @@ class ProductResource extends JsonResource
             'subCategory' => $this->sub_category ?? '',
             'subCategory2' => $this->sub_category_2 ?? '',
             'mainRider' => $this->main_rider ?? '',
-            'productKind' => ProductKind::derive($this->type ?? '', $this->category ?? '', $this->sub_category_2 ?? '', $this->sub_category ?? ''),
+            // Prefer the stored productType.kind (authored per taxonomy row)
+            // over the runtime derivation. The derivation stays as fallback
+            // for tenants whose product_types.kind hasn't been populated.
+            'productKind' => $this->productType?->kind
+                ?? ProductKind::derive($this->type ?? '', $this->category ?? '', $this->sub_category_2 ?? '', $this->sub_category ?? ''),
             'validStart' => $this->valid_start?->toDateString(),
             'validEnd' => $this->valid_end?->toDateString(),
             'summary' => $this->summary ?? '',

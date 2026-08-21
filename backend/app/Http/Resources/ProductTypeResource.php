@@ -22,6 +22,10 @@ class ProductTypeResource extends JsonResource
             'nameTh' => $this->name_th,
             'nameEn' => $this->name_en,
             'subOf' => $this->sub_of,
+            // Populated by 2027_02_15_000200. Nullable — falls back to
+            // ProductKind::derive() on the frontend when null.
+            'kind' => $this->kind,
+            'riskSchema' => $this->risk_schema,
             'tierId' => (string) $this->tier_id,
             'tierCode' => $this->tier?->code,
             'tierNameTh' => $this->tier?->name_th,

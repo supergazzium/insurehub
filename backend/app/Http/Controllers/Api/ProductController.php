@@ -96,7 +96,7 @@ class ProductController extends ApiController
             return $product;
         });
 
-        return (new ProductResource($product->load(['commissionRates', 'commissionBands'])))
+        return (new ProductResource($product->load(['commissionRates', 'commissionBands', 'productType'])))
             ->response()
             ->setStatusCode(201);
     }
@@ -122,7 +122,7 @@ class ProductController extends ApiController
             $this->replaceCommissionBands($tenantId, $product, $bands);
         });
 
-        return new ProductResource($product->fresh(['commissionRates', 'commissionBands']));
+        return new ProductResource($product->fresh(['commissionRates', 'commissionBands', 'productType']));
     }
 
     public function destroy(Request $request, Product $product): JsonResponse

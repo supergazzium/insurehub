@@ -53,6 +53,16 @@ export function fetchProductList(filters: ProductListFilters = {}) {
  *  existing product ("duplicate from…"). */
 export interface ProductDetail extends ProductListRow {
   productTypeId: string | null
+  // Denormalized product-type block from ProductResource. Nullable when the
+  // product isn't linked to a product_type yet. `kind` drives the wizard's
+  // Step 3 dynamic risk renderer; `riskSchema` is the JSON shape it reads.
+  productType: {
+    id: string
+    code: string
+    nameTh: string
+    kind: 'motor' | 'travel' | 'fire' | 'health' | 'life' | 'misc' | null
+    riskSchema: Record<string, unknown> | null
+  } | null
   commissionTierId: string | null
   summary: string
   coverage: number

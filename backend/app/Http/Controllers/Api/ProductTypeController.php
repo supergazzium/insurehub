@@ -88,6 +88,14 @@ class ProductTypeController extends ApiController
             'nameTh' => [$sometimes, 'string', 'max:128'],
             'nameEn' => [$sometimes, 'string', 'max:128'],
             'subOf' => ['sometimes', 'nullable', 'string', 'max:32'],
+            // Drives the wizard's Step 3 dynamic risk renderer + the
+            // policies.risk_data writer/reader shim (C-4). Enum kept in
+            // sync with docs/audit-2026-08-21/B4-risk-schema.md §2.
+            'kind' => ['sometimes', 'nullable', 'string', 'in:motor,travel,fire,health,life,misc'],
+            // JSON schema authored by admin. Shape validated at the
+            // renderer boundary rather than here — this keeps the
+            // request layer thin. See B4 for the contract.
+            'riskSchema' => ['sometimes', 'nullable', 'array'],
             'tierId' => [$sometimes, 'integer', 'exists:commission_tiers,id'],
             'sortOrder' => ['sometimes', 'integer', 'min:0'],
             'active' => ['sometimes', 'boolean'],
@@ -95,7 +103,8 @@ class ProductTypeController extends ApiController
         ]);
         $map = [
             'code' => 'code', 'nameTh' => 'name_th', 'nameEn' => 'name_en',
-            'subOf' => 'sub_of', 'tierId' => 'tier_id', 'sortOrder' => 'sort_order',
+            'subOf' => 'sub_of', 'kind' => 'kind', 'riskSchema' => 'risk_schema',
+            'tierId' => 'tier_id', 'sortOrder' => 'sort_order',
             'active' => 'active', 'notes' => 'notes',
         ];
         $out = [];

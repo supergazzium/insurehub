@@ -33,30 +33,34 @@ class ProductTypeSeeder extends Seeder
 {
     /**
      * Non-life product types from Sheet2 row 54 of the source Excel.
-     * Format: [code, name_th, name_en, sub_of, tier_code, sort_order]
+     * Format: [code, name_th, name_en, sub_of, tier_code, sort_order, kind]
+     *
+     * `kind` (added 2027-02-15) drives the wizard's Step 3 dynamic risk
+     * renderer + policies.risk_data shim. Enum: motor|travel|fire|health|life|misc.
+     * See docs/audit-2026-08-21/B4-risk-schema.md.
      */
     private const NON_LIFE_TYPES = [
-        ['MOTOR_CLASS1_GARAGE',    'มอเตอร์ ชั้น 1 (อู่)',         'Motor Class 1 (Garage)',        'Motor', 'TIER_FULL', 10],
-        ['MOTOR_CLASS1_DEALER',    'มอเตอร์ ชั้น 1 (ห้าง)',        'Motor Class 1 (Dealer)',         'Motor', 'TIER_FULL', 20],
-        ['MOTOR_CLASS23',          'มอเตอร์ ชั้น 2+/3+/2/3',        'Motor Class 2+/3+/2/3',          'Motor', 'TIER_FULL', 30],
-        ['MOTOR_HEAVY_GARAGE',     'มอเตอร์รถหนัก (อู่)',          'Motor Heavy Vehicle (Garage)',   'Motor', 'TIER_FULL', 40],
-        ['MOTOR_HEAVY_DEALER',     'มอเตอร์รถหนัก (ห้าง)',         'Motor Heavy Vehicle (Dealer)',   'Motor', 'TIER_FULL', 50],
-        ['MOTOR_HEAVY_CLASS23',    'มอเตอร์รถหนัก ชั้น 2+/3+/2/3', 'Motor Heavy Class 2+/3+/2/3',    'Motor', 'TIER_FULL', 60],
-        ['PORROR_CAR',             'พรบ (เก๋ง/กระบะ/ตู้)',         'Compulsory (Car)',               'Compulsory', 'TIER_PARTIAL', 70],
-        ['PORROR_OTHER',           'พรบ (อื่นๆ)',                    'Compulsory (Other)',             'Compulsory', 'TIER_PARTIAL', 80],
-        ['PA_INDIVIDUAL',          'PA รายเดี่ยว',                   'Personal Accident (Individual)', 'PA',    'TIER_FULL', 90],
-        ['TA_INDIVIDUAL',          'TA รายเดี่ยว (ท่องเที่ยว)',      'Travel Accident (Individual)',   'Travel', 'TIER_FULL', 100],
-        ['FIRE_HOUSE_BASIC',       'Fire บ้าน (พื้นฐาน)',            'Fire House (Basic)',             'Fire',  'TIER_FULL', 110],
-        ['FIRE_SME_BASIC',         'Fire SME (พื้นฐาน)',             'Fire SME (Basic)',               'Fire',  'TIER_FULL', 120],
-        ['FIRE_HOUSE_PACKAGE',     'Fire บ้าน (Package)',            'Fire House (Package)',           'Fire',  'TIER_FULL', 130],
-        ['FIRE_SME_PACKAGE',       'Fire SME (Package)',             'Fire SME (Package)',             'Fire',  'TIER_FULL', 140],
-        ['IAR_CAR_EAR',            'IAR / CAR / EAR',                'IAR / CAR / EAR',                'Property', 'TIER_DIRECT_ONLY', 150],
-        ['MARINE',                 'ประกันขนส่ง + Marine',           'Cargo + Marine',                 'Marine', 'TIER_PARTIAL', 160],
-        ['MISC',                   'MISC',                            'Miscellaneous',                  'Other', 'TIER_DIRECT_ONLY', 170],
-        ['HEALTH_ADULT',           'ประกันสุขภาพผู้ใหญ่',             'Health (Adult)',                 'Health', 'TIER_PARTIAL', 180],
-        ['HEALTH_CHILD',           'ประกันสุขภาพเด็ก',                'Health (Child)',                 'Health', 'TIER_PARTIAL', 190],
-        ['GROUP_ACCIDENT',         'ประกันกลุ่ม อุบัติเหตุ',           'Group Accident',                 'Group', 'TIER_DIRECT_ONLY', 200],
-        ['GROUP_HEALTH',           'ประกันกลุ่ม สุขภาพ',              'Group Health',                   'Group', 'TIER_DIRECT_ONLY', 210],
+        ['MOTOR_CLASS1_GARAGE',    'มอเตอร์ ชั้น 1 (อู่)',         'Motor Class 1 (Garage)',        'Motor', 'TIER_FULL', 10, 'motor'],
+        ['MOTOR_CLASS1_DEALER',    'มอเตอร์ ชั้น 1 (ห้าง)',        'Motor Class 1 (Dealer)',         'Motor', 'TIER_FULL', 20, 'motor'],
+        ['MOTOR_CLASS23',          'มอเตอร์ ชั้น 2+/3+/2/3',        'Motor Class 2+/3+/2/3',          'Motor', 'TIER_FULL', 30, 'motor'],
+        ['MOTOR_HEAVY_GARAGE',     'มอเตอร์รถหนัก (อู่)',          'Motor Heavy Vehicle (Garage)',   'Motor', 'TIER_FULL', 40, 'motor'],
+        ['MOTOR_HEAVY_DEALER',     'มอเตอร์รถหนัก (ห้าง)',         'Motor Heavy Vehicle (Dealer)',   'Motor', 'TIER_FULL', 50, 'motor'],
+        ['MOTOR_HEAVY_CLASS23',    'มอเตอร์รถหนัก ชั้น 2+/3+/2/3', 'Motor Heavy Class 2+/3+/2/3',    'Motor', 'TIER_FULL', 60, 'motor'],
+        ['PORROR_CAR',             'พรบ (เก๋ง/กระบะ/ตู้)',         'Compulsory (Car)',               'Compulsory', 'TIER_PARTIAL', 70, 'motor'],
+        ['PORROR_OTHER',           'พรบ (อื่นๆ)',                    'Compulsory (Other)',             'Compulsory', 'TIER_PARTIAL', 80, 'motor'],
+        ['PA_INDIVIDUAL',          'PA รายเดี่ยว',                   'Personal Accident (Individual)', 'PA',    'TIER_FULL', 90, 'misc'],
+        ['TA_INDIVIDUAL',          'TA รายเดี่ยว (ท่องเที่ยว)',      'Travel Accident (Individual)',   'Travel', 'TIER_FULL', 100, 'travel'],
+        ['FIRE_HOUSE_BASIC',       'Fire บ้าน (พื้นฐาน)',            'Fire House (Basic)',             'Fire',  'TIER_FULL', 110, 'fire'],
+        ['FIRE_SME_BASIC',         'Fire SME (พื้นฐาน)',             'Fire SME (Basic)',               'Fire',  'TIER_FULL', 120, 'fire'],
+        ['FIRE_HOUSE_PACKAGE',     'Fire บ้าน (Package)',            'Fire House (Package)',           'Fire',  'TIER_FULL', 130, 'fire'],
+        ['FIRE_SME_PACKAGE',       'Fire SME (Package)',             'Fire SME (Package)',             'Fire',  'TIER_FULL', 140, 'fire'],
+        ['IAR_CAR_EAR',            'IAR / CAR / EAR',                'IAR / CAR / EAR',                'Property', 'TIER_DIRECT_ONLY', 150, 'fire'],
+        ['MARINE',                 'ประกันขนส่ง + Marine',           'Cargo + Marine',                 'Marine', 'TIER_PARTIAL', 160, 'misc'],
+        ['MISC',                   'MISC',                            'Miscellaneous',                  'Other', 'TIER_DIRECT_ONLY', 170, 'misc'],
+        ['HEALTH_ADULT',           'ประกันสุขภาพผู้ใหญ่',             'Health (Adult)',                 'Health', 'TIER_PARTIAL', 180, 'health'],
+        ['HEALTH_CHILD',           'ประกันสุขภาพเด็ก',                'Health (Child)',                 'Health', 'TIER_PARTIAL', 190, 'health'],
+        ['GROUP_ACCIDENT',         'ประกันกลุ่ม อุบัติเหตุ',           'Group Accident',                 'Group', 'TIER_DIRECT_ONLY', 200, 'health'],
+        ['GROUP_HEALTH',           'ประกันกลุ่ม สุขภาพ',              'Group Health',                   'Group', 'TIER_DIRECT_ONLY', 210, 'health'],
     ];
 
     /**
@@ -64,11 +68,11 @@ class ProductTypeSeeder extends Seeder
      * high-margin non-life products. Admin can reassign per business decision.
      */
     private const LIFE_TYPES = [
-        ['WHOLE_LIFE_STANDARD',    'ประกันชีวิตตลอดชีพ (ประเภทสามัญ)', 'Whole Life (Standard)',       'Life', 'TIER_FULL', 300],
-        ['ENDOWMENT_STANDARD',     'ประกันสะสมทรัพย์ (ประเภทสามัญ)',   'Endowment (Standard)',        'Life', 'TIER_FULL', 310],
-        ['ANNUITY',                'ประกันบำนาญ',                     'Annuity',                     'Life', 'TIER_FULL', 320],
-        ['TERM',                   'ประกันชีวิตชั่วระยะเวลา',          'Term Life',                   'Life', 'TIER_FULL', 330],
-        ['LIFE_RIDER',             'สัญญาเพิ่มเติม (Rider)',           'Life Rider',                  'Life', 'TIER_PARTIAL', 340],
+        ['WHOLE_LIFE_STANDARD',    'ประกันชีวิตตลอดชีพ (ประเภทสามัญ)', 'Whole Life (Standard)',       'Life', 'TIER_FULL', 300, 'life'],
+        ['ENDOWMENT_STANDARD',     'ประกันสะสมทรัพย์ (ประเภทสามัญ)',   'Endowment (Standard)',        'Life', 'TIER_FULL', 310, 'life'],
+        ['ANNUITY',                'ประกันบำนาญ',                     'Annuity',                     'Life', 'TIER_FULL', 320, 'life'],
+        ['TERM',                   'ประกันชีวิตชั่วระยะเวลา',          'Term Life',                   'Life', 'TIER_FULL', 330, 'life'],
+        ['LIFE_RIDER',             'สัญญาเพิ่มเติม (Rider)',           'Life Rider',                  'Life', 'TIER_PARTIAL', 340, 'life'],
     ];
 
     public function run(): void
@@ -93,7 +97,7 @@ class ProductTypeSeeder extends Seeder
             }
 
             $all = array_merge(self::NON_LIFE_TYPES, self::LIFE_TYPES);
-            foreach ($all as [$code, $nameTh, $nameEn, $subOf, $tierCode, $sort]) {
+            foreach ($all as [$code, $nameTh, $nameEn, $subOf, $tierCode, $sort, $kind]) {
                 $tierId = $tiersByCode->get($tierCode);
                 if ($tierId === null) {
                     $this->command?->warn("Tenant {$tenant->id}: tier {$tierCode} missing — skipping {$code}");
@@ -106,6 +110,7 @@ class ProductTypeSeeder extends Seeder
                         'name_th' => $nameTh,
                         'name_en' => $nameEn,
                         'sub_of' => $subOf,
+                        'kind' => $kind,
                         'tier_id' => $tierId,
                         'sort_order' => $sort,
                         'active' => true,

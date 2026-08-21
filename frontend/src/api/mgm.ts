@@ -59,12 +59,24 @@ export function updateTierRankRate(tierId: string, rateId: string, payload: {
 
 // ── Product types ────────────────────────────────────────────────────────
 
+/** One of the 6 wizard branches. Nullable when a custom product_type
+ *  row hasn't been assigned a kind by the admin yet — the frontend then
+ *  falls back to the ProductResource.productKind runtime derivation. */
+export type ProductTypeKind = 'motor' | 'travel' | 'fire' | 'health' | 'life' | 'misc'
+
+/** JSON schema authored per product_type. Consumed by the wizard's
+ *  Step 3 dynamic risk renderer. Structural shape validated at the
+ *  renderer boundary — see docs/audit-2026-08-21/B4-risk-schema.md. */
+export type RiskSchema = Record<string, unknown>
+
 export interface ProductType {
   id: string
   code: string
   nameTh: string
   nameEn: string
   subOf: string | null
+  kind: ProductTypeKind | null
+  riskSchema: RiskSchema | null
   tierId: string
   tierCode: string | null
   tierNameTh: string | null
