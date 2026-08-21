@@ -56,7 +56,12 @@ class PolicyRiskShim
             'no_passenger' => 'motor_no_passenger',
             'notes' => 'motor_notes',
         ],
-        'property' => [
+        // Fire product kind — B4's canonical name for what the legacy
+        // schema calls "property_*". Column names keep their legacy
+        // `property_` prefix because renaming columns is out of scope for
+        // this refactor; the risk_data key mirrors the canonical `fire`
+        // kind so JSON output matches product_types.kind.
+        'fire' => [
             'insured_name' => 'property_insured_name',
             'insured_address' => 'property_insured_address',
             'phone' => 'property_phone',
@@ -104,6 +109,26 @@ class PolicyRiskShim
     ];
 
     /**
+     * The runtime helper `ProductKind::derive()` uses a slightly different
+     * vocabulary than product_types.kind (`property` vs `fire`, `other`
+     * vs `misc`). Both are valid inputs to the shim; this alias table
+     * normalizes any caller onto the canonical kind used by FIELDS.
+     */
+    private const KIND_ALIASES = [
+        'property' => 'fire',   // ProductKind::derive returns 'property' for อัคคีภัย
+        'other' => 'misc',      // ProductKind::derive returns 'other' for unknown
+    ];
+
+    /**
+     * Normalize a caller-supplied kind onto the shim's canonical vocabulary.
+     * Idempotent: unknown kinds pass through unchanged.
+     */
+    public static function canonicalKind(string $kind): string
+    {
+        return self::KIND_ALIASES[$kind] ?? $kind;
+    }
+
+    /**
      * Returns the (short) list of kinds the shim knows about.
      *
      * @return list<string>
@@ -131,6 +156,7 @@ class PolicyRiskShim
      */
     public static function writerDualWrite(string $kind, array $inputByRiskKey, ?array $existingRiskData = null): array
     {
+        $kind = self::canonicalKind($kind);
         $fieldMap = self::FIELDS[$kind] ?? [];
         $columns = [];
         $riskData = $existingRiskData ?? [];
@@ -161,6 +187,7 @@ class PolicyRiskShim
      */
     public static function readerField(object $policy, string $kind, string $key, ?string $legacyColumn = null): mixed
     {
+        $kind = self::canonicalKind($kind);
         $risk = $policy->risk_data ?? null;
         if (is_array($risk) && isset($risk[$kind]) && array_key_exists($key, $risk[$kind])) {
             return $risk[$kind][$key];
@@ -190,6 +217,7 @@ class PolicyRiskShim
      */
     public static function readerAll(object $policy, string $kind): array
     {
+        $kind = self::canonicalKind($kind);
         $out = [];
         foreach (self::FIELDS[$kind] ?? [] as $key => $col) {
             $val = self::readerField($policy, $kind, $key, $col);

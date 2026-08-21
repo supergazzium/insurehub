@@ -226,21 +226,24 @@ class PolicyResource extends JsonResource
 
     private function resolveRiskKind(): ?string
     {
-        // Prefer the stored kind on product_types (C-3 backfill).
+        // Prefer the stored kind on product_types (C-3 backfill). Both the
+        // stored kind and the runtime derivation pass through
+        // PolicyRiskShim::canonicalKind so `property` (derive) normalizes
+        // to `fire` (shim vocabulary).
         $stored = $this->product?->productType?->kind;
         if ($stored !== null) {
-            return $stored;
+            return PolicyRiskShim::canonicalKind($stored);
         }
-        // Fallback to the runtime derivation on the product record
-        // itself (older tenants without productType.kind populated).
         $product = $this->product;
         if ($product !== null) {
-            return \App\Support\ProductKind::derive(
+            $derived = \App\Support\ProductKind::derive(
                 $product->type ?? '',
                 $product->category ?? '',
                 $product->sub_category_2 ?? '',
                 $product->sub_category ?? '',
             );
+
+            return $derived !== null ? PolicyRiskShim::canonicalKind($derived) : null;
         }
 
         return null;
