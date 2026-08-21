@@ -129,6 +129,14 @@ class PolicyRequest extends FormRequest
             'beneficiaries.*.relation' => ['nullable', 'string', 'max:32'],
             'beneficiaries.*.share' => ['required_with:beneficiaries', 'numeric', 'min:0', 'max:100'],
             'beneficiaries.*.slot' => ['nullable', 'integer', 'min:1', 'max:4'],
+            // Phase C-4 writer shim payload — see toModel() + PolicyRiskShim.
+            // Loose validation because the schema-driven wizard is
+            // authoritative for per-field constraints (B4). Kind must
+            // be one of the known 6; data is any assoc array (renderer
+            // enforces types).
+            'risk' => ['sometimes', 'nullable', 'array'],
+            'risk.kind' => ['required_with:risk', 'string', 'in:motor,travel,fire,health,life,misc'],
+            'risk.data' => ['required_with:risk', 'array'],
         ];
     }
 
@@ -136,6 +144,27 @@ class PolicyRequest extends FormRequest
     public function toModel(): array
     {
         $v = $this->validated();
+
+        // Phase C-4 writer shim: if the wizard sent a `risk` payload
+        // (`{ kind: 'motor', data: { chassis_no: '…', ... } }`), dual-write
+        // into BOTH the top-level columns AND `risk_data.<kind>.*`. During
+        // the shim window the flat top-level keys (motorTypeDriver, etc.)
+        // still work as an alternative — see PolicyRiskShim + B2 §3.
+        $shimColumns = [];
+        $shimRiskData = null;
+        $riskInput = $this->input('risk');
+        if (is_array($riskInput) && isset($riskInput['kind'], $riskInput['data']) && is_array($riskInput['data'])) {
+            $kind = (string) $riskInput['kind'];
+            $existing = null;
+            $policy = $this->route('policy');
+            if ($policy && isset($policy->risk_data) && is_array($policy->risk_data)) {
+                $existing = $policy->risk_data;
+            }
+            $dw = \App\Support\PolicyRiskShim::writerDualWrite($kind, $riskInput['data'], $existing);
+            $shimColumns = $dw['columns'];
+            $shimRiskData = $dw['risk_data'];
+        }
+
         $map = [
             'quoteNo' => 'quote_no',
             'applicationNo' => 'application_no',
@@ -229,6 +258,30 @@ class PolicyRequest extends FormRequest
             }
         }
 
+        // Merge shim writes AFTER the flat map so `risk` payload overrides
+        // any legacy flat key sent alongside it. Also handles the case
+        // where the caller only sent `risk` and none of the flat keys.
+        foreach ($shimColumns as $col => $val) {
+            $out[$col] = $val;
+        }
+        if ($shimRiskData !== null) {
+            $out['risk_data'] = $shimRiskData;
+        }
+
         return $out;
+    }
+
+    /**
+     * Additional rule for the new `risk` payload shape (writer shim).
+     * Kept OUT of the main rules() array to keep the diff minimal — Laravel
+     * merges any missing keys through validated() anyway; validation is
+     * loose here because the schema-driven wizard is authoritative for
+     * per-field constraints. See B4.
+     */
+    protected function prepareForValidation(): void
+    {
+        // Nothing to do — kept as a stub so the shim's shape is documented
+        // in one place. Add coerce/normalize logic here when the wizard's
+        // Step-3 renderer starts producing `risk` payloads (C-14).
     }
 }

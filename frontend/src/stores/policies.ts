@@ -251,6 +251,12 @@ export interface Policy {
   rebate?: PolicyRebate | null
   riders: Rider[]
   beneficiaries: Beneficiary[]
+  /** Phase C-4 canonical risk block. `kind` mirrors product.productType.kind
+   *  (with runtime derivation fallback); `fields` is the schema-shaped
+   *  payload from policies.risk_data with legacy-column fallback during
+   *  the shim window. Prefer this over `motor`/`property`/flat travel
+   *  fields — those legacy properties are kept only for shim reads. */
+  risk: { kind: string | null; fields: Record<string, unknown> } | null
   motor: MotorDetails | null
   property: PropertyDetails | null
   status: PolicyStatus
@@ -406,6 +412,7 @@ export const usePolicyStore = defineStore('policies', () => {
         freelookActive: r.freelookActive,
         riders: [],
         beneficiaries: [],
+        risk: null,
         motor: null,
         property: null,
         status: r.status,

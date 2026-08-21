@@ -73,6 +73,18 @@ return [
             'replace_placeholders' => true,
         ],
 
+        // Phase C-4/C-18: dedicated channel for PolicyRiskShim fallback
+        // reads. Ops greps this file to confirm risk_data is authoritative
+        // before running the drop-column migration. See B2 §5. Kept
+        // 30 days so a monthly ops review has full history.
+        'risk_shim' => [
+            'driver' => 'daily',
+            'path' => storage_path('logs/risk-shim.log'),
+            'level' => env('LOG_LEVEL', 'info'),
+            'days' => env('RISK_SHIM_LOG_DAYS', 30),
+            'replace_placeholders' => true,
+        ],
+
         'slack' => [
             'driver' => 'slack',
             'url' => env('LOG_SLACK_WEBHOOK_URL'),

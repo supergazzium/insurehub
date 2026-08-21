@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\Policy;
+use App\Support\PolicyRiskShim;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -134,6 +135,16 @@ class PolicyResource extends JsonResource
                 ]),
                 fn () => [],
             ),
+            // Phase C-4 canonical risk block. Emits `{ kind, fields }` where
+            // fields are read via PolicyRiskShim (prefers policies.risk_data,
+            // falls back to legacy columns during the shim window, logs
+            // fallbacks on the `risk_shim` channel so ops can prove
+            // risk_data is authoritative before the drop migration).
+            //
+            // Legacy `motor` / `property` / flat travel-life-health emission
+            // below is KEPT until C-19 (post drop-column migration) so
+            // existing frontend consumers keep working during the shim.
+            'risk' => $this->buildRiskBlock(),
             'motor' => $this->motor_vehicle_brand !== null ? [
                 'vehicleBrand' => $this->motor_vehicle_brand ?? '',
                 'vehicleModel' => $this->motor_vehicle_model ?? '',
@@ -181,5 +192,57 @@ class PolicyResource extends JsonResource
                 fn () => null,
             ),
         ];
+    }
+
+    /**
+     * Canonical risk block emission — reads via PolicyRiskShim so
+     * risk_data has priority over legacy columns. `kind` is resolved
+     * from the loaded product.productType (populated in C-3) with a
+     * runtime derivation fallback for tenants whose product_types.kind
+     * hasn't been seeded.
+     *
+     * @return array{kind: string|null, fields: array<string, mixed>}|null
+     */
+    private function buildRiskBlock(): ?array
+    {
+        $kind = $this->resolveRiskKind();
+        if ($kind === null) {
+            return null;
+        }
+        $fields = PolicyRiskShim::readerAll($this->resource, $kind);
+        // Motor's three top-level-only fields aren't in the shim map (they
+        // stay top-level forever per B2 §3) — surface them here so the
+        // canonical block is complete.
+        if ($kind === 'motor') {
+            foreach (['license_no' => 'motor_license_no', 'vehicle_brand' => 'motor_vehicle_brand', 'vehicle_model' => 'motor_vehicle_model'] as $key => $col) {
+                if ($this->{$col} !== null) {
+                    $fields[$key] = $this->{$col};
+                }
+            }
+        }
+
+        return ['kind' => $kind, 'fields' => $fields];
+    }
+
+    private function resolveRiskKind(): ?string
+    {
+        // Prefer the stored kind on product_types (C-3 backfill).
+        $stored = $this->product?->productType?->kind;
+        if ($stored !== null) {
+            return $stored;
+        }
+        // Fallback to the runtime derivation on the product record
+        // itself (older tenants without productType.kind populated).
+        $product = $this->product;
+        if ($product !== null) {
+            return \App\Support\ProductKind::derive(
+                $product->type ?? '',
+                $product->category ?? '',
+                $product->sub_category_2 ?? '',
+                $product->sub_category ?? '',
+            );
+        }
+
+        return null;
     }
 }

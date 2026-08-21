@@ -137,7 +137,7 @@ class PolicyController extends ApiController
             $policy = Policy::create($payload);
             $this->syncChildren($request, $policy);
 
-            return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus']);
+            return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType']);
         });
 
         return (new PolicyResource($policy))->response()->setStatusCode(201);
@@ -148,7 +148,7 @@ class PolicyController extends ApiController
         $this->authorizeTenant($request, $policy);
 
         return new PolicyResource(
-            $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus'])
+            $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
         );
     }
 
@@ -161,7 +161,7 @@ class PolicyController extends ApiController
         });
 
         return new PolicyResource(
-            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus'])
+            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
         );
     }
 
@@ -357,7 +357,7 @@ class PolicyController extends ApiController
         }
 
         return new PolicyResource(
-            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus'])
+            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
         );
     }
 
@@ -401,7 +401,7 @@ class PolicyController extends ApiController
         });
 
         return new PolicyResource(
-            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus'])
+            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
         );
     }
 
@@ -441,7 +441,7 @@ class PolicyController extends ApiController
         });
 
         return new PolicyResource(
-            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus'])
+            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
         );
     }
 
