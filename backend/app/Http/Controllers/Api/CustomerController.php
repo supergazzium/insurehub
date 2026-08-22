@@ -226,6 +226,162 @@ class CustomerController extends ApiController
         return new CustomerResource($customer->fresh()->load(['kycDocs', 'assignmentHistory']));
     }
 
+    /**
+     * C-12 — GET /customers/{customer}/prior-assets?kind=motor
+     *
+     * Returns the customer's distinct asset blocks for the requested
+     * `kind`, de-duplicated by the schema-declared `dedupe_keys`. Feeds
+     * the wizard Step 3 "Reuse from prior policy" dropdown (B3-wizard-ia
+     * §4).
+     *
+     * Reads risk_data first (shim path); falls back to the legacy
+     * top-level columns via PolicyRiskShim::readerAll. Terminal states
+     * are included (Expired / Cancelled) because an old cancelled motor
+     * policy on the same car is still valuable prior-asset data.
+     *
+     * Dedup key comes from the tenant's product_type.risk_schema for the
+     * matching kind → sections[].dedupe_keys. Falls back to a sensible
+     * per-kind default when the schema isn't authored.
+     */
+    public function priorAssets(Request $request, Customer $customer): JsonResponse
+    {
+        $this->authorizeTenant($request, $customer);
+        $kind = \App\Support\PolicyRiskShim::canonicalKind((string) $request->input('kind', ''));
+        if (! in_array($kind, \App\Support\PolicyRiskShim::knownKinds(), true)) {
+            return response()->json([
+                'kind' => $kind,
+                'assets' => [],
+                'message' => 'Unknown or unsupported kind.',
+            ], 422);
+        }
+
+        $dedupeKeys = $this->resolveDedupeKeys($customer->tenant_id, $kind);
+
+        $policies = \App\Models\Policy::query()
+            ->with('product.productType')
+            ->where('tenant_id', $customer->tenant_id)
+            ->where('customer_id', $customer->id)
+            ->orderByDesc('effective_date')
+            ->orderByDesc('id')
+            ->limit(200)  // enough for even the busiest customer; wizard shows top ~10
+            ->get();
+
+        $seen = [];  // dedupe key → true
+        $assets = [];
+        foreach ($policies as $policy) {
+            $policyKind = $policy->product?->productType?->kind
+                ?? \App\Support\ProductKind::derive(
+                    $policy->product->type ?? '',
+                    $policy->product->category ?? '',
+                    $policy->product->sub_category_2 ?? '',
+                    $policy->product->sub_category ?? '',
+                );
+            if ($policyKind === null) {
+                continue;
+            }
+            $policyKind = \App\Support\PolicyRiskShim::canonicalKind($policyKind);
+            if ($policyKind !== $kind) {
+                continue;
+            }
+
+            $fields = \App\Support\PolicyRiskShim::readerAll($policy, $kind);
+            // Include the top-level-only motor columns so callers see the
+            // full asset block (PolicyRiskShim skips these because they
+            // stay as columns per B2 §3).
+            if ($kind === 'motor') {
+                foreach ([
+                    'license_no' => 'motor_license_no',
+                    'vehicle_brand' => 'motor_vehicle_brand',
+                    'vehicle_model' => 'motor_vehicle_model',
+                ] as $key => $col) {
+                    if ($policy->{$col} !== null) {
+                        $fields[$key] = $policy->{$col};
+                    }
+                }
+            }
+            if ($fields === []) {
+                continue;  // policy of this kind exists but has no field data
+            }
+
+            $dedupeKey = $this->buildDedupeKey($fields, $dedupeKeys);
+            if ($dedupeKey === '' || isset($seen[$dedupeKey])) {
+                continue;
+            }
+            $seen[$dedupeKey] = true;
+
+            $assets[] = [
+                'dedupeKey' => $dedupeKey,
+                'lastUsedPolicyNo' => $policy->policy_no,
+                'lastUsedApplicationNo' => $policy->application_no,
+                'lastUsedAt' => $policy->effective_date?->toDateString(),
+                'fields' => $fields,
+            ];
+        }
+
+        return response()->json([
+            'kind' => $kind,
+            'dedupeKeys' => $dedupeKeys,
+            'assets' => $assets,
+        ]);
+    }
+
+    /**
+     * Read dedupe_keys from any product_type whose kind matches. Multiple
+     * types share a schema (all motor product_types point at the same
+     * `motor.json`); we take the first and cache per-request via a static.
+     *
+     * @return list<string>
+     */
+    private function resolveDedupeKeys(int $tenantId, string $kind): array
+    {
+        static $cache = [];
+        $ck = "{$tenantId}:{$kind}";
+        if (isset($cache[$ck])) {
+            return $cache[$ck];
+        }
+        $type = \App\Models\ProductType::query()
+            ->where('tenant_id', $tenantId)
+            ->where('kind', $kind)
+            ->whereNotNull('risk_schema')
+            ->first(['risk_schema']);
+        $keys = [];
+        if ($type !== null) {
+            foreach ((array) ($type->risk_schema['sections'] ?? []) as $section) {
+                foreach ((array) ($section['dedupe_keys'] ?? []) as $k) {
+                    $keys[] = (string) $k;
+                }
+                if ($keys !== []) break;
+            }
+        }
+        // Sensible per-kind default when the admin hasn't authored a schema.
+        if ($keys === []) {
+            $keys = match ($kind) {
+                'motor' => ['license_no', 'chassis_no'],
+                'travel' => ['traveler_passport'],
+                'health', 'life' => ['id_card'],
+                'fire' => ['insured_address'],
+                default => [],
+            };
+        }
+        $cache[$ck] = $keys;
+
+        return $keys;
+    }
+
+    /** Concatenate the dedupe key values from a fields dict. Empty
+     *  segments are kept as empty strings so two records that share every
+     *  key EXCEPT one aren't collapsed. */
+    private function buildDedupeKey(array $fields, array $dedupeKeys): string
+    {
+        if ($dedupeKeys === []) return '';
+        $parts = [];
+        foreach ($dedupeKeys as $k) {
+            $parts[] = (string) ($fields[$k] ?? '');
+        }
+        $joined = trim(implode('|', $parts), '|');
+        return $joined === '' ? '' : $joined;
+    }
+
     private function authorizeTenant(Request $request, Customer $customer): void
     {
         if ((int) $customer->tenant_id !== $this->tenantId($request)) {

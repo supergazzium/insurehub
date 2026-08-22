@@ -48,3 +48,33 @@ export interface CustomerListFilters {
 export function fetchCustomerList(filters: CustomerListFilters = {}) {
   return api.get<Paginated<CustomerListRow>>(`customers${buildQuery({ ...filters })}`)
 }
+
+// ── C-12 Prior assets ─────────────────────────────────────────────────
+//
+// Feeds the wizard's "Reuse from prior policy" dropdown (B3 §4). The
+// endpoint scopes results to the customer's own history + the requested
+// kind, and returns records deduplicated by the schema-declared
+// `dedupe_keys` (motor: license_no+chassis_no; travel: passport;
+// health/life: id_card; fire: insured_address).
+
+export interface PriorAsset {
+  dedupeKey: string
+  lastUsedPolicyNo: string | null
+  lastUsedApplicationNo: string | null
+  lastUsedAt: string | null
+  fields: Record<string, unknown>
+}
+
+export interface PriorAssetsResponse {
+  kind: string
+  dedupeKeys: string[]
+  assets: PriorAsset[]
+}
+
+/** GET /customers/{id}/prior-assets?kind=motor
+ *  Kinds: motor | travel | fire | health | life | misc.
+ *  Returns empty `assets` when the customer has no prior policy of
+ *  that kind. */
+export function fetchPriorAssets(customerId: string, kind: string) {
+  return api.get<PriorAssetsResponse>(`customers/${customerId}/prior-assets?kind=${encodeURIComponent(kind)}`)
+}
