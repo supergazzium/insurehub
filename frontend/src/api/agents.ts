@@ -41,3 +41,9 @@ export interface AgentListFilters {
 export function fetchAgentList(filters: AgentListFilters = {}) {
   return api.get<Paginated<AgentListRow>>(`agents${buildQuery({ ...filters })}`)
 }
+
+/** Full agent record via GET /agents/{id}. Used by the wizard's
+ *  resume-from-draft flow (C-15) to hydrate the EntityPicker label. */
+export function fetchAgent(id: string) {
+  return api.get<{ data: Record<string, unknown> }>(`agents/${id}`)
+}

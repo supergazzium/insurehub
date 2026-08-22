@@ -10,7 +10,7 @@ import { usePolicyStore, type PolicyStatus, type PolicyDocument } from '../../st
 import { fetchPolicy, policyDocumentDownloadUrl } from '../../api/policies'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
-import { getToken } from '../../api/client'
+import { api, ApiError, getToken } from '../../api/client'
 import PolicyDetailDrawer from './PolicyDetailDrawer.vue'
 // C-14 — swap the legacy 3-step wizard for the new 5-step
 // PolicyApplicationWizard. Legacy import kept for rollback per B3 §9;
@@ -26,6 +26,9 @@ const policyStore = usePolicyStore()
 
 const detailId = ref<string | null>(null)
 const showCreate = ref(false)
+// C-15 — when non-null the wizard opens in resume mode against this draft.
+// Cleared on wizard close so the next New Policy click starts fresh.
+const resumeDraftId = ref<string | null>(null)
 
 // Documents popup — click ปุ่มเรียกดูเอกสารแนบ opens a modal listing every
 // attachment on the selected policy with per-file download buttons. We
@@ -376,6 +379,33 @@ function fmtBaht(n: number): string {
   return new Intl.NumberFormat('th-TH', { style: 'currency', currency: 'THB', maximumFractionDigits: 0 }).format(n)
 }
 
+// ── C-15 draft actions ──────────────────────────────────────────────────
+
+/** Open the wizard in resume mode. Wizard fetches GET /policies/{id}
+ *  and hydrates its form + productDetail + picker labels. */
+function resumeDraft(policyId: string): void {
+  resumeDraftId.value = policyId
+  showCreate.value = true
+}
+
+/** Hard-delete a draft. Backend guard (C-11) blocks non-draft rows with
+ *  409; frontend confirms first to prevent accidental clicks. */
+async function deleteDraft(policyId: string, label: string): Promise<void> {
+  if (!window.confirm(t('policyCreate.resumeDraft.confirmDelete', { label }))) return
+  try {
+    await api.delete<{ message: string }>(`policies/${policyId}`)
+    await load()
+  } catch (e) {
+    window.alert(e instanceof ApiError ? (e.body as { message?: string })?.message ?? e.message : 'Delete failed.')
+  }
+}
+
+/** Toggle the "My drafts" filter. Sets status=draft on the URL-backed
+ *  filter row so the state persists across refresh + is shareable. */
+function toggleDraftsFilter(): void {
+  filters.status = filters.status === 'draft' ? '' : 'draft'
+}
+
 const rangeText = computed(() => {
   const meta = policyStore.listMeta
   if (!meta) return ''
@@ -398,6 +428,18 @@ const rangeText = computed(() => {
         <div v-if="policyStore.listMeta" class="text-sm text-slate-500">
           {{ rangeText }}
         </div>
+        <!-- C-15 — "My drafts" quick-filter toggle. Filters the list to
+             status=draft; click again to clear. -->
+        <button type="button"
+          :class="[
+            'px-3 py-1.5 rounded-lg text-sm flex items-center gap-1.5 border',
+            filters.status === 'draft'
+              ? 'bg-slate-800 text-white border-slate-800'
+              : 'bg-white text-slate-700 border-slate-200 hover:border-slate-400',
+          ]"
+          @click="toggleDraftsFilter">
+          <i class="pi pi-file-edit text-xs" /> {{ t('policyCreate.drafts.tab') }}
+        </button>
         <button type="button"
           class="px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm flex items-center gap-1.5"
           @click="showCreate = true">
@@ -562,7 +604,9 @@ const rangeText = computed(() => {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="p in policyStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer" @click="detailId = p.id">
+            <!-- C-15 — draft rows route to resume; issued+ rows open the drawer. -->
+            <tr v-for="p in policyStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer"
+              @click="p.status === 'draft' ? resumeDraft(p.id) : (detailId = p.id)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">
                 <div>{{ p.applicationNo ?? '—' }}</div>
                 <div v-if="p.policyNo" class="text-[10px] text-slate-400">{{ p.policyNo }}</div>
@@ -605,7 +649,28 @@ const rangeText = computed(() => {
                 <div v-if="p.premiumCheck === 'mismatch'" class="text-[10px] text-amber-600 mt-0.5">Δ premium</div>
               </td>
               <td class="px-4 py-2 text-center" @click.stop>
-                <button type="button"
+                <!-- C-15 — draft rows get Resume + Delete instead of the
+                     attachments button. Drafts are never referenced by
+                     policy_no or application_no; the ONLY sensible action
+                     is to keep filling them or throw them away. -->
+                <template v-if="p.status === 'draft'">
+                  <div class="inline-flex items-center gap-1">
+                    <button type="button"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-brand-200 text-brand-600 text-xs hover:bg-brand-50"
+                      :title="t('policyCreate.resumeDraft.title')"
+                      @click="resumeDraft(p.id)">
+                      <i class="pi pi-play-circle text-[11px]" />
+                      <span>{{ t('policyCreate.resumeDraft.title') }}</span>
+                    </button>
+                    <button type="button"
+                      class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-rose-200 text-rose-600 text-xs hover:bg-rose-50"
+                      :title="t('policyCreate.resumeDraft.discard')"
+                      @click="deleteDraft(p.id, p.applicationNo || p.customerName || p.id)">
+                      <i class="pi pi-trash text-[11px]" />
+                    </button>
+                  </div>
+                </template>
+                <button v-else type="button"
                   class="inline-flex items-center gap-1 px-2 py-1 rounded-md border border-slate-200 text-slate-600 text-xs hover:bg-slate-50 hover:text-brand-600 hover:border-brand-200"
                   :title="'ดูเอกสารแนบ'"
                   @click="openDocsModal(p.id, p.policyNo || p.applicationNo || p.customerName || p.id)">
@@ -672,7 +737,11 @@ const rangeText = computed(() => {
     </section>
 
     <PolicyDetailDrawer :policy-id="detailId" @close="detailId = null" />
-    <PolicyCreateWizard :open="showCreate" @close="showCreate = false" @created="() => { page = 1; load() }" />
+    <PolicyCreateWizard
+      :open="showCreate"
+      :resume-draft-id="resumeDraftId"
+      @close="() => { showCreate = false; resumeDraftId = null }"
+      @created="() => { page = 1; load() }" />
 
     <!-- Documents popup — list attachments with per-file open button -->
     <div v-if="docsModalPolicyId !== null" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"

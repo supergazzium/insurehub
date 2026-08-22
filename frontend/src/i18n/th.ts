@@ -1582,6 +1582,16 @@ export default {
     reuseFromPrior: {
       label: 'ใช้ข้อมูลจากกรมธรรม์ก่อนหน้า',
     },
+    // C-15 drafts tab + resume flow
+    resumeDraft: {
+      title: 'ทำต่อ',
+      discard: 'ทิ้ง',
+      confirmDelete: 'ทิ้งฉบับร่างนี้ ({label})?',
+    },
+    drafts: {
+      tab: 'ฉบับร่าง',
+      retentionHint: 'ฉบับร่างจะถูกลบอัตโนมัติหลัง 30 วัน',
+    },
     newOrRenew: 'ใหม่ / ต่ออายุ',
     new: 'กรมธรรม์ใหม่',
     renew: 'ต่ออายุ',

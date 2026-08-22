@@ -31,6 +31,10 @@ import EntityPicker from '../../components/EntityPicker.vue'
 import { ApiError } from '../../api/client'
 import { fetchCustomerList, fetchPriorAssets, type CustomerListRow, type PriorAsset } from '../../api/customers'
 import { fetchProduct, fetchProductList, type ProductDetail, type ProductListRow } from '../../api/products'
+import { fetchAgent } from '../../api/agents'
+import { fetchCustomer } from '../../api/customers'
+import { fetchPolicy } from '../../api/policies'
+import { hydrateSchemaValues } from '../../utils/riskSchema'
 import { fetchAgentList, type AgentListRow } from '../../api/agents'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import {
@@ -162,6 +166,10 @@ async function loadProductsForCarrier(carrierId: string): Promise<void> {
 }
 
 watch(() => form.insureType, (it) => {
+  // Cascade clears run only on operator-initiated changes. During
+  // hydrateFromDraft (C-15) `hydrating` is true — we call the loaders
+  // directly there in the right order without wiping downstream picks.
+  if (hydrating.value) return
   carriers.value = []; products.value = []
   form.carrierId = ''; form.productId = ''
   productDetail.value = null
@@ -169,6 +177,7 @@ watch(() => form.insureType, (it) => {
 })
 
 watch(() => form.carrierId, (cid) => {
+  if (hydrating.value) return
   products.value = []
   form.productId = ''
   productDetail.value = null
@@ -326,6 +335,11 @@ const autosaving = ref(false)
 
 function scheduleAutosave(): void {
   if (!form.customerId) return  // wait until step-1 has minimum content
+  // Skip while hydrateFromDraft is populating the form — otherwise the
+  // first PATCH re-writes the same values we just loaded, and worse,
+  // the settling cascade watchers (insureType → carriers → productId
+  // clearing) can wipe risk data mid-load.
+  if (hydrating.value) return
   window.clearTimeout(autosaveTimer)
   autosaveTimer = window.setTimeout(() => { void doAutosave() }, 800)
 }
@@ -494,6 +508,163 @@ async function submitToCarrier(): Promise<void> {
   }
 }
 
+// ── Resume from draft (C-15) ─────────────────────────────────────────────
+
+/** Hydrate the wizard from a saved draft. Called on open when
+ *  resumeDraftId is set. Fetches:
+ *    1. GET /policies/{id}                → base scalar fields + risk_data
+ *    2. GET /products/{id}                → productType.riskSchema
+ *    3. GET /customers/{id}, /agents/{id} → EntityPicker labels
+ *    4. If product picked → also loadCarriersForInsureType +
+ *       loadProductsForCarrier so the cascade dropdowns render the
+ *       selected values (a <select> can't display an orphan value).
+ *
+ *  Race condition: the autosave watcher fires on every form mutation.
+ *  We suppress it during hydration by holding a `hydrating` flag and
+ *  short-circuiting scheduleAutosave() when it's set.
+ */
+const hydrating = ref(false)
+
+async function hydrateFromDraft(id: string): Promise<void> {
+  hydrating.value = true
+  error.value = null
+  try {
+    const res = await fetchPolicy(id)
+    const p = res.data as unknown as Record<string, unknown>
+
+    // Scalars — same field names as buildDraftPayload emits.
+    form.customerId = String(p.customerId ?? '')
+    form.writingAgentId = String(p.writingAgentId ?? '')
+    form.productId = String(p.productId ?? '')
+    form.carrierId = String(p.carrierId ?? '')
+    form.newOrRenew = (p.newOrRenew as 'new' | 'renew' | null) ?? 'new'
+    form.refAppToId = String(p.refAppToId ?? '')
+    form.applicationNo = String(p.applicationNo ?? '')
+    form.notionNo = String(p.notionNo ?? '')
+    form.appDate = String(p.appDate ?? '')
+    form.effectiveDate = String(p.effectiveDate ?? '')
+    form.expiryDate = String(p.expiryDate ?? '')
+    form.coverage = Number(p.coverage ?? 0)
+    form.policyYear = Number(p.policyYear ?? 1)
+    form.actYear = Number(p.actYear ?? 1)
+    form.netPremium = Number(p.netPremium ?? 0)
+    form.mainPremium = Number(p.mainPremium ?? 0)
+    form.dutyStamp = Number(p.dutyStamp ?? 0)
+    form.vat = Number(p.vat ?? 0)
+    form.totalPremiumPaid = Number(p.totalPremiumPaid ?? 0)
+    form.whtAmt = Number(p.whtAmt ?? 0)
+    form.netCustomerPaid = Number(p.netCustomerPaid ?? 0)
+    form.annualPremium = Number(p.annualPremium ?? 0)
+    form.premiumMode = (p.premiumMode as typeof form.premiumMode) ?? 'annual'
+    form.installmentTerm = String(p.installmentTerm ?? '')
+    form.firstDueInst = Number(p.firstDueInst ?? 0)
+    form.firstDueInstDate = String(p.firstDueInstDate ?? '')
+    form.nextDueInst = Number(p.nextDueInst ?? 0)
+    form.lastDueInstDate = String(p.lastDueInstDate ?? '')
+    form.notes = String(p.notes ?? '')
+
+    // Every field is now touched so recalc watchers don't stomp saved values.
+    touched.expiryDate = true
+    touched.dutyStamp = true
+    touched.vat = true
+    touched.totalPremiumPaid = true
+    touched.netCustomerPaid = true
+    touched.mainPremium = true
+
+    // Product + cascade — needed for kind + riskSchema + dropdown display.
+    if (form.productId) {
+      const pd = await fetchProduct(form.productId)
+      productDetail.value = pd.data
+      const it = pd.data.carrierInsureType as 'life' | 'non-life' | 'tax' | ''
+      if (it === 'life' || it === 'non-life' || it === 'tax') {
+        form.insureType = it
+        await loadCarriersForInsureType(it)
+        await loadProductsForCarrier(form.carrierId)
+      }
+    }
+
+    // Hydrate the risk value bag from risk_data + top-level columns.
+    const schema = productDetail.value?.productType?.riskSchema as RiskSchema | null | undefined
+    if (schema) {
+      // Prefer the canonical `risk.fields` block from PolicyResource
+      // (populated by PolicyRiskShim::readerAll — merges JSON + columns).
+      const riskBlock = p.risk as { kind?: string; fields?: Record<string, unknown> } | null | undefined
+      const riskFields = riskBlock?.fields ?? {}
+      form.risk = hydrateSchemaValues(schema, riskFields, p as Record<string, unknown>)
+    }
+
+    // Customer / agent labels for the EntityPicker chip. Fetched in
+    // parallel — best-effort; picker input stays raw id string on failure.
+    const labelFetches: Promise<void>[] = []
+    if (form.customerId) {
+      labelFetches.push(fetchCustomer(form.customerId).then((cr) => {
+        const c = cr.data
+        customerPicked.value = {
+          id: String(c.id ?? ''),
+          customerCode: String(c.customerCode ?? ''),
+          customerType: String(c.customerType ?? ''),
+          titleTh: String(c.titleTh ?? ''),
+          firstName: String(c.firstName ?? ''),
+          lastName: String(c.lastName ?? ''),
+          nickname: String(c.nickname ?? ''),
+          juristicName: String(c.juristicName ?? ''),
+          idCard: String(c.idCard ?? ''),
+          taxId: String(c.taxId ?? ''),
+          passport: String(c.passport ?? ''),
+          phone: String(c.phone ?? ''),
+          email: String(c.email ?? ''),
+          province: String(c.province ?? ''),
+          assignedAgentId: null,
+          assignedAgentCode: null,
+          assignedAgentName: '',
+          activePolicyCount: 0,
+          totalPolicyCount: 0,
+          active: true,
+          registeredAt: null,
+        }
+      }).catch(() => { /* label hydration is best-effort */ }))
+    }
+    if (form.writingAgentId) {
+      labelFetches.push(fetchAgent(form.writingAgentId).then((ar) => {
+        const a = ar.data
+        agentPicked.value = {
+          id: String(a.id ?? ''),
+          agentCode: String(a.agentCode ?? ''),
+          firstName: String(a.firstName ?? ''),
+          lastName: String(a.lastName ?? ''),
+          email: String(a.email ?? ''),
+          phone: String(a.phone ?? ''),
+          agentType: String(a.agentType ?? ''),
+          active: true,
+          licenseStatus: (a.licenseStatus as 'valid' | 'expired' | 'expiring60d' | null) ?? null,
+          licenseExpiryDate: (a.licenseExpiryDate as string | null) ?? null,
+          rankId: (a.rankId as string | null) ?? null,
+          rankCode: (a.rankCode as string | null) ?? null,
+          rankNameTh: (a.rankNameTh as string | null) ?? null,
+          parentAgentId: (a.parentAgentId as string | null) ?? null,
+          parentAgentCode: (a.parentAgentCode as string | null) ?? null,
+        } as unknown as AgentListRow
+      }).catch(() => { /* best-effort */ }))
+    }
+    await Promise.all(labelFetches)
+
+    // Trigger prior-assets load after customer + kind resolved.
+    void loadPriorAssets()
+
+    // Land the operator on Step 1 (the picker chips are visible there).
+    // The 5-step layout doesn't force auto-jump to first-incomplete
+    // yet — a nice-to-have deferred to a follow-up.
+    step.value = 1
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : 'Draft resume failed.'
+  } finally {
+    // Give Vue two ticks for cascade watchers to settle before
+    // re-enabling autosave. Prevents the immediate PATCH from
+    // shipping a stale scalar bag.
+    setTimeout(() => { hydrating.value = false }, 100)
+  }
+}
+
 // ── Reset on close ────────────────────────────────────────────────────────
 
 watch(() => props.open, (o) => {
@@ -501,7 +672,7 @@ watch(() => props.open, (o) => {
   // On open, if resumeDraftId is set, load the draft; else reset fresh.
   if (props.resumeDraftId) {
     draftId.value = props.resumeDraftId
-    // Deferred: hydrate form from GET /policies/{id}. Ships in C-15.
+    void hydrateFromDraft(props.resumeDraftId)
   } else {
     draftId.value = null
     step.value = 1

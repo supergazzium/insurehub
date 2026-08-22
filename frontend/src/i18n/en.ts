@@ -522,6 +522,16 @@ export default {
     reuseFromPrior: {
       label: 'Reuse from prior policy',
     },
+    // C-15 drafts tab + resume flow
+    resumeDraft: {
+      title: 'Resume',
+      discard: 'Discard',
+      confirmDelete: 'Discard this draft ({label})?',
+    },
+    drafts: {
+      tab: 'Drafts',
+      retentionHint: 'Drafts auto-delete after 30 days',
+    },
     newOrRenew: 'New / Renew',
     new: 'New policy',
     renew: 'Renewal',

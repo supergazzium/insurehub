@@ -49,6 +49,14 @@ export function fetchCustomerList(filters: CustomerListFilters = {}) {
   return api.get<Paginated<CustomerListRow>>(`customers${buildQuery({ ...filters })}`)
 }
 
+/** Full customer record via GET /customers/{id}. Used by the wizard's
+ *  resume-from-draft flow (C-15) to hydrate the EntityPicker label
+ *  after page reload. Typed loosely — CustomerResource has ~40 fields
+ *  and callers here only need a handful. */
+export function fetchCustomer(id: string) {
+  return api.get<{ data: Record<string, unknown> }>(`customers/${id}`)
+}
+
 // ── C-12 Prior assets ─────────────────────────────────────────────────
 //
 // Feeds the wizard's "Reuse from prior policy" dropdown (B3 §4). The
