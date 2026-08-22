@@ -502,7 +502,26 @@ export default {
     create: 'Create',
     saving: 'Saving…',
     footerHint: 'Enter next · Esc close',
-    step: { 1: 'Identity', 2: 'Coverage & premium', 3: 'Details' },
+    step: {
+      1: 'Party',
+      2: 'Product & coverage',
+      3: 'Risk details',
+      4: 'Premium & payment',
+      5: 'Review & save',
+    },
+    action: {
+      saveDraft: 'Save as draft',
+      saveQuotation: 'Save as quotation',
+      submitToCarrier: 'Submit to carrier',
+      savingDraft: 'Auto-saving…',
+      draftSaved: 'Draft saved',
+    },
+    duration: {
+      expiryHint: 'Auto-computed from effective date + duration',
+    },
+    reuseFromPrior: {
+      label: 'Reuse from prior policy',
+    },
     newOrRenew: 'New / Renew',
     new: 'New policy',
     renew: 'Renewal',

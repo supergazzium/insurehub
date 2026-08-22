@@ -12,7 +12,11 @@ import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
 import { getToken } from '../../api/client'
 import PolicyDetailDrawer from './PolicyDetailDrawer.vue'
-import PolicyCreateWizard from './PolicyCreateWizard.vue'
+// C-14 — swap the legacy 3-step wizard for the new 5-step
+// PolicyApplicationWizard. Legacy import kept for rollback per B3 §9;
+// remove in C-20 after prod verification.
+// import PolicyCreateWizard from './PolicyCreateWizard.vue'
+import PolicyCreateWizard from './PolicyApplicationWizard.vue'
 import AgentPicker from '../../components/AgentPicker.vue'
 import DateInput from '../../components/DateInput.vue'
 import { CURRENT_STATUSES, statusBadgeClass } from '../../utils/policyStatus'

@@ -18,6 +18,13 @@ class PolicyRequest extends FormRequest
     public function rules(): array
     {
         $isCreate = $this->isMethod('post');
+        // C-11 permissive draft path: POST /policies/draft + PATCH /draft
+        // both accept partial state. All required rules relax to sometimes
+        // + nullable so the wizard's autosave can post whatever's filled.
+        // The promote endpoints (C-11) or regular POST /policies enforce
+        // the full contract at commit time.
+        $isDraft = str_contains($this->path(), '/draft');
+        $strict = $isCreate && ! $isDraft;
         $tenantId = $this->user()->tenant_id;
 
         return [
@@ -25,10 +32,10 @@ class PolicyRequest extends FormRequest
             'applicationNo' => ['sometimes', 'nullable', 'string', 'max:32'],
             'policyNo' => ['sometimes', 'nullable', 'string', 'max:64'],
             'notionNo' => ['sometimes', 'nullable', 'string', 'max:32'],
-            'customerId' => [$isCreate ? 'required' : 'sometimes', Rule::exists('customers', 'id')->where('tenant_id', $tenantId)],
-            'productId' => [$isCreate ? 'required' : 'sometimes', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
-            'carrierId' => [$isCreate ? 'required' : 'sometimes', Rule::exists('carriers', 'id')->where('tenant_id', $tenantId)],
-            'writingAgentId' => [$isCreate ? 'required' : 'sometimes', Rule::exists('agents', 'id')->where('tenant_id', $tenantId)],
+            'customerId' => [$strict ? 'required' : 'sometimes', 'nullable', Rule::exists('customers', 'id')->where('tenant_id', $tenantId)],
+            'productId' => [$strict ? 'required' : 'sometimes', 'nullable', Rule::exists('products', 'id')->where('tenant_id', $tenantId)],
+            'carrierId' => [$strict ? 'required' : 'sometimes', 'nullable', Rule::exists('carriers', 'id')->where('tenant_id', $tenantId)],
+            'writingAgentId' => [$strict ? 'required' : 'sometimes', 'nullable', Rule::exists('agents', 'id')->where('tenant_id', $tenantId)],
             'refAppToId' => ['sometimes', 'nullable', Rule::exists('policies', 'id')->where('tenant_id', $tenantId)],
             'coverage' => ['sometimes', 'numeric', 'min:0'],
             // Premium breakdown (Access parity).

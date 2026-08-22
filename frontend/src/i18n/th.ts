@@ -1556,7 +1556,32 @@ export default {
     create: 'สร้าง',
     saving: 'กำลังบันทึก…',
     footerHint: 'Enter ถัดไป · Esc ปิด',
-    step: { 1: 'ข้อมูลหลัก', 2: 'ความคุ้มครองและเบี้ย', 3: 'รายละเอียด' },
+    // C-14 5-step wizard: step labels repurposed per B3 §8 (step 1-3
+     // retexted, 4-5 new). Legacy 3-step wizard reads step.1..3 too so
+     // both wizards render meaningful labels during the shim period.
+    step: {
+      1: 'ผู้เอาประกัน',
+      2: 'สินค้า + ความคุ้มครอง',
+      3: 'รายละเอียด',
+      4: 'เบี้ย + การชำระ',
+      5: 'ตรวจสอบและบันทึก',
+    },
+    // C-14 action buttons (Step 5 three-button bar per B3 §2)
+    action: {
+      saveDraft: 'บันทึกฉบับร่าง',
+      saveQuotation: 'บันทึกใบเสนอราคา',
+      submitToCarrier: 'ส่งพิจารณา',
+      savingDraft: 'กำลังบันทึกอัตโนมัติ…',
+      draftSaved: 'บันทึกฉบับร่างเรียบร้อย',
+    },
+    // C-14 duration chips (per-kind labels supplied by durationPresets.ts)
+    duration: {
+      expiryHint: 'คำนวณจากวันเริ่มคุ้มครอง + ระยะเวลา',
+    },
+    // C-14 prior-asset autofill dropdown (Step 3, C-12 endpoint)
+    reuseFromPrior: {
+      label: 'ใช้ข้อมูลจากกรมธรรม์ก่อนหน้า',
+    },
     newOrRenew: 'ใหม่ / ต่ออายุ',
     new: 'กรมธรรม์ใหม่',
     renew: 'ต่ออายุ',

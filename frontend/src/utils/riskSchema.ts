@@ -78,10 +78,19 @@ export interface RiskSchema {
   sections: RiskSection[]
 }
 
+/** Convert a snake_case column name to the camelCase key the Laravel
+ *  PolicyRequest validator uses (motor_license_no → motorLicenseNo).
+ *  Kept as a local helper because the mapping is bounded by the shim's
+ *  FIELDS map — no need to pull a full case-converter dep. */
+function toCamelCase(snake: string): string {
+  return snake.replace(/_([a-z])/g, (_m, c) => (c as string).toUpperCase())
+}
+
 /** Build the writer payload for the whole schema value tree. Splits into
- *  `columns` (flat top-level) and `riskData` (nested by section/field key
- *  under the schema kind). Matches PolicyRiskShim::writerDualWrite on the
- *  backend so PolicyRequest.risk = { kind, data: <riskData[kind]> } +
+ *  `columns` (flat top-level, camelCase) and `riskData` (nested by
+ *  section/field key under the schema kind). Matches
+ *  PolicyRiskShim::writerDualWrite on the backend so
+ *  PolicyRequest.risk = { kind, data: <riskData[kind]> } +
  *  top-level column keys go together. */
 export function splitSchemaPayload(
   schema: RiskSchema,
@@ -95,7 +104,11 @@ export function splitSchemaPayload(
       const v = values[valueKey(section.key, field.key)]
       if (v === undefined || v === '' || v === null) continue
       if (field.storage === 'column' && field.column_name) {
-        columns[field.column_name] = v
+        // Column names in schema JSON are snake_case (matches DB), but
+        // the PolicyRequest validator + toModel mapper key on camelCase.
+        // Convert here so consumers can spread the returned object into
+        // an autosave payload directly.
+        columns[toCamelCase(field.column_name)] = v
       } else {
         sectionData[field.key] = v
       }
@@ -130,9 +143,14 @@ export function hydrateSchemaValues(
   for (const section of schema.sections) {
     for (const field of section.fields) {
       const k = valueKey(section.key, field.key)
-      if (field.storage === 'column' && field.column_name && columnValues[field.column_name] !== undefined) {
-        out[k] = columnValues[field.column_name]
-        continue
+      if (field.storage === 'column' && field.column_name) {
+        // Column values come from either the PolicyResource shape
+        // (camelCase — motorLicenseNo) or the raw DB row (snake_case —
+        // motor_license_no). Check both so the same helper serves the
+        // wizard resume path AND future direct-DB callers.
+        const camel = field.column_name.replace(/_([a-z])/g, (_m, c) => (c as string).toUpperCase())
+        if (columnValues[camel] !== undefined) { out[k] = columnValues[camel]; continue }
+        if (columnValues[field.column_name] !== undefined) { out[k] = columnValues[field.column_name]; continue }
       }
       if (riskData && field.key in riskData) {
         out[k] = riskData[field.key]
