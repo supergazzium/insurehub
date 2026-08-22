@@ -420,6 +420,66 @@ export default {
     },
   },
 
+  // C-7 English mirror of th.ts::policies.{status,statusDesc,events}. The
+  // Thai block is the primary source for the DB `policy_statuses.name_th`;
+  // this block is what the app renders when the user picks the English
+  // locale in the header selector.
+  policies: {
+    status: {
+      draft: 'Draft',
+      quotation: 'Quotation',
+      submitted: 'Submitted',
+      approved: 'Approved (pending policy no.)',
+      issued: 'Issued',
+      active: 'Active',
+      expired: 'Expired',
+      cancelled: 'Cancelled',
+      rejected: 'Rejected',
+      lapsed: 'Lapsed',
+      // Legacy (removed in C-20):
+      quote: 'Quote (legacy)',
+      application: 'Application (legacy)',
+      reinstated: 'Reinstated (legacy)',
+    },
+    statusDesc: {
+      draft: 'Draft — quote not yet issued',
+      quotation: 'Quotation — application not yet submitted',
+      submitted: 'Submitted to carrier — awaiting underwriting decision',
+      approved: 'Carrier approved — awaiting policy number',
+      issued: 'Policy number issued — coverage pending effective date',
+      active: 'Premium paid — coverage in force',
+      expired: 'Coverage ended at expiry date',
+      cancelled: 'Cancelled by customer or carrier',
+      rejected: 'Declined by the carrier',
+      lapsed: 'Lapsed for non-payment',
+      quote: 'Quote (legacy code)',
+      application: 'Application (legacy code)',
+      reinstated: 'Reinstated after lapse (legacy code)',
+    },
+    events: {
+      created: 'Record created',
+      draftCreated: 'Draft saved',
+      quotationMinted: 'Quotation created',
+      submittedFromDraft: 'Submitted from draft',
+      convertedToApplication: 'Converted to application',
+      submittedToCarrier: 'Submitted to carrier',
+      underwritingApproved: 'Underwriting approved',
+      underwritingRejected: 'Underwriting rejected',
+      issued: 'Policy issued',
+      activated: 'Coverage activated',
+      expired: 'Expired',
+      premiumPaid: 'Premium paid',
+      renewed: 'Renewed',
+      lapsed: 'Lapsed',
+      cancelled: 'Cancelled',
+      rejected: 'Rejected',
+      reinstated: 'Reinstated (legacy)',
+      backfillMigrated: 'Backfill migrated',
+      detailsUpdated: 'Details updated',
+      documentUploaded: 'Document uploaded',
+    },
+  },
+
   policyCreate: {
     title: 'New policy',
     cancel: 'Cancel',

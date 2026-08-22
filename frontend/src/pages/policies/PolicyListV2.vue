@@ -15,6 +15,7 @@ import PolicyDetailDrawer from './PolicyDetailDrawer.vue'
 import PolicyCreateWizard from './PolicyCreateWizard.vue'
 import AgentPicker from '../../components/AgentPicker.vue'
 import DateInput from '../../components/DateInput.vue'
+import { CURRENT_STATUSES, statusBadgeClass } from '../../utils/policyStatus'
 
 const { t } = useI18n()
 const policyStore = usePolicyStore()
@@ -356,31 +357,15 @@ function goPage(next: number): void {
   void load()
 }
 
-const allStatuses: { value: PolicyStatus | ''; label: string }[] = [
-  { value: '', label: 'All' },
-  { value: 'active', label: 'อนุมัติแล้ว' },
-  { value: 'submitted', label: 'รอพิจารณา' },
-  { value: 'application', label: 'รอตรวจรถ' },
-  { value: 'cancelled', label: 'Cancel / Reject' },
-  { value: 'quote', label: 'ใบเสนอราคา' },
-  { value: 'issued', label: 'ออกกรมธรรม์แล้ว' },
-  { value: 'lapsed', label: 'ขาดต่ออายุ' },
-  { value: 'reinstated', label: 'กลับมาคุ้มครองใหม่' },
-  { value: 'expired', label: 'หมดอายุ' },
-]
+// Filter dropdown options come from the centralized helper so a new
+// status code (or a rename) doesn't require touching this file.
+const allStatuses = computed<{ value: PolicyStatus | ''; label: string }[]>(() => [
+  { value: '', label: t('common.all') },
+  ...CURRENT_STATUSES.map((code) => ({ value: code as PolicyStatus, label: t(`policies.status.${code}`) })),
+])
 
 function statusBadge(s: PolicyStatus): string {
-  return {
-    quote: 'bg-slate-100 text-slate-600',
-    application: 'bg-amber-50 text-amber-700',
-    submitted: 'bg-amber-50 text-amber-700',
-    issued: 'bg-sky-50 text-sky-700',
-    active: 'bg-emerald-50 text-emerald-700',
-    lapsed: 'bg-rose-50 text-rose-700',
-    cancelled: 'bg-slate-100 text-slate-500',
-    reinstated: 'bg-violet-50 text-violet-700',
-    expired: 'bg-slate-100 text-slate-500',
-  }[s]
+  return statusBadgeClass(s)
 }
 
 function fmtBaht(n: number): string {

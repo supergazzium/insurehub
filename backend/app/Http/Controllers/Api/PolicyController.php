@@ -36,7 +36,15 @@ class PolicyController extends ApiController
             ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
             ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
             ->leftJoin('products as pr', 'pr.id', '=', 'p.product_id')
-            ->leftJoin('policy_statuses as ps', 'ps.id', '=', 'p.legacy_policy_status_id')
+            // Prefer join on the current status code (10-code enum after
+            // C-1/C-2) with a fallback to legacy_policy_status_id for the
+            // 7 pre-existing rows where the code column is NULL. Post-C-20
+            // we drop legacy_policy_status_id and simplify this to the
+            // code-only join.
+            ->leftJoin('policy_statuses as ps', function ($j) {
+                $j->on('ps.code', '=', 'p.status')
+                    ->orOn('ps.id', '=', 'p.legacy_policy_status_id');
+            })
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->select([

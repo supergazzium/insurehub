@@ -12,6 +12,7 @@ import { fetchPolicy, patchPolicySection, syncPolicyRiders, syncPolicyBeneficiar
 import { fetchEndorsements, createEndorsement, type Endorsement } from '../../api/endorsements'
 import { ApiError } from '../../api/client'
 import DateInput from '../../components/DateInput.vue'
+import { statusBadgeClass, type PolicyStatus } from '../../utils/policyStatus'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -441,13 +442,9 @@ async function removeDoc(id: string): Promise<void> {
           {{ (policy?.applicationNo as string) || (policy?.quoteNo as string) || '—' }}
         </h1>
         <div class="mt-1 flex items-center gap-2 text-xs">
-          <span :class="{
-            'bg-slate-100 text-slate-700': status === 'quote',
-            'bg-brand-50 text-brand-700': status === 'application',
-            'bg-emerald-50 text-emerald-700': ['issued','active'].includes(status),
-            'bg-amber-50 text-amber-700': ['lapsed','submitted'].includes(status),
-            'bg-rose-50 text-rose-700': ['cancelled','expired'].includes(status),
-          }" class="inline-flex px-2 py-0.5 rounded">{{ status || '—' }}</span>
+          <span :class="['inline-flex px-2 py-0.5 rounded', statusBadgeClass(status as PolicyStatus)]">
+            {{ status ? t(`policies.status.${status}`) : '—' }}
+          </span>
           <span v-if="isLocked" class="text-amber-700 flex items-center gap-1">
             <i class="pi pi-lock text-[10px]" /> {{ t('policyEdit.lockedHint') }}
           </span>

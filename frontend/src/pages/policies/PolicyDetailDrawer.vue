@@ -6,22 +6,22 @@
 // cancellation, payments, rebate, data-quality flags.
 
 import { computed, ref, watch } from 'vue'
+import { useI18n } from 'vue-i18n'
 import { usePolicyStore } from '../../stores/policies'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import { api, ApiError } from '../../api/client'
+import { CURRENT_STATUSES } from '../../utils/policyStatus'
 
-const POLICY_STATUS_OPTIONS = [
-  { value: 'quote', label: 'ใบเสนอราคา' },
-  { value: 'application', label: 'รอตรวจรถ' },
-  { value: 'submitted', label: 'รอพิจารณา' },
-  { value: 'issued', label: 'ออกกรมธรรม์แล้ว' },
-  { value: 'active', label: 'อนุมัติแล้ว' },
-  { value: 'lapsed', label: 'ขาดต่ออายุ' },
-  { value: 'cancelled', label: 'Cancel / Reject' },
-  { value: 'reinstated', label: 'กลับมาคุ้มครองใหม่' },
-  { value: 'expired', label: 'หมดอายุ' },
-]
+const { t } = useI18n()
+
+// C-7 — status options come from CURRENT_STATUSES so a new code lands
+// in one place. Click-to-edit on `status` writes via PATCH which the
+// backend `in:` validator + PolicyEventController transition matrix
+// gate — a mis-picked value returns 422.
+const POLICY_STATUS_OPTIONS = computed(() =>
+  CURRENT_STATUSES.map((code) => ({ value: code, label: t(`policies.status.${code}`) })),
+)
 
 const NEW_OR_RENEW_OPTIONS = [
   { value: 'new', label: 'New' },

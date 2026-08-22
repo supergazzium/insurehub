@@ -21,27 +21,48 @@ import {
 // lean PolicyListRow from a single store module.
 export type { PolicyListRow, PolicyListFilters }
 
+/** 10-code 7-state model per docs/audit-2026-08-21/B1-state-machine.md §1.
+ *  Legacy codes (`quote`, `application`, `reinstated`) are kept for the
+ *  shim window so rows that missed C-2 backfill still hydrate cleanly.
+ *  C-20 drops the legacy branch. */
 export type PolicyStatus =
-  | 'quote'
-  | 'application'
+  | 'draft'
+  | 'quotation'
   | 'submitted'
+  | 'approved'
   | 'issued'
   | 'active'
-  | 'lapsed'
-  | 'cancelled'
-  | 'reinstated'
   | 'expired'
+  | 'cancelled'
+  | 'rejected'
+  | 'lapsed'
+  // Legacy (removed in C-20):
+  | 'quote'
+  | 'application'
+  | 'reinstated'
 
+/** Event verbs the backend accepts (PolicyEventController::TRANSITIONS).
+ *  Mirrors utils/policyStatus.ts::PolicyTransitionVerb + the pure-audit
+ *  events emitted server-side (`created`, `premiumPaid`, `documentUploaded`,
+ *  `backfillMigrated`). */
 export type PolicyEventType =
   | 'created'
+  | 'draftCreated'
+  | 'quotationMinted'
+  | 'submittedFromDraft'
   | 'convertedToApplication'
   | 'submittedToCarrier'
+  | 'underwritingApproved'
+  | 'underwritingRejected'
   | 'issued'
-  | 'premiumPaid'
+  | 'activated'
+  | 'expired'
   | 'renewed'
   | 'lapsed'
   | 'cancelled'
   | 'reinstated'
+  | 'backfillMigrated'
+  | 'premiumPaid'
   | 'detailsUpdated'
   | 'documentUploaded'
 
@@ -310,16 +331,24 @@ export const usePolicyStore = defineStore('policies', () => {
   }
 
   const totalsByStatus = computed(() => {
+    // Bucket the 10 current codes + 3 legacy. Kept as an explicit Record
+    // so a new PolicyStatus value forces a compile error here (and by
+    // extension in every dashboard tile that renders these counts).
     const out: Record<PolicyStatus, number> = {
-      quote: 0,
-      application: 0,
+      draft: 0,
+      quotation: 0,
       submitted: 0,
+      approved: 0,
       issued: 0,
       active: 0,
-      lapsed: 0,
-      cancelled: 0,
-      reinstated: 0,
       expired: 0,
+      cancelled: 0,
+      rejected: 0,
+      lapsed: 0,
+      // Legacy (removed in C-20):
+      quote: 0,
+      application: 0,
+      reinstated: 0,
     }
     for (const p of policies.value) out[p.status]++
     return out
@@ -489,7 +518,9 @@ export const usePolicyStore = defineStore('policies', () => {
       coverage: payload.coverage,
       annualPremium: payload.annualPremium,
       premiumMode: payload.premiumMode,
-      status: 'quote',
+      // C-6 renamed `quote → quotation`. Legacy `quote` reads still
+      // hydrate; writes use the canonical code.
+      status: 'quotation',
       notes: payload.notes ?? '',
     })
     const created = normalize(response.data)
@@ -562,7 +593,9 @@ export const usePolicyStore = defineStore('policies', () => {
 
   async function convertToApplication(policyId: string): Promise<void> {
     const current = getPolicy(policyId)
-    if (!current || current.status !== 'quote') return
+    // Post-C-6 the source state is `quotation`; legacy `quote` still
+    // accepted for rows that missed the C-2 backfill.
+    if (!current || (current.status !== 'quotation' && current.status !== 'quote')) return
     await emitEvent(policyId, 'convertedToApplication', {
       applicationNo: nextApplicationNo(current.quoteNo),
     })
@@ -570,17 +603,43 @@ export const usePolicyStore = defineStore('policies', () => {
 
   async function submitToCarrier(policyId: string): Promise<void> {
     const current = getPolicy(policyId)
-    if (!current || current.status !== 'application') return
+    // Legacy verb — deprecated in C-6 in favor of submittedFromDraft or
+    // convertedToApplication. Backend still accepts it for backward
+    // compat; kept here so old callers keep working during the shim.
+    if (!current || (current.status !== 'quotation' && current.status !== 'draft'
+        && current.status !== 'quote')) return
     await emitEvent(policyId, 'submittedToCarrier')
   }
 
+  /** Record the carrier's acceptance (submitted → approved). The Issue
+   *  Policy modal (C-8) covers the next step (approved → issued). */
+  async function approveByCarrier(policyId: string, note?: string): Promise<void> {
+    const current = getPolicy(policyId)
+    if (!current || (current.status !== 'submitted' && current.status !== 'application')) return
+    await emitEvent(policyId, 'underwritingApproved', note ? { note } : {})
+  }
+
+  /** Record the carrier's decline (submitted → rejected). Reason required. */
+  async function rejectByCarrier(policyId: string, reason: string): Promise<void> {
+    const current = getPolicy(policyId)
+    if (!current || (current.status !== 'submitted' && current.status !== 'application')) return
+    await emitEvent(policyId, 'underwritingRejected', { reason })
+  }
+
+  /** Assign the carrier's policy_no and flip to issued. C-8 IssuePolicyModal
+   *  calls this. For rows that skipped the approval step (legacy shim),
+   *  also accept submitted/application as source. */
   async function issuePolicy(
     policyId: string,
     policyNo: string,
     effectiveDate: string,
   ): Promise<void> {
     const current = getPolicy(policyId)
-    if (!current || (current.status !== 'submitted' && current.status !== 'application')) return
+    if (!current) return
+    // Post-C-6 the canonical source is `approved`; the legacy states are
+    // accepted so a partial-deploy state doesn't strand the operator.
+    const allowed = ['approved', 'submitted', 'application']
+    if (!allowed.includes(current.status)) return
     await emitEvent(policyId, 'issued', { policyNo, effectiveDate })
   }
 
@@ -610,7 +669,12 @@ export const usePolicyStore = defineStore('policies', () => {
     newPremium: number,
   ): Promise<void> {
     const current = getPolicy(policyId)
-    if (!current || (current.status !== 'active' && current.status !== 'issued')) return
+    // Renewal is source-tolerant — active, issued, expired, and legacy
+    // reinstated all reasonably renew. The event is audit-only on the
+    // source; the new policy row is created via POST /policies with
+    // ref_app_to_id set (wizard's renewal path).
+    const allowed = ['active', 'issued', 'expired', 'reinstated']
+    if (!current || !allowed.includes(current.status)) return
     await emitEvent(policyId, 'renewed', { newExpiry, newPremium })
   }
 
@@ -630,10 +694,18 @@ export const usePolicyStore = defineStore('policies', () => {
     await emitEvent(policyId, 'lapsed', { lapseDate })
   }
 
-  async function reinstatePolicy(policyId: string, reinstateDate: string): Promise<void> {
-    const current = getPolicy(policyId)
-    if (!current || current.status !== 'lapsed') return
-    await emitEvent(policyId, 'reinstated', { reinstateDate })
+  /**
+   * @deprecated The `reinstated` transition was retired in C-6 — terminal
+   *  states never revert. Revival flow creates a NEW policy chained via
+   *  ref_app_to_id. Backend returns 410 Gone. Method kept as a no-op so
+   *  legacy callers don't crash; will be deleted with the wizard rewrite
+   *  in C-14.
+   */
+  async function reinstatePolicy(_policyId: string, _reinstateDate: string): Promise<void> {
+    if (import.meta.env.DEV) {
+      // eslint-disable-next-line no-console
+      console.warn('reinstatePolicy is deprecated (C-6). Create a new renewal policy instead.')
+    }
   }
 
   async function updatePolicyDetails(policyId: string, patch: Partial<Policy>): Promise<void> {
@@ -686,6 +758,8 @@ export const usePolicyStore = defineStore('policies', () => {
     createPolicyDirect,
     convertToApplication,
     submitToCarrier,
+    approveByCarrier,
+    rejectByCarrier,
     issuePolicy,
     recordPremiumPayment,
     renewPolicy,

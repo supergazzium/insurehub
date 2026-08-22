@@ -244,9 +244,11 @@ const form = reactive({
   mainComAmtInh: 0,
   mainComRateAg: 0,
   mainComAmtAg: 0,
-  // Default assumes non-motor (safe pick — "รอพิจารณา"); the `kind` watcher
-  // switches to "application" once the operator picks a motor product.
-  status: 'submitted' as 'quote' | 'application' | 'submitted' | 'issued' | 'active',
+  // Default assumes non-motor (safe pick — Submitted). The `kind` watcher
+  // switches to legacy `application` for motor pending the C-14 5-step
+  // wizard rewrite (which replaces the whole state <select> with three
+  // stage-gated action buttons).
+  status: 'submitted' as 'draft' | 'quotation' | 'quote' | 'application' | 'submitted' | 'approved' | 'issued' | 'active',
   notes: '',
   // Step 3 — motor
   motorTypeDriver: '',
@@ -1548,13 +1550,21 @@ function back(): void {
           <!-- Status + notes -->
           <div class="mt-4 pt-3 border-t border-slate-100 grid grid-cols-2 gap-4">
             <FormField :label="t('policyCreate.status')" error-key="status" :errors="fieldErrors" class="col-span-2">
+              <!-- C-7: options come from utils/policyStatus so the enum
+                   stays consistent with backend. Kept as a simple select
+                   until C-14 replaces the wizard with the 5-step layout
+                   whose Step-5 action buttons drive state transitions
+                   through the matrix instead. Legacy `application`
+                   option kept for motor-flow back-compat until C-14. -->
               <select v-model="form.status" @change="statusTouched = true"
                 class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-                <option value="quote">ใบเสนอราคา</option>
-                <option v-if="kind === 'motor'" value="application">รอตรวจรถ</option>
-                <option value="submitted">รอพิจารณา</option>
-                <option value="issued">ออกกรมธรรม์แล้ว</option>
-                <option value="active">อนุมัติแล้ว</option>
+                <option value="draft">{{ t('policies.status.draft') }}</option>
+                <option value="quotation">{{ t('policies.status.quotation') }}</option>
+                <option v-if="kind === 'motor'" value="application">{{ t('policies.status.application') }}</option>
+                <option value="submitted">{{ t('policies.status.submitted') }}</option>
+                <option value="approved">{{ t('policies.status.approved') }}</option>
+                <option value="issued">{{ t('policies.status.issued') }}</option>
+                <option value="active">{{ t('policies.status.active') }}</option>
               </select>
             </FormField>
             <FormField :label="t('policyCreate.notes')" class="col-span-2" error-key="notes" :errors="fieldErrors">
