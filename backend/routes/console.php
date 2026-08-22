@@ -24,3 +24,13 @@ Schedule::command('mail:poll')
 Schedule::command('mgm:reconcile-volumes')
     ->dailyAt('02:00')
     ->withoutOverlapping();
+
+// C-16 — daily policy state-machine transitions per B1 §7:
+//   1. issued → active   (effective_date reached)
+//   2. active → expired  (expiry_date passed)
+//   3. draft retention   (>30 day drafts soft-deleted)
+// 00:15 to buffer past midnight for clock skew on date comparisons.
+Schedule::command('policies:transition-daily')
+    ->dailyAt('00:15')
+    ->timezone('Asia/Bangkok')
+    ->withoutOverlapping();
