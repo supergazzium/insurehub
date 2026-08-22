@@ -7,11 +7,12 @@
 
 import { computed, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { usePolicyStore } from '../../stores/policies'
+import { usePolicyStore, type Policy, type PolicyStatus } from '../../stores/policies'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
+import IssuePolicyModal from './IssuePolicyModal.vue'
 import { api, ApiError } from '../../api/client'
-import { CURRENT_STATUSES } from '../../utils/policyStatus'
+import { CURRENT_STATUSES, statusBadgeClass } from '../../utils/policyStatus'
 
 const { t } = useI18n()
 
@@ -52,6 +53,18 @@ function apply(pathKey: string, v: unknown): void {
     }
   }
   obj[parts[parts.length - 1]] = v
+}
+
+// ── Issue Policy modal (C-8) ─────────────────────────────────────────────
+const showIssueModal = ref(false)
+
+async function onIssued(_updated: Policy): Promise<void> {
+  showIssueModal.value = false
+  // Re-fetch through the store's ensureDetail so the drawer picks up
+  // the fresh status + policyNo + issueDate. The modal already
+  // triggered a refresh on its own via the API call; this ensures the
+  // shared cache is in sync.
+  if (props.policyId) await policyStore.ensureDetail(props.policyId, true)
 }
 
 // ── Delete ────────────────────────────────────────────────────────────────
@@ -121,17 +134,7 @@ function fmtDate(s: string | null | undefined): string {
 }
 
 function statusBadge(s: string): string {
-  return {
-    quote: 'bg-slate-100 text-slate-600',
-    application: 'bg-amber-50 text-amber-700',
-    submitted: 'bg-amber-50 text-amber-700',
-    issued: 'bg-sky-50 text-sky-700',
-    active: 'bg-emerald-50 text-emerald-700',
-    lapsed: 'bg-rose-50 text-rose-700',
-    cancelled: 'bg-slate-100 text-slate-500',
-    reinstated: 'bg-violet-50 text-violet-700',
-    expired: 'bg-slate-100 text-slate-500',
-  }[s] ?? 'bg-slate-100 text-slate-600'
+  return statusBadgeClass(s as PolicyStatus)
 }
 </script>
 
@@ -151,6 +154,15 @@ function statusBadge(s: string): string {
         </div>
         <div v-else class="text-slate-500">Loading…</div>
         <div class="flex items-center gap-2">
+          <!-- C-8 — Issue Policy action, gated by state. Hidden on
+               non-Approved rows so it doesn't add noise for the 95%+
+               of the fleet that's Active/Expired. -->
+          <button v-if="policy?.status === 'approved'"
+            type="button"
+            class="px-3 py-1.5 rounded-md bg-emerald-600 text-white text-xs hover:bg-emerald-700 flex items-center gap-1.5"
+            @click="showIssueModal = true">
+            <i class="pi pi-check-circle text-[10px]" /> {{ $t('policyIssue.open') }}
+          </button>
           <RouterLink v-if="policy" :to="{ name: 'policy-edit', params: { id: policy.id } }"
             class="px-3 py-1.5 rounded-md bg-brand-600 text-white text-xs hover:bg-brand-700 flex items-center gap-1.5">
             <i class="pi pi-pencil text-[10px]" /> {{ $t('policyEdit.openFullEditor') }}
@@ -477,6 +489,13 @@ function statusBadge(s: string): string {
       :error="deleteError"
       @confirm="doDelete"
       @cancel="showDelete = false"
+    />
+
+    <IssuePolicyModal
+      :open="showIssueModal"
+      :policy-id="props.policyId"
+      @close="showIssueModal = false"
+      @issued="onIssued"
     />
   </div>
 </template>

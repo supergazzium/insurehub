@@ -229,6 +229,9 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::delete('policies/{policy}/documents/{document}', [PolicyDocumentController::class, 'destroy']);
     Route::get('policies/{policy}/events', [PolicyEventController::class, 'index']);
     Route::post('policies/{policy}/events', [PolicyEventController::class, 'store']);
+    // C-8 — Issue Policy modal endpoint. Thin sugar over the events store
+    // that pre-shapes the payload for the IssuePolicyModal UI. See B5.
+    Route::post('policies/{policy}/issue', [PolicyEventController::class, 'issue']);
 
     // Editable rebate ledger — inline edits from /commissions/rebates.
     Route::patch('policy-rebates/{rebate}', [PolicyRebateController::class, 'update']);

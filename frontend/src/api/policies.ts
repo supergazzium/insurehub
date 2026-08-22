@@ -131,3 +131,37 @@ export function recomputeCommission(policyId: string) {
     `policies/${policyId}/commission/recompute`,
   )
 }
+
+/** C-8 — Issue Policy modal payload. All strings ISO. `force=true`
+ *  bypasses the soft-duplicate policyNo check. */
+export interface IssuePolicyPayload {
+  policyNo: string
+  issueDate: string
+  periodPaidEnd?: string | null
+  policyEnd?: string | null
+  mailingAddByPolicy?: string | null
+  mailingDate?: string | null
+  mailingNote?: string | null
+}
+
+/** Response body for a soft-duplicate policyNo 409. Frontend surfaces the
+ *  `existing` block as a "already used by … — proceed anyway?" banner. */
+export interface DuplicatePolicyNoError {
+  code: 'duplicate_policy_no'
+  message: string
+  existing: {
+    id: string
+    quoteNo: string | null
+    applicationNo: string | null
+    status: string
+  }
+}
+
+/** POST /policies/{id}/issue. See B5-issue-modal.md.
+ *  Guard: policy.status must be `approved` server-side (409 otherwise).
+ *  Soft-duplicate on policyNo returns 409 with DuplicatePolicyNoError;
+ *  pass { force: true } after operator confirmation to bypass. */
+export function issuePolicy(id: string, payload: IssuePolicyPayload, opts?: { force?: boolean }) {
+  const qs = opts?.force ? '?force=1' : ''
+  return api.post<Single<Policy>>(`policies/${id}/issue${qs}`, payload)
+}

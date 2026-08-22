@@ -1663,6 +1663,45 @@ export default {
     addRow: 'เพิ่มแถว',
   },
 
+  // C-8 — Issue Policy modal. New namespace; distinct from policyCreate/
+  // policyEdit because it's a targeted transition (Approved → Issued),
+  // not a form for creating or editing full record state.
+  policyIssue: {
+    title: 'ออกกรมธรรม์',
+    open: 'ออกกรมธรรม์',
+    cancel: 'ยกเลิก',
+    submit: 'ออกกรมธรรม์',
+    submitting: 'กำลังบันทึก…',
+    confirmDuplicate: 'ยืนยันใช้เลขนี้',
+    f: {
+      policyNo: 'เลขที่กรมธรรม์',
+      issueDate: 'วันที่ออกกรมธรรม์',
+      periodPaidEnd: 'ระยะที่ชำระเบี้ยถึง',
+      policyEnd: 'วันสิ้นสุดกรมธรรม์',
+      mailingAddByPolicy: 'ที่อยู่จัดส่งกรมธรรม์',
+      mailingDate: 'วันที่ส่งไปรษณีย์',
+      mailingNote: 'หมายเหตุการส่ง',
+      certificate: 'ไฟล์กรมธรรม์ (PDF)',
+    },
+    hint: {
+      policyNo: 'เลขที่บริษัทประกันออกให้',
+      issueDate: 'ต้องเป็นวันในอดีตหรือปัจจุบัน',
+      periodPaidEnd: 'ค่าเริ่มต้นเท่ากับวันสิ้นสุดความคุ้มครอง',
+      policyEnd: 'ค่าเริ่มต้นเท่ากับวันสิ้นสุดความคุ้มครอง',
+      mailingAddByPolicy: 'ค่าเริ่มต้นดึงจากที่อยู่ลูกค้า',
+    },
+    error: {
+      notApproved: 'ต้องอยู่ในสถานะ Approved ก่อนจึงจะออกกรมธรรม์ได้',
+      policyNoRequired: 'ต้องระบุเลขที่กรมธรรม์',
+      issueDateRequired: 'ต้องระบุวันที่ออกกรมธรรม์',
+      issueDateFuture: 'วันที่ออกกรมธรรม์ต้องไม่อยู่ในอนาคต',
+      duplicatePolicyNo: 'เลขนี้ถูกใช้แล้วในกรมธรรม์ {ref} — ต้องการยืนยันใช้เลขนี้หรือไม่?',
+      uploadFailed: 'ออกกรมธรรม์เรียบร้อย แต่แนบไฟล์ไม่สำเร็จ — ลองใหม่ผ่านเมนูเอกสารแนบ',
+      generic: 'บันทึกไม่สำเร็จ ลองใหม่',
+    },
+    success: 'ออกกรมธรรม์เรียบร้อย',
+  },
+
   policyEdit: {
     title: 'แก้ไขกรมธรรม์',
     saveAll: 'บันทึกทั้งหมด',

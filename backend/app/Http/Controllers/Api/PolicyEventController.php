@@ -122,6 +122,89 @@ class PolicyEventController extends ApiController
     }
 
     /**
+     * C-8 — dedicated Issue Policy endpoint. Wraps the `issued` verb
+     * with the Issue Modal's payload contract (policyNo + issueDate
+     * required, other fields optional). See B5-issue-modal.md.
+     *
+     * Guard: from=approved (enforced by the shared transition matrix).
+     *
+     * Soft-duplicate handling: if another Issued+ row in this tenant
+     * already carries the same policyNo, returns 409 with
+     * `code:duplicate_policy_no` + the conflicting row's info. Client
+     * can retry with the operator's confirmation via `?force=1`.
+     */
+    public function issue(Request $request, Policy $policy): \Illuminate\Http\JsonResponse
+    {
+        $this->authorizeTenant($request, $policy);
+
+        $data = $request->validate([
+            'policyNo' => ['required', 'string', 'max:64'],
+            'issueDate' => ['required', 'date', 'before_or_equal:today'],
+            'periodPaidEnd' => ['sometimes', 'nullable', 'date'],
+            'policyEnd' => ['sometimes', 'nullable', 'date'],
+            'mailingAddByPolicy' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'mailingDate' => ['sometimes', 'nullable', 'date'],
+            'mailingNote' => ['sometimes', 'nullable', 'string'],
+        ]);
+
+        $this->assertTransitionAllowed($policy->status, 'issued');
+
+        // Soft-duplicate check — the migration relaxed the unique
+        // constraint on purpose (see 2027_01_01_000700). Warn instead
+        // of hard-blocking so the operator can confirm-and-proceed.
+        $force = $request->boolean('force');
+        if (! $force) {
+            $conflict = Policy::query()
+                ->where('tenant_id', $policy->tenant_id)
+                ->where('policy_no', $data['policyNo'])
+                ->where('id', '!=', $policy->id)
+                ->whereNotNull('policy_no')
+                ->whereIn('status', ['issued', 'active', 'expired', 'cancelled', 'lapsed'])
+                ->first(['id', 'quote_no', 'application_no', 'status']);
+            if ($conflict !== null) {
+                abort(response()->json([
+                    'code' => 'duplicate_policy_no',
+                    'message' => "Policy number `{$data['policyNo']}` is already used by another row in this tenant.",
+                    'existing' => [
+                        'id' => (string) $conflict->id,
+                        'quoteNo' => $conflict->quote_no,
+                        'applicationNo' => $conflict->application_no,
+                        'status' => $conflict->status,
+                    ],
+                ], 409));
+            }
+        }
+
+        DB::transaction(function () use ($policy, $data, $request): void {
+            $updates = [
+                'status' => 'issued',
+                'policy_no' => $data['policyNo'],
+                'issue_date' => $data['issueDate'],
+            ];
+            foreach (['periodPaidEnd' => 'period_paid_end', 'policyEnd' => 'policy_end',
+                      'mailingAddByPolicy' => 'mailing_add_by_policy', 'mailingDate' => 'mailing_date',
+                      'mailingNote' => 'mailing_note'] as $camel => $snake) {
+                if (array_key_exists($camel, $data)) {
+                    $updates[$snake] = $data[$camel];
+                }
+            }
+            $policy->update($updates);
+
+            PolicyEvent::create([
+                'policy_id' => $policy->id,
+                'type' => 'issued',
+                'occurred_at' => now(),
+                'by_user_id' => $request->user()?->id,
+                'payload' => $data,
+            ]);
+        });
+
+        $policy->refresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'product.productType']);
+
+        return (new PolicyResource($policy))->response();
+    }
+
+    /**
      * Enforce (from → to) matrix. Empty `from` list = source-agnostic
      * (audit-only events). Reject with 409 Conflict and a payload the
      * client can inspect to render "allowed next" options.

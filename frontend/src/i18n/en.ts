@@ -609,6 +609,43 @@ export default {
     addRow: 'Add row',
   },
 
+  // C-8 — English mirror of policyIssue.*
+  policyIssue: {
+    title: 'Issue policy',
+    open: 'Issue policy',
+    cancel: 'Cancel',
+    submit: 'Issue policy',
+    submitting: 'Saving…',
+    confirmDuplicate: 'Confirm and use',
+    f: {
+      policyNo: 'Policy number',
+      issueDate: 'Issue date',
+      periodPaidEnd: 'Premium paid through',
+      policyEnd: 'Policy end',
+      mailingAddByPolicy: 'Mailing address',
+      mailingDate: 'Mailing date',
+      mailingNote: 'Mailing note',
+      certificate: 'Certificate document (PDF)',
+    },
+    hint: {
+      policyNo: 'Number issued by the carrier',
+      issueDate: 'Must be today or earlier',
+      periodPaidEnd: 'Defaults to the expiry date',
+      policyEnd: 'Defaults to the expiry date',
+      mailingAddByPolicy: 'Pre-filled from the customer address',
+    },
+    error: {
+      notApproved: 'Policy must be in Approved status before it can be issued',
+      policyNoRequired: 'Policy number is required',
+      issueDateRequired: 'Issue date is required',
+      issueDateFuture: 'Issue date cannot be in the future',
+      duplicatePolicyNo: 'This number is already used by {ref} — confirm to proceed anyway?',
+      uploadFailed: 'Issued, but the file upload failed — retry via the attachments menu',
+      generic: 'Save failed, try again',
+    },
+    success: 'Policy issued',
+  },
+
   policyEdit: {
     title: 'Edit policy',
     saveAll: 'Save all',
