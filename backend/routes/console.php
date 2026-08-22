@@ -34,3 +34,12 @@ Schedule::command('policies:transition-daily')
     ->dailyAt('00:15')
     ->timezone('Asia/Bangkok')
     ->withoutOverlapping();
+
+// C-17 — daily shim-soak report. Sends a JSON line to the app log at
+// 00:30 so any monitoring/alerting can pick up "risk shim silent for
+// N days" as the ops signal for scheduling C-18's drop-columns
+// migration. Read-only; safe to run alongside the daily transitions.
+Schedule::command('policies:shim-report --json')
+    ->dailyAt('00:30')
+    ->timezone('Asia/Bangkok')
+    ->appendOutputTo(storage_path('logs/shim-report.log'));
