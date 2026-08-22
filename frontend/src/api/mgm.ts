@@ -95,6 +95,8 @@ export function createProductType(payload: {
   nameTh: string
   nameEn: string
   subOf?: string | null
+  kind?: ProductTypeKind | null
+  riskSchema?: RiskSchema | null
   tierId: number
   sortOrder?: number
   active?: boolean
@@ -108,6 +110,8 @@ export function updateProductType(id: string, payload: Partial<{
   nameTh: string
   nameEn: string
   subOf: string | null
+  kind: ProductTypeKind | null
+  riskSchema: RiskSchema | null
   tierId: number
   sortOrder: number
   active: boolean
