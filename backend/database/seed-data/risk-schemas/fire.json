@@ -1,0 +1,23 @@
+{
+  "version": 1,
+  "kind": "fire",
+  "sections": [
+    {
+      "key": "property",
+      "label_th": "รายละเอียดทรัพย์สิน",
+      "label_en": "Property details",
+      "fields": [
+        { "key": "insured_name",    "label_th": "ชื่อผู้เอาประกัน (ทรัพย์สิน)", "label_en": "Insured name",       "type": "string", "required": true },
+        { "key": "insured_address", "label_th": "ที่ตั้งทรัพย์สิน",              "label_en": "Insured address",    "type": "text",   "required": true },
+        { "key": "phone",           "label_th": "โทรศัพท์",                      "label_en": "Phone",              "type": "phone",  "validation": { "max": 32 } },
+        { "key": "building_cov",    "label_th": "ความคุ้มครองอาคาร (บาท)",       "label_en": "Building coverage",  "type": "number", "validation": { "min": 0 } },
+        { "key": "furniture_cov",   "label_th": "ความคุ้มครองเฟอร์นิเจอร์ (บาท)", "label_en": "Furniture coverage", "type": "number", "validation": { "min": 0 } },
+        { "key": "stock_cov",       "label_th": "ความคุ้มครองสต๊อกสินค้า (บาท)",  "label_en": "Stock coverage",     "type": "number", "validation": { "min": 0 } },
+        { "key": "other_cov",       "label_th": "ความคุ้มครองอื่นๆ (บาท)",        "label_en": "Other coverage",     "type": "number", "validation": { "min": 0 } },
+        { "key": "other_detail",    "label_th": "รายละเอียดอื่นๆ",               "label_en": "Other detail",       "type": "text" },
+        { "key": "notes",           "label_th": "หมายเหตุ",                      "label_en": "Notes",              "type": "text" }
+      ],
+      "dedupe_keys": ["insured_address"]
+    }
+  ]
+}

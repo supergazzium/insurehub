@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "kind": "travel",
+  "sections": [
+    {
+      "key": "trip",
+      "label_th": "รายละเอียดการเดินทาง",
+      "label_en": "Trip details",
+      "fields": [
+        {
+          "key": "destination",
+          "label_th": "ประเทศปลายทาง",
+          "label_en": "Destination",
+          "type": "string",
+          "required": true,
+          "validation": { "max": 128 }
+        },
+        {
+          "key": "start",
+          "label_th": "วันเริ่มเดินทาง",
+          "label_en": "Trip start",
+          "type": "date",
+          "required": true
+        },
+        {
+          "key": "end",
+          "label_th": "วันสิ้นสุดการเดินทาง",
+          "label_en": "Trip end",
+          "type": "date",
+          "required": true,
+          "depends_on": { "field": "start", "operator": "gte" }
+        },
+        {
+          "key": "traveler_count",
+          "label_th": "จำนวนผู้เดินทาง",
+          "label_en": "Traveler count",
+          "type": "number",
+          "required": true,
+          "validation": { "min": 1, "max": 99 },
+          "default": 1
+        },
+        {
+          "key": "traveler_passport",
+          "label_th": "เลขหนังสือเดินทาง",
+          "label_en": "Passport",
+          "type": "passport",
+          "validation": { "max": 32 },
+          "prior_autofill": true
+        }
+      ],
+      "dedupe_keys": ["traveler_passport"]
+    }
+  ]
+}

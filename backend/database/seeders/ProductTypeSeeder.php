@@ -84,6 +84,13 @@ class ProductTypeSeeder extends Seeder
             return;
         }
 
+        // C-10: load the 6 canonical risk_schema JSON files once so every
+        // tenant + every product_type row hydrates from the same source.
+        // Files live under seed-data/risk-schemas/{kind}.json. Missing
+        // files are treated as "no schema" (kind → NULL risk_schema).
+        // Admin can override per-row via AdminProductTypes.vue (C-9).
+        $schemas = $this->loadRiskSchemas();
+
         foreach ($tenants as $tenant) {
             // Cache per-tenant tier lookup so seeding N types × 1 tier query isn't N queries.
             $tiersByCode = CommissionTier::query()
@@ -111,6 +118,11 @@ class ProductTypeSeeder extends Seeder
                         'name_en' => $nameEn,
                         'sub_of' => $subOf,
                         'kind' => $kind,
+                        // C-10: risk_schema pulled from the JSON file that
+                        // matches this row's kind. NULL for kinds without
+                        // a file (should not happen for the 6 canonical
+                        // kinds — misc.json is the deliberate empty schema).
+                        'risk_schema' => $schemas[$kind] ?? null,
                         'tier_id' => $tierId,
                         'sort_order' => $sort,
                         'active' => true,
@@ -120,5 +132,40 @@ class ProductTypeSeeder extends Seeder
         }
 
         $this->command?->info('  product_types: '.ProductType::count());
+        $this->command?->info('  risk-schemas seeded: '.count($schemas).' ('.implode(', ', array_keys($schemas)).')');
+    }
+
+    /**
+     * Load the 6 canonical risk_schema JSON files from
+     * database/seed-data/risk-schemas/{kind}.json. Returns an assoc
+     * array keyed by kind. Missing files are silently skipped so a
+     * partial checkout still runs (kinds without a file end up with
+     * risk_schema=null on their product_type rows).
+     *
+     * @return array<string, array<string, mixed>>
+     */
+    private function loadRiskSchemas(): array
+    {
+        $out = [];
+        $dir = database_path('seed-data/risk-schemas');
+        foreach (['motor', 'travel', 'fire', 'health', 'life', 'misc'] as $kind) {
+            $path = "{$dir}/{$kind}.json";
+            if (! is_file($path)) {
+                $this->command?->warn("  risk-schema missing: {$path}");
+                continue;
+            }
+            $json = file_get_contents($path);
+            if ($json === false) {
+                $this->command?->warn("  risk-schema unreadable: {$path}");
+                continue;
+            }
+            try {
+                $out[$kind] = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+            } catch (\JsonException $e) {
+                $this->command?->error("  risk-schema {$kind} invalid JSON: {$e->getMessage()}");
+            }
+        }
+
+        return $out;
     }
 }

@@ -1,0 +1,108 @@
+{
+  "version": 1,
+  "kind": "motor",
+  "sections": [
+    {
+      "key": "vehicle",
+      "label_th": "รายละเอียดรถยนต์",
+      "label_en": "Vehicle details",
+      "fields": [
+        {
+          "key": "license_no",
+          "label_th": "ทะเบียนรถ",
+          "label_en": "License plate",
+          "type": "string",
+          "required": true,
+          "storage": "column",
+          "column_name": "motor_license_no",
+          "placeholder": "กข 1234",
+          "validation": { "min": 1, "max": 32, "validator": "thai_license_plate" },
+          "prior_autofill": true
+        },
+        {
+          "key": "vehicle_brand",
+          "label_th": "ยี่ห้อรถ",
+          "label_en": "Vehicle brand",
+          "type": "string",
+          "required": true,
+          "storage": "column",
+          "column_name": "motor_vehicle_brand",
+          "prior_autofill": true
+        },
+        {
+          "key": "vehicle_model",
+          "label_th": "รุ่นรถ",
+          "label_en": "Vehicle model",
+          "type": "string",
+          "required": true,
+          "storage": "column",
+          "column_name": "motor_vehicle_model",
+          "prior_autofill": true
+        },
+        {
+          "key": "register_year",
+          "label_th": "ปีจดทะเบียน",
+          "label_en": "Registration year",
+          "type": "string",
+          "validation": { "pattern": "^\\d{4}$" },
+          "prior_autofill": true
+        },
+        {
+          "key": "chassis_no",
+          "label_th": "เลขตัวถัง",
+          "label_en": "Chassis number",
+          "type": "string",
+          "validation": { "max": 64 },
+          "prior_autofill": true
+        },
+        {
+          "key": "engine_no",
+          "label_th": "เลขเครื่อง",
+          "label_en": "Engine number",
+          "type": "string",
+          "validation": { "max": 64 },
+          "prior_autofill": true
+        },
+        {
+          "key": "no_passenger",
+          "label_th": "จำนวนที่นั่ง",
+          "label_en": "Seats",
+          "type": "number",
+          "validation": { "min": 1, "max": 99 }
+        },
+        {
+          "key": "type_vehicle",
+          "label_th": "ประเภทรถ",
+          "label_en": "Vehicle type",
+          "type": "select",
+          "options": [
+            { "value": "sedan", "label_th": "เก๋ง", "label_en": "Sedan" },
+            { "value": "pickup", "label_th": "กระบะ", "label_en": "Pickup" },
+            { "value": "van", "label_th": "ตู้", "label_en": "Van" },
+            { "value": "suv", "label_th": "SUV", "label_en": "SUV" },
+            { "value": "truck", "label_th": "รถบรรทุก", "label_en": "Truck" },
+            { "value": "motorcycle", "label_th": "รถจักรยานยนต์", "label_en": "Motorcycle" }
+          ]
+        },
+        {
+          "key": "type_driver",
+          "label_th": "ประเภทผู้ขับขี่",
+          "label_en": "Driver type",
+          "type": "select",
+          "options": [
+            { "value": "named", "label_th": "ระบุชื่อ", "label_en": "Named driver" },
+            { "value": "any", "label_th": "ไม่ระบุชื่อ", "label_en": "Any driver" }
+          ]
+        },
+        {
+          "key": "notes",
+          "label_th": "หมายเหตุ",
+          "label_en": "Notes",
+          "type": "text",
+          "validation": { "max": 1000 }
+        }
+      ],
+      "dedupe_keys": ["license_no", "chassis_no"]
+    }
+  ]
+}
