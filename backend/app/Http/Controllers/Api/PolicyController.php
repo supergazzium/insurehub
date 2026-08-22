@@ -176,9 +176,173 @@ class PolicyController extends ApiController
     public function destroy(Request $request, Policy $policy): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
+
+        // C-11: only drafts are truly deletable. Non-draft rows go through
+        // the Cancel workflow so the audit trail and refund pipeline stay
+        // authoritative. Prevents accidental delete of an in-force policy.
+        if ($policy->status !== 'draft') {
+            abort(response()->json([
+                'code' => 'delete_non_draft',
+                'message' => 'Only draft policies can be deleted. Cancel this policy instead.',
+                'currentStatus' => $policy->status,
+            ], 409));
+        }
+
         $policy->delete();
 
         return response()->json(['message' => 'Deleted.']);
+    }
+
+    // ── C-11: Draft endpoints ─────────────────────────────────────────────
+    //
+    // The 5-step wizard (C-14) needs a way to auto-save partial state without
+    // consuming a quote_no or application_no serial. These endpoints back
+    // the wizard's "Save draft" action + the resume-from-drafts flow. See
+    // docs/audit-2026-08-21/B3-wizard-ia.md §7.
+
+    /**
+     * POST /policies/draft — permissive create for the wizard's auto-save.
+     *
+     * Any subset of PolicyRequest fields accepted; status defaults to
+     * 'draft'. Emits a draftCreated PolicyEvent so the audit trail records
+     * the wizard opening. Does NOT mint quote_no / application_no —
+     * promote endpoints below do that when the operator commits.
+     */
+    public function storeDraft(PolicyRequest $request): JsonResponse
+    {
+        $policy = DB::transaction(function () use ($request) {
+            $payload = $request->toModel() + [
+                'tenant_id' => $this->tenantId($request),
+                'status' => 'draft',
+                'writing_agent_id' => $request->input('writingAgentId')
+                    ?? $request->user()?->agent_id
+                    ?? null,
+            ];
+            $policy = Policy::create($payload);
+            $this->syncChildren($request, $policy);
+            \App\Models\PolicyEvent::create([
+                'policy_id' => $policy->id,
+                'type' => 'draftCreated',
+                'occurred_at' => now(),
+                'by_user_id' => $request->user()?->id,
+                'payload' => ['source' => 'wizard'],
+            ]);
+
+            return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType']);
+        });
+
+        return (new PolicyResource($policy))->response()->setStatusCode(201);
+    }
+
+    /**
+     * PATCH /policies/{policy}/draft — permissive update for the wizard's
+     * auto-save. 409 if the row already promoted past draft (racing wizard
+     * autosave vs a manual promote button).
+     */
+    public function updateDraft(PolicyRequest $request, Policy $policy): PolicyResource
+    {
+        $this->authorizeTenant($request, $policy);
+        if ($policy->status !== 'draft') {
+            abort(response()->json([
+                'code' => 'not_draft',
+                'message' => 'Only draft policies can be updated via /draft.',
+                'currentStatus' => $policy->status,
+            ], 409));
+        }
+        DB::transaction(function () use ($request, $policy): void {
+            $policy->update($request->toModel());
+            $this->syncChildren($request, $policy);
+        });
+
+        return new PolicyResource(
+            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
+        );
+    }
+
+    /**
+     * POST /policies/{policy}/promote-to-quotation — flips draft → quotation
+     * and mints a quote_no via the shared PolicyNumbering allocator.
+     *
+     * Emits a quotationMinted event so the audit trail records who
+     * committed the draft. The state-machine matrix (B1 §2) rejects any
+     * other source state at this transition.
+     */
+    public function promoteToQuotation(Request $request, Policy $policy): PolicyResource
+    {
+        $this->authorizeTenant($request, $policy);
+        if ($policy->status !== 'draft') {
+            abort(response()->json([
+                'code' => 'invalid_transition',
+                'message' => 'Only draft policies can promote to quotation.',
+                'currentStatus' => $policy->status,
+            ], 409));
+        }
+
+        $quoteNo = \App\Support\PolicyNumbering::nextQuoteNo($policy->tenant_id);
+
+        DB::transaction(function () use ($policy, $quoteNo, $request): void {
+            $policy->update([
+                'status' => 'quotation',
+                'quote_no' => $quoteNo,
+                'quote_date' => now()->toDateString(),
+            ]);
+            \App\Models\PolicyEvent::create([
+                'policy_id' => $policy->id,
+                'type' => 'quotationMinted',
+                'occurred_at' => now(),
+                'by_user_id' => $request->user()?->id,
+                'payload' => ['quoteNo' => $quoteNo, 'source' => 'wizard'],
+            ]);
+        });
+
+        return new PolicyResource(
+            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
+        );
+    }
+
+    /**
+     * POST /policies/{policy}/promote-to-submitted — flips draft → submitted
+     * OR quotation → submitted (state machine handles both source states).
+     * Mints application_no via the shared allocator.
+     *
+     * The wizard's "Submit to carrier" button hits this on both the draft
+     * short-path and the two-step draft → quotation → submit path.
+     */
+    public function promoteToSubmitted(Request $request, Policy $policy): PolicyResource
+    {
+        $this->authorizeTenant($request, $policy);
+        if (! in_array($policy->status, ['draft', 'quotation', 'quote'], true)) {
+            abort(response()->json([
+                'code' => 'invalid_transition',
+                'message' => 'Only draft or quotation policies can promote to submitted.',
+                'currentStatus' => $policy->status,
+                'allowedFrom' => ['draft', 'quotation'],
+            ], 409));
+        }
+
+        $applicationNo = $policy->application_no
+            ?? \App\Support\PolicyNumbering::nextApplicationNo($policy->tenant_id);
+        $appDate = now()->toDateString();
+        $verb = $policy->status === 'draft' ? 'submittedFromDraft' : 'convertedToApplication';
+
+        DB::transaction(function () use ($policy, $applicationNo, $appDate, $verb, $request): void {
+            $policy->update([
+                'status' => 'submitted',
+                'application_no' => $applicationNo,
+                'app_date' => $appDate,
+            ]);
+            \App\Models\PolicyEvent::create([
+                'policy_id' => $policy->id,
+                'type' => $verb,
+                'occurred_at' => now(),
+                'by_user_id' => $request->user()?->id,
+                'payload' => ['applicationNo' => $applicationNo, 'appDate' => $appDate, 'source' => 'wizard'],
+            ]);
+        });
+
+        return new PolicyResource(
+            $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
+        );
     }
 
     // ── Phase 6: sectioned edit ──────────────────────────────────────────

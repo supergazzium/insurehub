@@ -73,6 +73,38 @@ export function fetchPolicy(id: string) {
   return api.get<Single<Policy>>(`policies/${id}`)
 }
 
+// ── C-11 Draft endpoints ─────────────────────────────────────────────────
+// Back the wizard's auto-save + resume-from-draft flow. The permissive
+// payload (any subset of PolicyRequest fields) is intentional — backend
+// enforces state-machine gates on the transition endpoints below, not
+// on the shape of the draft itself. See B3-wizard-ia.md §7.
+
+/** POST /policies/draft — creates a status='draft' row. Does NOT mint
+ *  quote_no or application_no. Emits draftCreated PolicyEvent. */
+export function createDraftPolicy(payload: Record<string, unknown>) {
+  return api.post<Single<Policy>>('policies/draft', payload)
+}
+
+/** PATCH /policies/{id}/draft — updates a draft in place. 409 with
+ *  `code:not_draft` if the row has already been promoted. */
+export function updateDraftPolicy(id: string, payload: Record<string, unknown>) {
+  return api.patch<Single<Policy>>(`policies/${id}/draft`, payload)
+}
+
+/** POST /policies/{id}/promote-to-quotation — mints quote_no and flips
+ *  status to `quotation`. Backend rejects any source state other than
+ *  draft with `code:invalid_transition`. */
+export function promotePolicyToQuotation(id: string) {
+  return api.post<Single<Policy>>(`policies/${id}/promote-to-quotation`)
+}
+
+/** POST /policies/{id}/promote-to-submitted — mints application_no and
+ *  flips to `submitted`. Accepts source state = draft (short path) or
+ *  quotation (two-step path). */
+export function promotePolicyToSubmitted(id: string) {
+  return api.post<Single<Policy>>(`policies/${id}/promote-to-submitted`)
+}
+
 /** Phase 6/9b — sectioned PATCH. Section = dates|premium|payment|notes|identifiers|motor|commission. */
 export type PolicySection = 'dates' | 'premium' | 'payment' | 'notes' | 'identifiers' | 'motor' | 'commission'
 

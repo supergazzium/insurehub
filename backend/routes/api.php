@@ -148,6 +148,12 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // Registered before apiResource so 'next-code' doesn't get parsed as
     // a customer id by the {customer} route parameter.
     Route::get('customers/next-code', [CustomerController::class, 'nextCode']);
+    // C-12 prior-assets — feeds the wizard's "Reuse from prior policy"
+    // dropdown. Registered before apiResource so /customers/{customer}
+    // doesn't shadow /customers/{customer}/prior-assets (Laravel routes
+    // sub-paths correctly either way, but keeping it grouped with the
+    // apiResource makes intent clear).
+    Route::get('customers/{customer}/prior-assets', [CustomerController::class, 'priorAssets']);
     Route::apiResource('customers', CustomerController::class);
     Route::apiResource('carriers', CarrierController::class);
     Route::apiResource('carriers.bank-accounts', CarrierBankAccountController::class)
@@ -176,6 +182,14 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::patch('quotes/{policy}', [QuoteController::class, 'update']);
     Route::post('quotes/{policy}/convert', [QuoteController::class, 'convert']);
     Route::apiResource('contracts', ContractController::class);
+    // C-11 draft endpoints — registered BEFORE apiResource so the
+    // `/policies/draft` path isn't shadowed by `/policies/{policy}`. The
+    // wizard auto-save (C-14) hits storeDraft on first blur; the promote
+    // endpoints back the wizard's Save-Quotation and Submit buttons.
+    Route::post('policies/draft', [PolicyController::class, 'storeDraft']);
+    Route::patch('policies/{policy}/draft', [PolicyController::class, 'updateDraft']);
+    Route::post('policies/{policy}/promote-to-quotation', [PolicyController::class, 'promoteToQuotation']);
+    Route::post('policies/{policy}/promote-to-submitted', [PolicyController::class, 'promoteToSubmitted']);
     Route::apiResource('policies', PolicyController::class);
     // Phase 6 — sectioned edit (parties/dates/premium/payment/notes/identifiers).
     Route::patch('policies/{policy}/section/{section}', [PolicyController::class, 'patchSection']);

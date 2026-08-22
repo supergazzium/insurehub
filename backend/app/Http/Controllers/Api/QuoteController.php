@@ -259,36 +259,18 @@ class QuoteController extends ApiController
         return $out;
     }
 
-    /**
-     * Q<YY><4-digit-serial> — matches the convention we chose in Phase 5 plan.
-     * MAX(numeric-suffix)+1 across all statuses so a re-issue doesn't collide.
-     */
+    /** Thin wrapper — see {@see \App\Support\PolicyNumbering::nextQuoteNo()}.
+     *  Extracted in C-11 so PolicyController's draft-promote endpoints
+     *  share the same allocator. */
     private function nextQuoteNo(int $tenantId): string
     {
-        $prefix = 'Q'.now()->format('y');
-        $maxNum = (int) DB::table('policies')
-            ->where('tenant_id', $tenantId)
-            ->where('quote_no', 'like', $prefix.'%')
-            ->whereRaw('SUBSTRING(quote_no, ?) REGEXP \'^[0-9]+$\'', [strlen($prefix) + 1])
-            ->max(DB::raw('CAST(SUBSTRING(quote_no, '.(strlen($prefix) + 1).') AS UNSIGNED)'));
-        $next = $maxNum + 1;
-        return $prefix.str_pad((string) $next, 4, '0', STR_PAD_LEFT);
+        return \App\Support\PolicyNumbering::nextQuoteNo($tenantId);
     }
 
-    /**
-     * A<YY><6-digit-serial> — matches Access's application_code pattern
-     * that the importer already writes (e.g. A2507160006).
-     */
+    /** Thin wrapper — see {@see \App\Support\PolicyNumbering::nextApplicationNo()}. */
     private function nextApplicationNo(int $tenantId): string
     {
-        $prefix = 'A'.now()->format('y');
-        $maxNum = (int) DB::table('policies')
-            ->where('tenant_id', $tenantId)
-            ->where('application_no', 'like', $prefix.'%')
-            ->whereRaw('SUBSTRING(application_no, ?) REGEXP \'^[0-9]+$\'', [strlen($prefix) + 1])
-            ->max(DB::raw('CAST(SUBSTRING(application_no, '.(strlen($prefix) + 1).') AS UNSIGNED)'));
-        $next = $maxNum + 1;
-        return $prefix.str_pad((string) $next, 6, '0', STR_PAD_LEFT);
+        return \App\Support\PolicyNumbering::nextApplicationNo($tenantId);
     }
 
     private function authorizeTenant(Request $request, Policy $policy): void
