@@ -26,7 +26,12 @@ export interface CarrierListRow {
 export interface CarrierListFilters {
   q?: string
   activeOnly?: boolean
-  insureType?: 'life' | 'non-life' | 'tax' | ''
+  // Backend carriers.insure_type stores capitalized strings ("Life",
+  // "Non-Life", "Tax"); CarrierController's WHERE is case-sensitive.
+  // The union accepts both casings for shim compatibility with legacy
+  // callers (CarrierManagementV2, PolicyCreateWizard) that send lowercase.
+  // Prefer the capitalized form in new code (C-14+).
+  insureType?: 'Life' | 'Non-Life' | 'Tax' | 'life' | 'non-life' | 'tax' | ''
   page?: number
   perPage?: number
 }

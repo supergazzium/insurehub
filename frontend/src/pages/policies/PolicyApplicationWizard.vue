@@ -82,7 +82,10 @@ const form = reactive({
   notionNo: '' as string,
 
   // Step 2 — Product + Coverage
-  insureType: '' as 'life' | 'non-life' | 'tax' | '',
+  // Backend carriers.insure_type stores exact strings "Life", "Non-Life",
+  // "Tax". The dropdown / hydrate must send those exact values or the
+  // case-sensitive WHERE clause in CarrierController returns 0 rows.
+  insureType: '' as 'Life' | 'Non-Life' | 'Tax' | '',
   carrierId: '' as string,
   productId: '' as string,
   policyYear: 1,
@@ -141,7 +144,7 @@ const agentPicked = ref<AgentListRow | null>(null)
 const productDetail = ref<ProductDetail | null>(null)
 const productDetailLoading = ref(false)
 
-async function loadCarriersForInsureType(t: 'life' | 'non-life' | 'tax'): Promise<void> {
+async function loadCarriersForInsureType(t: 'Life' | 'Non-Life' | 'Tax'): Promise<void> {
   carriersLoading.value = true
   try {
     const res = await fetchCarrierList({ insureType: t, activeOnly: true, perPage: 100 })
@@ -575,8 +578,8 @@ async function hydrateFromDraft(id: string): Promise<void> {
     if (form.productId) {
       const pd = await fetchProduct(form.productId)
       productDetail.value = pd.data
-      const it = pd.data.carrierInsureType as 'life' | 'non-life' | 'tax' | ''
-      if (it === 'life' || it === 'non-life' || it === 'tax') {
+      const it = pd.data.carrierInsureType as 'Life' | 'Non-Life' | 'Tax' | ''
+      if (it === 'Life' || it === 'Non-Life' || it === 'Tax') {
         form.insureType = it
         await loadCarriersForInsureType(it)
         await loadProductsForCarrier(form.carrierId)
@@ -783,6 +786,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
                 :render-primary="(r: CustomerListRow) => r.customerCode"
                 :placeholder="t('policyCreate.customerPlaceholder')"
                 icon-class="pi-user"
+                :initial-label="customerPicked ? (`${customerPicked.firstName} ${customerPicked.lastName}`.trim() || customerPicked.juristicName || customerPicked.customerCode) : ''"
                 @picked="(r) => customerPicked = r as CustomerListRow | null"
               />
             </FormField>
@@ -795,6 +799,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
                 :render-primary="(r: AgentListRow) => r.agentCode"
                 :placeholder="t('policyCreate.agentPlaceholder')"
                 icon-class="pi-briefcase"
+                :initial-label="agentPicked ? (`${agentPicked.firstName} ${agentPicked.lastName}`.trim() || agentPicked.agentCode) : ''"
                 @picked="(r) => agentPicked = r as AgentListRow | null"
               />
             </FormField>
@@ -811,11 +816,11 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField :label="t('policyCreate.insureType')" required>
               <div class="flex gap-2">
-                <button v-for="opt in ['non-life', 'life', 'tax']" :key="opt" type="button"
-                  @click="form.insureType = opt as 'non-life' | 'life' | 'tax'"
+                <button v-for="opt in (['Non-Life', 'Life', 'Tax'] as const)" :key="opt" type="button"
+                  @click="form.insureType = opt"
                   :class="['flex-1 px-2 py-1.5 rounded-lg text-xs border',
                     form.insureType === opt ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200']">
-                  {{ t(`policyCreate.insureTypeOpt.${opt === 'non-life' ? 'nonLife' : opt}`) }}
+                  {{ t(`policyCreate.insureTypeOpt.${opt === 'Non-Life' ? 'nonLife' : opt.toLowerCase()}`) }}
                 </button>
               </div>
             </FormField>
