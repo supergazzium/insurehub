@@ -1655,6 +1655,7 @@ export default {
     installmentTerm: 'งวดการผ่อน',
     commissionSection: 'ค่าคอมมิชชั่น (จากสินค้า)',
     commissionRate: 'อัตรา (บริษัท → ตัวแทน)',
+    commissionYr1: '(ปีที่ 1)',
     commissionFrozen: 'ล็อกไว้ตอนสร้างกรมธรรม์',
     commissionWillFreeze: 'จะถูกล็อกเมื่อบันทึก',
     firstDueInst: 'ยอดงวดแรก',

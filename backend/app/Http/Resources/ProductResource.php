@@ -135,15 +135,25 @@ class ProductResource extends JsonResource
      */
     private function serializeCommissionRates(): array
     {
-        $scheme = in_array($this->type, ['Life', 'Rider'], true)
+        // Fallback scheme from the product group when no rate rows are loaded.
+        // NOTE: product.type casing is inconsistent across the dataset
+        // ('Life' vs 'life'), so this is only a fallback — the authoritative
+        // scheme is the one stored on the actual rate rows below.
+        $fallbackScheme = in_array(strtolower((string) $this->type), ['life', 'rider'], true)
             ? ProductCommissionRate::SCHEME_LIFE_YEARS
             : ProductCommissionRate::SCHEME_FLAT;
 
         if (! $this->relationLoaded('commissionRates')) {
-            return ['scheme' => $scheme, 'carrierToHub' => null, 'hubToAgent' => null];
+            return ['scheme' => $fallbackScheme, 'carrierToHub' => null, 'hubToAgent' => null];
         }
 
         $rows = $this->commissionRates->keyBy('direction');
+
+        // Prefer the scheme actually persisted on the rows (hub_to_agent first,
+        // then carrier_to_hub); fall back to the type-derived guess.
+        $scheme = $rows->get(ProductCommissionRate::DIRECTION_HUB_TO_AGENT)?->scheme
+            ?? $rows->get(ProductCommissionRate::DIRECTION_CARRIER_TO_HUB)?->scheme
+            ?? $fallbackScheme;
 
         return [
             'scheme' => $scheme,

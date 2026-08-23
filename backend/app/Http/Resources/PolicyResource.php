@@ -276,9 +276,29 @@ class PolicyResource extends JsonResource
 
         return [
             'frozen' => true,
-            'hubToAgentRate' => $hub?->flat_rate !== null ? (float) $hub->flat_rate : null,
-            'carrierToHubRate' => $carrier?->flat_rate !== null ? (float) $carrier->flat_rate : null,
+            // Headline rate: flat rate for non-life, year-1 rate for life
+            // (life_years vector). scheme lets the UI label it (e.g. "ปีที่ 1").
+            'scheme' => $hub?->scheme ?? $carrier?->scheme,
+            'hubToAgentRate' => $this->headlineRate($hub),
+            'carrierToHubRate' => $this->headlineRate($carrier),
             'capturedAt' => $snap->capturedAt(),
         ];
+    }
+
+    /**
+     * The single "headline" commission rate for a frozen rate row: the flat
+     * rate under scheme=flat, or the year-1 rate under scheme=life_years. This
+     * is what the wizard's premium section shows as the policy's commission.
+     */
+    private function headlineRate(?\App\Models\ProductCommissionRate $row): ?float
+    {
+        if ($row === null) {
+            return null;
+        }
+        if ($row->scheme === \App\Models\ProductCommissionRate::SCHEME_LIFE_YEARS) {
+            return $row->yr_1 !== null ? (float) $row->yr_1 : null;
+        }
+
+        return $row->flat_rate !== null ? (float) $row->flat_rate : null;
     }
 }

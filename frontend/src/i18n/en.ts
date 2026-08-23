@@ -596,6 +596,7 @@ export default {
     installmentTerm: 'Installment term',
     commissionSection: 'Commission (from product)',
     commissionRate: 'Rate (hub → agent)',
+    commissionYr1: '(year 1)',
     commissionFrozen: 'Locked at creation',
     commissionWillFreeze: 'Will lock when saved',
     firstDueInst: 'First due amount',

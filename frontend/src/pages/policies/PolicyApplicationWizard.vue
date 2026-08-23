@@ -147,19 +147,31 @@ const productDetail = ref<ProductDetail | null>(null)
 const productDetailLoading = ref(false)
 
 /** C-20: commission frozen onto an existing policy (edit mode). Null in
- *  create mode — there we show the product's LIVE rate that WILL be frozen. */
-const snapshotCommission = ref<{ hubToAgentRate: number | null; capturedAt: string | null } | null>(null)
+ *  create mode — there we show the product's LIVE rate that WILL be frozen.
+ *  `scheme` lets the UI label a life rate as the year-1 rate. */
+const snapshotCommission = ref<{ rate: number | null; scheme: string | null; capturedAt: string | null } | null>(null)
 
 /** Commission shown in the เบี้ย + การชำระ section.
  *  - edit mode: the rate frozen on the policy (immutable to product edits)
  *  - create mode: the product's current hub→agent rate, which will be locked
- *    onto the policy the moment it is saved. */
-const commissionDisplay = computed<{ rate: number | null; frozen: boolean; capturedAt: string | null }>(() => {
+ *    onto the policy the moment it is saved.
+ *  For life products the headline rate is the year-1 rate (life_years vector);
+ *  for non-life it is the flat rate. `isLife` drives the "ปีที่ 1" hint. */
+const commissionDisplay = computed<{ rate: number | null; frozen: boolean; isLife: boolean; capturedAt: string | null }>(() => {
   if (snapshotCommission.value) {
-    return { rate: snapshotCommission.value.hubToAgentRate, frozen: true, capturedAt: snapshotCommission.value.capturedAt }
+    return {
+      rate: snapshotCommission.value.rate,
+      frozen: true,
+      isLife: snapshotCommission.value.scheme === 'life_years',
+      capturedAt: snapshotCommission.value.capturedAt,
+    }
   }
-  const live = productDetail.value?.commissionRates?.hubToAgent?.flatRate ?? null
-  return { rate: live, frozen: false, capturedAt: null }
+  const rates = productDetail.value?.commissionRates
+  const isLife = rates?.scheme === 'life_years'
+  const live = isLife
+    ? (rates?.hubToAgent?.yr1 ?? null)
+    : (rates?.hubToAgent?.flatRate ?? null)
+  return { rate: live, frozen: false, isLife, capturedAt: null }
 })
 
 async function loadCarriersForInsureType(t: 'Life' | 'Non-Life' | 'Tax'): Promise<void> {
@@ -569,9 +581,9 @@ async function hydrateFromDraft(id: string): Promise<void> {
     form.notes = String(p.notes ?? '')
 
     // C-20: frozen commission (read-only display in the premium section).
-    const cs = p.commissionSnapshot as { hubToAgentRate?: number | null; capturedAt?: string | null; frozen?: boolean } | undefined
+    const cs = p.commissionSnapshot as { hubToAgentRate?: number | null; scheme?: string | null; capturedAt?: string | null; frozen?: boolean } | undefined
     snapshotCommission.value = cs?.frozen
-      ? { hubToAgentRate: cs.hubToAgentRate ?? null, capturedAt: cs.capturedAt ?? null }
+      ? { rate: cs.hubToAgentRate ?? null, scheme: cs.scheme ?? null, capturedAt: cs.capturedAt ?? null }
       : null
 
     // Every field is now touched so recalc watchers don't stomp saved values.
@@ -964,6 +976,9 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <span class="text-slate-500 mr-2">{{ t('policyCreate.commissionRate') }}</span>
           <span class="font-semibold text-slate-900 tabular-nums">
             {{ commissionDisplay.rate !== null ? (commissionDisplay.rate * 100).toFixed(2) + '%' : '—' }}
+          </span>
+          <span v-if="commissionDisplay.isLife && commissionDisplay.rate !== null" class="text-[10px] text-slate-400 ml-1">
+            {{ t('policyCreate.commissionYr1') }}
           </span>
         </div>
         <span
