@@ -105,7 +105,7 @@ class ProductController extends ApiController
     {
         $this->authorizeTenant($request, $product);
 
-        return new ProductResource($product->load(['carrier', 'commissionRates', 'commissionBands']));
+        return new ProductResource($product->load(['carrier', 'commissionRates', 'commissionBands', 'productType']));
     }
 
     public function update(ProductRequest $request, Product $product): ProductResource
