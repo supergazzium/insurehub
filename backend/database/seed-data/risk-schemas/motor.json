@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "kind": "motor",
   "sections": [
     {
@@ -8,26 +8,59 @@
       "label_en": "Vehicle details",
       "fields": [
         {
-          "key": "license_no",
-          "label_th": "ทะเบียนรถ",
-          "label_en": "License plate",
-          "type": "string",
+          "key": "type_driver",
+          "label_th": "ระบุผู้ขับขี่หรือไม่",
+          "label_en": "Named driver?",
+          "type": "radio",
           "required": true,
           "storage": "column",
-          "column_name": "motor_license_no",
-          "placeholder": "กข 1234",
-          "validation": { "min": 1, "max": 32, "validator": "thai_license_plate" },
-          "prior_autofill": true
+          "column_name": "motor_type_driver",
+          "options": [
+            { "value": "named", "label_th": "ระบุ", "label_en": "Named" },
+            { "value": "any", "label_th": "ไม่ระบุ", "label_en": "Any driver" }
+          ]
+        },
+        {
+          "key": "drivers",
+          "label_th": "รายชื่อผู้ขับขี่",
+          "label_en": "Named drivers",
+          "type": "array_of_objects",
+          "show_when": { "field": "type_driver", "equals": "named" },
+          "min_rows": 1,
+          "max_rows": 5,
+          "fields": [
+            {
+              "key": "name",
+              "label_th": "ชื่อ-สกุล",
+              "label_en": "Full name",
+              "type": "string",
+              "required": true,
+              "validation": { "max": 128 }
+            }
+          ]
         },
         {
           "key": "vehicle_brand",
           "label_th": "ยี่ห้อรถ",
           "label_en": "Vehicle brand",
-          "type": "string",
+          "type": "remote_select",
           "required": true,
           "storage": "column",
           "column_name": "motor_vehicle_brand",
+          "remote_url": "lookups/vehicle-brands",
+          "placeholder": "พิมพ์เพื่อค้นหายี่ห้อ...",
           "prior_autofill": true
+        },
+        {
+          "key": "type_vehicle",
+          "label_th": "ประเภทรถ",
+          "label_en": "Vehicle type",
+          "type": "remote_select",
+          "required": true,
+          "storage": "column",
+          "column_name": "motor_type_vehicle",
+          "remote_url": "lookups/motor-market-groups",
+          "placeholder": "เลือกประเภทรถ..."
         },
         {
           "key": "vehicle_model",
@@ -37,6 +70,18 @@
           "required": true,
           "storage": "column",
           "column_name": "motor_vehicle_model",
+          "prior_autofill": true
+        },
+        {
+          "key": "license_no",
+          "label_th": "ทะเบียนรถ",
+          "label_en": "License plate",
+          "type": "string",
+          "required": true,
+          "storage": "column",
+          "column_name": "motor_license_no",
+          "placeholder": "กข 1234",
+          "validation": { "min": 1, "max": 32 },
           "prior_autofill": true
         },
         {
@@ -69,30 +114,6 @@
           "label_en": "Seats",
           "type": "number",
           "validation": { "min": 1, "max": 99 }
-        },
-        {
-          "key": "type_vehicle",
-          "label_th": "ประเภทรถ",
-          "label_en": "Vehicle type",
-          "type": "select",
-          "options": [
-            { "value": "sedan", "label_th": "เก๋ง", "label_en": "Sedan" },
-            { "value": "pickup", "label_th": "กระบะ", "label_en": "Pickup" },
-            { "value": "van", "label_th": "ตู้", "label_en": "Van" },
-            { "value": "suv", "label_th": "SUV", "label_en": "SUV" },
-            { "value": "truck", "label_th": "รถบรรทุก", "label_en": "Truck" },
-            { "value": "motorcycle", "label_th": "รถจักรยานยนต์", "label_en": "Motorcycle" }
-          ]
-        },
-        {
-          "key": "type_driver",
-          "label_th": "ประเภทผู้ขับขี่",
-          "label_en": "Driver type",
-          "type": "select",
-          "options": [
-            { "value": "named", "label_th": "ระบุชื่อ", "label_en": "Named driver" },
-            { "value": "any", "label_th": "ไม่ระบุชื่อ", "label_en": "Any driver" }
-          ]
         },
         {
           "key": "notes",
