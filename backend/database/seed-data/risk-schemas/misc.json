@@ -1,1 +1,80 @@
-{ "version": 1, "kind": "misc", "sections": [] }
+{
+  "version": 2,
+  "kind": "misc",
+  "sections": [
+    {
+      "key": "property",
+      "label_th": "รายละเอียดทรัพย์สินและผู้ติดต่อ",
+      "label_en": "Property and contact details",
+      "fields": [
+        {
+          "key": "contact_name",
+          "label_th": "ชื่อผู้ติดต่อ",
+          "label_en": "Contact name",
+          "type": "string",
+          "required": true,
+          "storage": "column",
+          "column_name": "property_insured_name",
+          "validation": { "max": 128 }
+        },
+        {
+          "key": "contact_phone",
+          "label_th": "เบอร์ผู้ติดต่อ",
+          "label_en": "Contact phone",
+          "type": "phone",
+          "required": true,
+          "storage": "column",
+          "column_name": "property_phone",
+          "placeholder": "08x-xxx-xxxx",
+          "validation": { "max": 20 }
+        },
+        {
+          "key": "property_address",
+          "label_th": "ที่ตั้งทรัพย์",
+          "label_en": "Property address",
+          "type": "text",
+          "required": true,
+          "storage": "column",
+          "column_name": "property_insured_address",
+          "validation": { "max": 500 }
+        },
+        {
+          "key": "building_cov",
+          "label_th": "สิ่งปลูกสร้าง (บาท)",
+          "label_en": "Building coverage (THB)",
+          "type": "number",
+          "storage": "column",
+          "column_name": "property_building_cov",
+          "validation": { "min": 0 }
+        },
+        {
+          "key": "furniture_cov",
+          "label_th": "เฟอร์นิเจอร์ (บาท)",
+          "label_en": "Furniture coverage (THB)",
+          "type": "number",
+          "storage": "column",
+          "column_name": "property_furniture_cov",
+          "validation": { "min": 0 }
+        },
+        {
+          "key": "stock_cov",
+          "label_th": "สต๊อกสินค้า (บาท)",
+          "label_en": "Stock coverage (THB)",
+          "type": "number",
+          "storage": "column",
+          "column_name": "property_stock_cov",
+          "validation": { "min": 0 }
+        },
+        {
+          "key": "other_detail",
+          "label_th": "อื่นๆ",
+          "label_en": "Other",
+          "type": "text",
+          "storage": "column",
+          "column_name": "property_other_detail",
+          "validation": { "max": 1000 }
+        }
+      ]
+    }
+  ]
+}

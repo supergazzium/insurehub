@@ -61,16 +61,37 @@ class PolicyRiskShim
         // `property_` prefix because renaming columns is out of scope for
         // this refactor; the risk_data key mirrors the canonical `fire`
         // kind so JSON output matches product_types.kind.
+        // Fire + misc share the same 7-field property/contact shape post-C-19.
+        // Legacy risk_data keys (insured_name, insured_address, phone, etc.)
+        // stay in the map so pre-C-19 rows still route correctly on read;
+        // the C-19 canonical keys (contact_name, contact_phone,
+        // property_address) alias to the same columns.
         'fire' => [
-            'insured_name' => 'property_insured_name',
-            'insured_address' => 'property_insured_address',
-            'phone' => 'property_phone',
+            'contact_name' => 'property_insured_name',
+            'contact_phone' => 'property_phone',
+            'property_address' => 'property_insured_address',
             'building_cov' => 'property_building_cov',
             'furniture_cov' => 'property_furniture_cov',
             'stock_cov' => 'property_stock_cov',
-            'other_cov' => 'property_other_cov',
             'other_detail' => 'property_other_detail',
+            // Legacy keys — read-side compat only.
+            'insured_name' => 'property_insured_name',
+            'insured_address' => 'property_insured_address',
+            'phone' => 'property_phone',
+            'other_cov' => 'property_other_cov',
             'notes' => 'property_notes',
+        ],
+        // misc — same 7-field property/contact shape as fire (added C-19
+        // per operator request; misc products historically lived in the
+        // schema-less bucket).
+        'misc' => [
+            'contact_name' => 'property_insured_name',
+            'contact_phone' => 'property_phone',
+            'property_address' => 'property_insured_address',
+            'building_cov' => 'property_building_cov',
+            'furniture_cov' => 'property_furniture_cov',
+            'stock_cov' => 'property_stock_cov',
+            'other_detail' => 'property_other_detail',
         ],
         'travel' => [
             'destination' => 'trip_destination',
@@ -104,8 +125,6 @@ class PolicyRiskShim
             'health_beneficiary_name' => 'health_beneficiary_name',
             'health_beneficiary_relation' => 'health_beneficiary_relation',
         ],
-        // 'misc' has no risk fields — schema-driven wizard renders an
-        // empty section. Left out of FIELDS so nothing writes to it.
     ];
 
     /**
