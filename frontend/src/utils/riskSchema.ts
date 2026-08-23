@@ -12,6 +12,8 @@ export type RiskFieldType =
   | 'number'
   | 'date'
   | 'select'
+  | 'radio'
+  | 'remote_select'
   | 'boolean'
   | 'passport'
   | 'phone'
@@ -57,6 +59,14 @@ export interface RiskField {
   validation?: RiskFieldValidation
   depends_on?: RiskFieldDependsOn
   prior_autofill?: boolean
+  /** remote_select only — path under /api/v1 that returns
+   *  `{ data: [{ id, label, ... }] }`. `?q=` is appended for typeahead. */
+  remote_url?: string
+  /** Generic show/hide gate. When set, the field only renders (and
+   *  participates in validation) if the referenced field in the SAME
+   *  section equals one of the listed values. Used to reveal drivers
+   *  array only when type_driver === 'named'. */
+  show_when?: { field: string; equals: string | string[] }
   // array_of_objects only
   min_rows?: number
   max_rows?: number
@@ -174,6 +184,15 @@ export function validateSchemaValues(
 
   for (const section of schema.sections) {
     for (const field of section.fields) {
+      // Skip fields whose show_when gate is not satisfied — a hidden
+      // field is neither required nor validated.
+      if (field.show_when) {
+        const gateVal = values[valueKey(section.key, field.show_when.field)]
+        const eq = field.show_when.equals
+        const target = Array.isArray(eq) ? eq : [eq]
+        if (gateVal === undefined || !target.includes(String(gateVal))) continue
+      }
+
       const k = valueKey(section.key, field.key)
       const v = values[k]
       const filled = v !== undefined && v !== '' && v !== null
@@ -193,6 +212,12 @@ export function validateSchemaValues(
           try {
             if (!new RegExp(val.pattern).test(v)) problems.push({ key: k, message: `${field.label_th} ไม่ตรงรูปแบบ` })
           } catch { /* ignore malformed patterns — admin edit issue */ }
+        }
+        if (field.type === 'phone') {
+          const digits = v.replace(/[\s\-()]/g, '')
+          if (!/^0[689]\d{8}$/.test(digits)) {
+            problems.push({ key: k, message: `${field.label_th} ต้องเป็นเบอร์มือถือไทยที่ถูกต้อง` })
+          }
         }
       }
       if (typeof v === 'number') {
