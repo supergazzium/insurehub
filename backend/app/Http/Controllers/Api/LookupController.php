@@ -6,6 +6,7 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Bank;
 use App\Models\Location;
+use App\Models\MotorMarketGroup;
 use App\Models\MotorVehicle;
 use App\Models\NamePrefix;
 use App\Models\Nationality;
@@ -127,6 +128,52 @@ class LookupController extends ApiController
                 'yearEnd' => $v->vh_year_end,
                 'redbookCode' => $v->redbook_code,
             ]),
+        ]);
+    }
+
+    /** Distinct vehicle brand typeahead — powers the motor risk-schema
+     *  `remote_select` for ยี่ห้อรถ. Reuses motor_vehicles as the source
+     *  of truth so no separate brand table needs to be maintained.
+     *  `q` filters case-insensitively; returns up to 50 unique brand
+     *  strings ordered alphabetically. */
+    public function vehicleBrands(Request $request): JsonResponse
+    {
+        $q = MotorVehicle::query()
+            ->select('vehicle_brand')
+            ->whereNotNull('vehicle_brand')
+            ->where('vehicle_brand', '!=', '');
+
+        if ($needle = $request->input('q')) {
+            $q->where('vehicle_brand', 'like', "%{$needle}%");
+        }
+
+        $brands = $q->distinct()->orderBy('vehicle_brand')->limit(50)->pluck('vehicle_brand');
+
+        return response()->json([
+            'data' => $brands->values()->map(fn (string $b) => [
+                'id' => $b,
+                'label' => $b,
+            ]),
+        ]);
+    }
+
+    /** The 10 canonical Thai motor market categories (รถหรู / รถตลาดทั่วไป /
+     *  รถไฮซัม / รถบัส / รถมอเตอร์ไซค์ / รถกระบะ 2 ประตู / รถบรรทุก /
+     *  รถกระบะ 4 ประตู / รถหางพ่วง / รถอื่นๆ). Powers the motor risk-schema
+     *  `remote_select` for ประเภทรถ. Response key is `id` = group_code so
+     *  the value persisted in policies.risk_data is the stable 2-char code
+     *  regardless of Thai/English label drift. */
+    public function motorMarketGroups(): JsonResponse
+    {
+        return response()->json([
+            'data' => MotorMarketGroup::query()
+                ->orderBy('group_code')
+                ->get()
+                ->map(fn (MotorMarketGroup $g) => [
+                    'id' => $g->group_code,
+                    'label' => $g->desc_th,
+                    'labelEn' => $g->desc_en,
+                ]),
         ]);
     }
 }
