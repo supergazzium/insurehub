@@ -157,6 +157,37 @@ class LookupController extends ApiController
         ]);
     }
 
+    /** Distinct vehicle model typeahead, scoped to a brand. Powers the
+     *  cascade `remote_select` — model options refresh whenever the
+     *  brand changes. Empty brand → 400 so the frontend surfaces the
+     *  "pick a brand first" state instead of showing all 32k models. */
+    public function vehicleModels(Request $request): JsonResponse
+    {
+        $brand = trim((string) $request->input('brand', ''));
+        if ($brand === '') {
+            return response()->json(['data' => []]);
+        }
+
+        $q = MotorVehicle::query()
+            ->select('vehicle_model')
+            ->where('vehicle_brand', $brand)
+            ->whereNotNull('vehicle_model')
+            ->where('vehicle_model', '!=', '');
+
+        if ($needle = $request->input('q')) {
+            $q->where('vehicle_model', 'like', "%{$needle}%");
+        }
+
+        $models = $q->distinct()->orderBy('vehicle_model')->limit(100)->pluck('vehicle_model');
+
+        return response()->json([
+            'data' => $models->values()->map(fn (string $m) => [
+                'id' => $m,
+                'label' => $m,
+            ]),
+        ]);
+    }
+
     /** The 10 canonical Thai motor market categories (รถหรู / รถตลาดทั่วไป /
      *  รถไฮซัม / รถบัส / รถมอเตอร์ไซค์ / รถกระบะ 2 ประตู / รถบรรทุก /
      *  รถกระบะ 4 ประตู / รถหางพ่วง / รถอื่นๆ). Powers the motor risk-schema

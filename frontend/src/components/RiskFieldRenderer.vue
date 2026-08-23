@@ -115,6 +115,25 @@ function ensureRemote(key: string): RemoteState {
   return remoteCache[key]
 }
 
+/** Build the URL with any remote_deps params appended. Returns the URL
+ *  AND a `ready` flag — false when any required dep value is empty so
+ *  callers can skip the fetch (e.g. don't fetch models until brand set). */
+function buildRemoteUrl(section: RiskSection, field: RiskField): { url: string; ready: boolean } {
+  if (!field.remote_url) return { url: '', ready: false }
+  const deps = field.remote_deps ?? []
+  if (deps.length === 0) return { url: field.remote_url, ready: true }
+  const params: string[] = []
+  for (const dep of deps) {
+    const v = props.modelValue[valueKey(section.key, dep.field)]
+    if (v === undefined || v === null || v === '') {
+      return { url: field.remote_url, ready: false }
+    }
+    params.push(`${encodeURIComponent(dep.param)}=${encodeURIComponent(String(v))}`)
+  }
+  const sep = field.remote_url.includes('?') ? '&' : '?'
+  return { url: `${field.remote_url}${sep}${params.join('&')}`, ready: true }
+}
+
 async function fetchRemote(key: string, url: string, q: string): Promise<void> {
   const state = ensureRemote(key)
   state.loading = true
@@ -138,9 +157,17 @@ function scheduleRemoteFetch(key: string, url: string, q: string): void {
 }
 
 /** Pre-warm the option list for a remote_select field so the initial
- *  dropdown open shows options immediately (no wait-for-fetch dead time). */
-function primeRemote(key: string, url: string): void {
+ *  dropdown open shows options immediately (no wait-for-fetch dead time).
+ *  Respects remote_deps: skips priming when any dep is unfilled. */
+function primeRemote(section: RiskSection, field: RiskField): void {
+  const key = valueKey(section.key, field.key)
+  const { url, ready } = buildRemoteUrl(section, field)
   const state = ensureRemote(key)
+  if (!ready) {
+    // Clear stale options so the dropdown shows the "pick parent first" state.
+    if (state.options.length > 0) state.options = []
+    return
+  }
   if (state.options.length === 0 && !state.loading) {
     void fetchRemote(key, url, '')
   }
@@ -153,7 +180,7 @@ onMounted(() => {
   for (const section of props.schema.sections) {
     for (const field of section.fields) {
       if (field.type === 'remote_select' && field.remote_url) {
-        primeRemote(valueKey(section.key, field.key), field.remote_url)
+        primeRemote(section, field)
       }
     }
   }
@@ -164,11 +191,41 @@ watch(() => props.schema, (s) => {
   for (const section of s.sections) {
     for (const field of section.fields) {
       if (field.type === 'remote_select' && field.remote_url) {
-        primeRemote(valueKey(section.key, field.key), field.remote_url)
+        primeRemote(section, field)
       }
     }
   }
 })
+
+// Cascade dep watcher — when a parent field's value changes, clear the
+// child's value + refetch its options. Runs against the whole schema on
+// every modelValue change; O(schema fields × deps) but the schema is tiny
+// so the cost is negligible.
+watch(() => props.modelValue, (newV, oldV) => {
+  if (!props.schema) return
+  for (const section of props.schema.sections) {
+    for (const field of section.fields) {
+      if (field.type !== 'remote_select' || !field.remote_deps || field.remote_deps.length === 0) continue
+      const childKey = valueKey(section.key, field.key)
+      let changed = false
+      for (const dep of field.remote_deps) {
+        const depKey = valueKey(section.key, dep.field)
+        if (newV[depKey] !== oldV?.[depKey]) { changed = true; break }
+      }
+      if (!changed) continue
+      // Clear stale option cache so buildRemoteUrl-based prime refetches.
+      const state = ensureRemote(childKey)
+      state.options = []
+      state.query = ''
+      // Clear the child's own value (a model of the old brand is no
+      // longer valid for the new brand).
+      if (newV[childKey] !== undefined && newV[childKey] !== '' && newV[childKey] !== null) {
+        setValue(childKey, '')
+      }
+      primeRemote(section, field)
+    }
+  }
+}, { deep: true })
 
 // When resolving a saved value's label, first try the cached options; if
 // missing (typical on resume when the option isn't on the first page),
@@ -183,9 +240,9 @@ function remoteLabel(key: string, value: string): string {
 // outside can close it. We use a mounted-body listener to keep the
 // template simple.
 const openRemoteKey = ref<string | null>(null)
-function openRemote(key: string, url: string): void {
-  openRemoteKey.value = key
-  primeRemote(key, url)
+function openRemote(section: RiskSection, field: RiskField): void {
+  openRemoteKey.value = valueKey(section.key, field.key)
+  primeRemote(section, field)
 }
 function closeRemote(): void { openRemoteKey.value = null }
 
@@ -300,21 +357,28 @@ onMounted(() => {
             <!-- remote_select — searchable dropdown backed by an API. On
                  focus the cached options open; typing debounces a fresh
                  fetch against the endpoint's ?q= param. Value stored is
-                 the option's id (string). -->
+                 the option's id (string). Cascade-dependent fields (see
+                 field.remote_deps) refetch + clear their value when a
+                 parent field changes; when a required parent is empty
+                 the input is disabled with a "pick parent first" hint. -->
             <div v-else-if="field.type === 'remote_select' && field.remote_url"
               class="relative" data-remote-select>
               <input type="text"
-                :placeholder="field.placeholder ?? 'พิมพ์เพื่อค้นหา...'"
+                :placeholder="buildRemoteUrl(section, field).ready
+                  ? (field.placeholder ?? 'พิมพ์เพื่อค้นหา...')
+                  : (field.placeholder_disabled ?? 'เลือกค่าอ้างอิงก่อน')"
+                :disabled="!buildRemoteUrl(section, field).ready"
                 :value="openRemoteKey === valueKey(section.key, field.key)
                   ? ensureRemote(valueKey(section.key, field.key)).query
                   : remoteLabel(valueKey(section.key, field.key), (modelValue[valueKey(section.key, field.key)] as string | undefined) ?? '')"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400"
-                @focus="openRemote(valueKey(section.key, field.key), field.remote_url)"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 pr-8 text-sm bg-white focus:outline-none focus:border-brand-400 disabled:bg-slate-50 disabled:text-slate-400 disabled:cursor-not-allowed"
+                @focus="openRemote(section, field)"
                 @input="(e) => {
                   const state = ensureRemote(valueKey(section.key, field.key))
                   state.query = (e.target as HTMLInputElement).value
                   openRemoteKey = valueKey(section.key, field.key)
-                  scheduleRemoteFetch(valueKey(section.key, field.key), field.remote_url as string, state.query)
+                  const built = buildRemoteUrl(section, field)
+                  if (built.ready) scheduleRemoteFetch(valueKey(section.key, field.key), built.url, state.query)
                 }"
               />
               <button v-if="modelValue[valueKey(section.key, field.key)]"
@@ -324,7 +388,7 @@ onMounted(() => {
               >
                 <i class="pi pi-times text-xs" />
               </button>
-              <ul v-if="openRemoteKey === valueKey(section.key, field.key)"
+              <ul v-if="openRemoteKey === valueKey(section.key, field.key) && buildRemoteUrl(section, field).ready"
                 class="absolute left-0 right-0 top-full mt-1 z-20 bg-white border border-slate-200 rounded-lg shadow-lg max-h-56 overflow-auto">
                 <li v-if="ensureRemote(valueKey(section.key, field.key)).loading" class="px-3 py-2 text-xs text-slate-400">
                   <i class="pi pi-spin pi-spinner text-[10px]" /> Loading…

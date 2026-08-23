@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "kind": "motor",
   "sections": [
     {
@@ -66,10 +66,14 @@
           "key": "vehicle_model",
           "label_th": "รุ่นรถ",
           "label_en": "Vehicle model",
-          "type": "string",
+          "type": "remote_select",
           "required": true,
           "storage": "column",
           "column_name": "motor_vehicle_model",
+          "remote_url": "lookups/vehicle-models",
+          "remote_deps": [{ "field": "vehicle_brand", "param": "brand" }],
+          "placeholder": "พิมพ์เพื่อค้นหารุ่น...",
+          "placeholder_disabled": "เลือกยี่ห้อรถก่อน",
           "prior_autofill": true
         },
         {

@@ -293,6 +293,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
         Route::get('payment-methods', [LookupController::class, 'paymentMethods']);
         Route::get('motor-vehicles', [LookupController::class, 'motorVehicles']);
         Route::get('vehicle-brands', [LookupController::class, 'vehicleBrands']);
+        Route::get('vehicle-models', [LookupController::class, 'vehicleModels']);
         Route::get('motor-market-groups', [LookupController::class, 'motorMarketGroups']);
     });
 });

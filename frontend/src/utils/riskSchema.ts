@@ -52,6 +52,9 @@ export interface RiskField {
   storage?: 'column' | 'risk_data'
   column_name?: string
   placeholder?: string
+  /** Optional Thai/EN prompt shown when a cascade parent is empty and the
+   *  remote_select is disabled. Falls back to a generic message when unset. */
+  placeholder_disabled?: string
   help_th?: string
   help_en?: string
   default?: unknown
@@ -62,6 +65,13 @@ export interface RiskField {
   /** remote_select only — path under /api/v1 that returns
    *  `{ data: [{ id, label, ... }] }`. `?q=` is appended for typeahead. */
   remote_url?: string
+  /** remote_select only — cascade dependencies. Each entry sends the
+   *  named parent field's current value as a query param when fetching
+   *  options. When the parent field's value changes, this field's
+   *  current value is cleared + the option list is refetched.
+   *  Example: vehicle_model depends on { field: 'vehicle_brand', param: 'brand' }
+   *  → GET /lookups/vehicle-models?brand=TOYOTA */
+  remote_deps?: { field: string; param: string }[]
   /** Generic show/hide gate. When set, the field only renders (and
    *  participates in validation) if the referenced field in the SAME
    *  section equals one of the listed values. Used to reveal drivers
