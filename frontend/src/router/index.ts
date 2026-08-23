@@ -175,6 +175,12 @@ const routes: RouteRecordRaw[] = [
       { path: 'quotes/:id', name: 'quote-detail', component: QuoteDetail },
       // Phase 6 — Policy sectioned edit
       { path: 'policies/:id/edit', name: 'policy-edit', component: PolicyEdit, meta: { moduleKey: 'policies' } },
+      // C-14/C-18 — 5-section Application Wizard (replaces the modal).
+      // `new` creates a fresh draft; `edit-draft/:id` resumes an existing
+      // draft with hydrated form state. Same PolicyApplicationWizard.vue
+      // handles both — it reads the id from the route on mount.
+      { path: 'policies/new', name: 'policy-new', component: () => import('../pages/policies/PolicyApplicationWizard.vue'), meta: { moduleKey: 'policies' } },
+      { path: 'policies/:id/edit-draft', name: 'policy-edit-draft', component: () => import('../pages/policies/PolicyApplicationWizard.vue'), meta: { moduleKey: 'policies' }, props: true },
       ...moduleRoutes,
     ],
   },

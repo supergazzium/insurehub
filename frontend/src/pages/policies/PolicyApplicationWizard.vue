@@ -1,28 +1,34 @@
 <script setup lang="ts">
-// C-14 — 5-step Policy Application Wizard. Ground truth: B3-wizard-ia.md.
+// C-14 (v2 layout) — Policy Application Wizard as a full-page route.
 //
-// Step layout:
-//   1. Party           — customer + writing agent + new/renew + optional refAppToId
-//   2. Product + Cov   — insureType → carrier → product; effective + duration chip → expiry
+// Sections (rendered as vertically-stacked cards, matching PolicyEdit.vue):
+//   1. Party           — customer + writing agent + new/renew + refAppToId
+//   2. Product + Cov   — insureType → carrier → product; effective + duration chip
 //   3. Risk (dynamic)  — RiskFieldRenderer against product.productType.riskSchema
 //                        + "Reuse from prior policy" dropdown (C-12)
-//   4. Premium         — net/main/duty/vat/total/wht/mode + installment + commission
-//   5. Review + Save   — three action buttons:
-//                        · บันทึกฉบับร่าง    → POST /policies/draft
-//                        · บันทึกใบเสนอราคา  → promote-to-quotation
-//                        · ส่งพิจารณา        → promote-to-submitted
+//   4. Premium         — net/main/duty/vat/total/wht + installment
+//   5. Notes           — free-text notes + review summary
 //
-// Draft-safe autosave: once the operator picks a customer on Step 1, the
-// wizard POSTs /policies/draft and subsequent field changes PATCH the
-// draft in place with a 800ms debounce. No serial numbers minted at
-// this stage.
+// Header (like PolicyEdit) carries the title, status badge, and three
+// action buttons:
+//     · บันทึกฉบับร่าง    → POST /policies/draft (or PATCH if resuming)
+//     · บันทึกใบเสนอราคา  → promote-to-quotation
+//     · ส่งพิจารณา        → promote-to-submitted
 //
-// The legacy PolicyCreateWizard.vue stays available (mounted from the
-// same trigger button) as a rollback safety net until this rewrite is
-// verified end-to-end in prod (see C-20 for legacy removal).
+// Draft-safe autosave: once the operator picks a customer, the wizard
+// POSTs /policies/draft and subsequent field changes PATCH the draft in
+// place with a 800ms debounce. No serial numbers minted at this stage.
+//
+// Two routes point here (see router/index.ts):
+//     /policies/new                  fresh wizard
+//     /policies/:id/edit-draft       resume-mode, hydrates from GET /policies/{id}
+//
+// The legacy modal PolicyCreateWizard.vue stays available for rollback;
+// removed in C-20.
 
-import { computed, onBeforeUnmount, reactive, ref, watch } from 'vue'
+import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { useRouter } from 'vue-router'
 import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
 import DurationChip from '../../components/DurationChip.vue'
@@ -42,29 +48,25 @@ import {
   promotePolicyToQuotation, promotePolicyToSubmitted,
 } from '../../api/policies'
 import { durationConfig } from '../../utils/durationPresets'
+import { statusBadgeClass, type PolicyStatus } from '../../utils/policyStatus'
 import {
   splitSchemaPayload, valueKey, validateSchemaValues, type RiskSchema,
 } from '../../utils/riskSchema'
 
+// Route-driven resume id — `/policies/:id/edit-draft` binds `id` prop.
 const props = defineProps<{
-  open: boolean
-  /** Optional draft id to resume from. `null` = fresh wizard. */
-  resumeDraftId?: string | null
+  id?: string
 }>()
 
-const emit = defineEmits<{
-  (e: 'close'): void
-  /** Fires on any successful save so the parent list can reload. */
-  (e: 'created', row: Record<string, unknown>): void
-}>()
+const router = useRouter()
 
 const { t } = useI18n()
 
 // ── State ────────────────────────────────────────────────────────────────
 
-type WizardStep = 1 | 2 | 3 | 4 | 5
-const step = ref<WizardStep>(1)
-const draftId = ref<string | null>(props.resumeDraftId ?? null)
+// Full-page layout — no step gating. All 5 sections visible at once,
+// matching PolicyEdit.vue. `draftId` still tracks the persisted row.
+const draftId = ref<string | null>(props.id ?? null)
 const saving = ref(false)
 const error = ref<string | null>(null)
 const flash = ref<string | null>(null)
@@ -295,7 +297,6 @@ let hubChannel: BroadcastChannel | null = null
 if (typeof BroadcastChannel !== 'undefined') {
   hubChannel = new BroadcastChannel('insurehub')
   hubChannel.onmessage = (ev: MessageEvent) => {
-    if (!props.open) return
     const data = ev.data as CreatedMessage | undefined
     if (!data?.type || !data.row) return
     const r = data.row
@@ -423,23 +424,7 @@ function buildDraftPayload(): Record<string, unknown> {
   return out
 }
 
-// ── Step navigation + validation ─────────────────────────────────────────
-
-const canNext = computed<boolean>(() => {
-  if (step.value === 1) return form.customerId !== '' && form.writingAgentId !== ''
-  if (step.value === 2) return form.carrierId !== '' && form.productId !== '' && form.effectiveDate !== '' && form.expiryDate !== ''
-  if (step.value === 3) return true  // risk fields are S-gated, not Q-gated
-  if (step.value === 4) return form.netPremium > 0 || form.totalPremiumPaid > 0
-  return true
-})
-
-function next(): void {
-  if (!canNext.value) return
-  if (step.value < 5) step.value = (step.value + 1) as WizardStep
-}
-function back(): void {
-  if (step.value > 1) step.value = (step.value - 1) as WizardStep
-}
+// ── Submit-gate validation ───────────────────────────────────────────────
 
 // Submit-gate = all Q gates + all S gates (schema required + premium).
 function collectSubmitProblems(): string[] {
@@ -458,13 +443,15 @@ function collectSubmitProblems(): string[] {
   return problems
 }
 
-// ── Action buttons (Step 5) ───────────────────────────────────────────────
+// ── Action buttons ────────────────────────────────────────────────────────
 
 async function saveDraftNow(): Promise<void> {
-  // Ensure any pending autosave writes first, then acknowledge.
+  // Ensure any pending autosave writes first, then acknowledge with a
+  // toast; stay on the page so the operator can keep editing.
   window.clearTimeout(autosaveTimer)
   await doAutosave()
-  emit('created', { id: draftId.value })
+  flash.value = t('policyCreate.action.draftSaved')
+  window.setTimeout(() => { flash.value = null }, 2000)
 }
 
 async function saveAsQuotation(): Promise<void> {
@@ -477,9 +464,9 @@ async function saveAsQuotation(): Promise<void> {
       await doAutosave()
     }
     if (!draftId.value) throw new Error('Draft save failed — cannot promote.')
-    const res = await promotePolicyToQuotation(draftId.value)
-    emit('created', res.data as unknown as Record<string, unknown>)
-    emit('close')
+    await promotePolicyToQuotation(draftId.value)
+    // Row is now a quotation — return the operator to the list.
+    await router.push({ name: 'policies' })
   } catch (e) {
     error.value = e instanceof ApiError ? (e.body as { message?: string })?.message ?? e.message : (e instanceof Error ? e.message : 'Save failed.')
   } finally {
@@ -501,9 +488,8 @@ async function submitToCarrier(): Promise<void> {
       await doAutosave()
     }
     if (!draftId.value) throw new Error('Draft save failed — cannot submit.')
-    const res = await promotePolicyToSubmitted(draftId.value)
-    emit('created', res.data as unknown as Record<string, unknown>)
-    emit('close')
+    await promotePolicyToSubmitted(draftId.value)
+    await router.push({ name: 'policies' })
   } catch (e) {
     error.value = e instanceof ApiError ? (e.body as { message?: string })?.message ?? e.message : (e instanceof Error ? e.message : 'Submit failed.')
   } finally {
@@ -653,11 +639,6 @@ async function hydrateFromDraft(id: string): Promise<void> {
 
     // Trigger prior-assets load after customer + kind resolved.
     void loadPriorAssets()
-
-    // Land the operator on Step 1 (the picker chips are visible there).
-    // The 5-step layout doesn't force auto-jump to first-incomplete
-    // yet — a nice-to-have deferred to a follow-up.
-    step.value = 1
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Draft resume failed.'
   } finally {
@@ -668,39 +649,15 @@ async function hydrateFromDraft(id: string): Promise<void> {
   }
 }
 
-// ── Reset on close ────────────────────────────────────────────────────────
+// ── Route-driven init ────────────────────────────────────────────────────
 
-watch(() => props.open, (o) => {
-  if (!o) return
-  // On open, if resumeDraftId is set, load the draft; else reset fresh.
-  if (props.resumeDraftId) {
-    draftId.value = props.resumeDraftId
-    void hydrateFromDraft(props.resumeDraftId)
-  } else {
-    draftId.value = null
-    step.value = 1
-    Object.assign(form, {
-      newOrRenew: 'new', refAppToId: '', customerId: '', writingAgentId: '',
-      applicationNo: '', notionNo: '',
-      insureType: '', carrierId: '', productId: '',
-      policyYear: 1, actYear: 1,
-      appDate: '', effectiveDate: '', expiryDate: '', durationChipKey: null,
-      coverage: 0,
-      risk: {},
-      netPremium: 0, mainPremium: 0, dutyStamp: 0, vat: 0,
-      totalPremiumPaid: 0, whtAmt: 0, netCustomerPaid: 0, annualPremium: 0,
-      premiumMode: 'annual', installmentTerm: '',
-      firstDueInst: 0, firstDueInstDate: '', nextDueInst: 0, lastDueInstDate: '',
-      notes: '',
-    })
-    Object.assign(touched, {
-      expiryDate: false, mainPremium: false, dutyStamp: false, vat: false,
-      totalPremiumPaid: false, netCustomerPaid: false,
-    })
-    productDetail.value = null
-    customerPicked.value = null
-    agentPicked.value = null
-    priorAssets.value = []
+// The page mounts fresh on every visit, so no reset-on-close watcher
+// needed — the form's reactive() defaults do the reset. If `id` prop is
+// present (resume path), fire hydrateFromDraft after mount.
+onMounted(() => {
+  if (props.id) {
+    draftId.value = props.id
+    void hydrateFromDraft(props.id)
   }
 })
 
@@ -717,328 +674,275 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
 </script>
 
 <template>
-  <div v-if="open" class="fixed inset-0 bg-slate-900/40 flex items-center justify-center z-50 p-4" @click.self="emit('close')">
-    <div class="bg-white w-full max-w-4xl rounded-xl shadow-xl flex flex-col max-h-[95vh]">
-      <!-- Header + step indicator -->
-      <header class="px-6 py-4 border-b border-slate-200 flex items-center justify-between">
-        <div>
-          <h2 class="text-lg font-semibold text-slate-900">{{ t('policyCreate.title') }}</h2>
-          <div class="flex items-center gap-1 mt-2 text-xs">
-            <template v-for="s in [1, 2, 3, 4, 5]" :key="s">
-              <div :class="[
-                'flex items-center gap-1.5 px-2 py-0.5 rounded-md',
-                step === s ? 'bg-brand-100 text-brand-800 font-medium'
-                           : step > s ? 'text-emerald-600' : 'text-slate-400',
-              ]">
-                <span class="inline-flex items-center justify-center w-4 h-4 rounded-full text-[10px]"
-                  :class="step === s ? 'bg-brand-600 text-white'
-                                     : step > s ? 'bg-emerald-500 text-white' : 'bg-slate-200 text-slate-500'">
-                  <i v-if="step > s" class="pi pi-check text-[8px]" />
-                  <span v-else>{{ s }}</span>
-                </span>
-                <span>{{ t(`policyCreate.step.${s}`) }}</span>
-              </div>
-              <i v-if="s < 5" class="pi pi-angle-right text-[10px] text-slate-300" />
-            </template>
-          </div>
+  <div class="space-y-6 max-w-5xl">
+    <!-- Header — mirrors PolicyEdit's format (title / status / actions) -->
+    <header class="flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <div class="text-xs text-slate-400">
+          <RouterLink :to="{ name: 'policies' }" class="hover:text-brand-600">{{ t('modules.policies.name') }}</RouterLink>
+          <span class="mx-1">/</span>
+          <span>{{ props.id ? t('policyCreate.resumeDraft.title') : t('policyCreate.title') }}</span>
         </div>
-        <div class="flex items-center gap-3">
-          <span v-if="autosaving" class="text-xs text-slate-400">
+        <h1 class="text-2xl font-semibold text-slate-900 font-mono">
+          {{ draftId ? `#${draftId}` : t('policyCreate.title') }}
+        </h1>
+        <div class="mt-1 flex items-center gap-2 text-xs">
+          <span :class="['inline-flex px-2 py-0.5 rounded', statusBadgeClass('draft' as PolicyStatus)]">
+            {{ t('policies.status.draft') }}
+          </span>
+          <span v-if="autosaving" class="text-slate-400">
             <i class="pi pi-spin pi-spinner text-[10px] mr-1" /> {{ t('policyCreate.action.savingDraft') }}
           </span>
-          <span v-else-if="flash" class="text-xs text-emerald-600">
+          <span v-else-if="flash" class="text-emerald-600">
             <i class="pi pi-check-circle text-[10px] mr-1" /> {{ flash }}
           </span>
-          <button class="text-slate-400 hover:text-slate-700 p-2" @click="emit('close')">
-            <i class="pi pi-times" />
-          </button>
         </div>
-      </header>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" @click="router.push({ name: 'policies' })"
+          class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
+          {{ t('policyCreate.cancel') }}
+        </button>
+        <button type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
+          class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
+          <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
+        </button>
+        <button type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
+          class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
+          <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
+        </button>
+        <button type="button" @click="submitToCarrier" :disabled="saving"
+          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+          <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
+        </button>
+      </div>
+    </header>
 
-      <div class="flex-1 overflow-y-auto p-6 space-y-4">
-        <div v-if="error" class="p-3 rounded-lg bg-rose-50 border border-rose-200 text-rose-700 text-sm">
-          {{ error }}
-        </div>
+    <div v-if="error" class="card p-3 bg-rose-50 border border-rose-200 text-rose-700 text-sm">
+      {{ error }}
+    </div>
 
-        <!-- ── STEP 1: Party ────────────────────────────────────────────── -->
-        <template v-if="step === 1">
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField :label="t('policyCreate.newOrRenew')">
-              <div class="flex gap-2">
-                <button type="button" @click="form.newOrRenew = 'new'"
-                  :class="['flex-1 px-3 py-1.5 rounded-lg text-sm border',
-                    form.newOrRenew === 'new' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 hover:border-brand-300']">
-                  {{ t('policyCreate.new') }}
-                </button>
-                <button type="button" @click="form.newOrRenew = 'renew'"
-                  :class="['flex-1 px-3 py-1.5 rounded-lg text-sm border',
-                    form.newOrRenew === 'renew' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 hover:border-brand-300']">
-                  {{ t('policyCreate.renew') }}
-                </button>
-              </div>
-            </FormField>
-
-            <FormField :label="t('policyCreate.customer')" required>
-              <EntityPicker
-                v-model="form.customerId"
-                :fetch="searchCustomers"
-                :render-label="(r: CustomerListRow) => `${r.firstName} ${r.lastName}`.trim() || r.juristicName || r.customerCode"
-                :render-primary="(r: CustomerListRow) => r.customerCode"
-                :placeholder="t('policyCreate.customerPlaceholder')"
-                icon-class="pi-user"
-                :initial-label="customerPicked ? (`${customerPicked.firstName} ${customerPicked.lastName}`.trim() || customerPicked.juristicName || customerPicked.customerCode) : ''"
-                @picked="(r) => customerPicked = r as CustomerListRow | null"
-              />
-            </FormField>
-
-            <FormField :label="t('policyCreate.agent')" required>
-              <EntityPicker
-                v-model="form.writingAgentId"
-                :fetch="searchAgents"
-                :render-label="(r: AgentListRow) => `${r.firstName} ${r.lastName}`.trim() || r.agentCode"
-                :render-primary="(r: AgentListRow) => r.agentCode"
-                :placeholder="t('policyCreate.agentPlaceholder')"
-                icon-class="pi-briefcase"
-                :initial-label="agentPicked ? (`${agentPicked.firstName} ${agentPicked.lastName}`.trim() || agentPicked.agentCode) : ''"
-                @picked="(r) => agentPicked = r as AgentListRow | null"
-              />
-            </FormField>
-
-            <FormField :label="t('policyCreate.applicationNo')">
-              <input v-model.trim="form.applicationNo" type="text" maxlength="32"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
+    <!-- ── Section 1: Party ─────────────────────────────────────────────── -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.1') }}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField :label="t('policyCreate.newOrRenew')">
+          <div class="flex gap-2">
+            <button type="button" @click="form.newOrRenew = 'new'"
+              :class="['flex-1 px-3 py-1.5 rounded-lg text-sm border',
+                form.newOrRenew === 'new' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 hover:border-brand-300']">
+              {{ t('policyCreate.new') }}
+            </button>
+            <button type="button" @click="form.newOrRenew = 'renew'"
+              :class="['flex-1 px-3 py-1.5 rounded-lg text-sm border',
+                form.newOrRenew === 'renew' ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200 hover:border-brand-300']">
+              {{ t('policyCreate.renew') }}
+            </button>
           </div>
-        </template>
+        </FormField>
 
-        <!-- ── STEP 2: Product + Coverage ────────────────────────────────── -->
-        <template v-if="step === 2">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField :label="t('policyCreate.insureType')" required>
-              <div class="flex gap-2">
-                <button v-for="opt in (['Non-Life', 'Life', 'Tax'] as const)" :key="opt" type="button"
-                  @click="form.insureType = opt"
-                  :class="['flex-1 px-2 py-1.5 rounded-lg text-xs border',
-                    form.insureType === opt ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200']">
-                  {{ t(`policyCreate.insureTypeOpt.${opt === 'Non-Life' ? 'nonLife' : opt.toLowerCase()}`) }}
-                </button>
-              </div>
-            </FormField>
+        <FormField :label="t('policyCreate.applicationNo')">
+          <input v-model.trim="form.applicationNo" type="text" maxlength="32"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
 
-            <FormField :label="t('policyCreate.carrier')" required>
-              <select v-model="form.carrierId"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-                <option value="">
-                  {{ carriersLoading ? t('policyCreate.carrierLoading') : t('policyCreate.carrierPlaceholder') }}
-                </option>
-                <option v-for="c in carriers" :key="c.id" :value="c.id">
-                  {{ c.code }} · {{ c.name }}
-                </option>
-              </select>
-            </FormField>
-
-            <FormField :label="t('policyCreate.product')" required>
-              <select v-model="form.productId"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-                <option value="">
-                  {{ productsLoading ? t('policyCreate.productLoading') : t('policyCreate.productPlaceholder') }}
-                </option>
-                <option v-for="p in products" :key="p.id" :value="p.id">
-                  {{ p.code }} · {{ p.name }}
-                </option>
-              </select>
-              <p v-if="productDetail" class="text-[10px] text-slate-500 mt-1">
-                {{ t('policyCreate.productKindLabel') }}: <span class="font-medium">{{ kind }}</span>
-              </p>
-            </FormField>
-          </div>
-
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4 mt-3">
-            <FormField :label="t('policyCreate.appDate')">
-              <DateInput v-model="form.appDate" />
-            </FormField>
-            <FormField :label="t('policyCreate.effectiveDate')" required>
-              <DateInput v-model="form.effectiveDate" />
-            </FormField>
-            <FormField :label="t('policyCreate.expiryDate')" required>
-              <DateInput
-                v-model="form.expiryDate"
-                @update:model-value="() => { touched.expiryDate = true }"
-                :min="form.effectiveDate || null"
-              />
-            </FormField>
-          </div>
-
-          <DurationChip
-            v-if="durationCfg.presets.length > 0 || durationCfg.allowCustomYears"
-            v-model="form.expiryDate"
-            v-model:selected-key="form.durationChipKey"
-            :effective-date="form.effectiveDate || null"
-            :presets="durationCfg.presets"
-            :allow-custom-years="durationCfg.allowCustomYears"
-            :label="t('policyCreate.duration.expiryHint')"
-            class="mt-3"
+        <FormField :label="t('policyCreate.customer')" required>
+          <EntityPicker
+            v-model="form.customerId"
+            :fetch="searchCustomers"
+            :render-label="(r: CustomerListRow) => `${r.firstName} ${r.lastName}`.trim() || r.juristicName || r.customerCode"
+            :render-primary="(r: CustomerListRow) => r.customerCode"
+            :placeholder="t('policyCreate.customerPlaceholder')"
+            icon-class="pi-user"
+            :initial-label="customerPicked ? (`${customerPicked.firstName} ${customerPicked.lastName}`.trim() || customerPicked.juristicName || customerPicked.customerCode) : ''"
+            @picked="(r) => customerPicked = r as CustomerListRow | null"
           />
+        </FormField>
 
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
-            <FormField :label="t('policyCreate.coverage')">
-              <input v-model.number="form.coverage" type="number" min="0" step="1"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
+        <FormField :label="t('policyCreate.agent')" required>
+          <EntityPicker
+            v-model="form.writingAgentId"
+            :fetch="searchAgents"
+            :render-label="(r: AgentListRow) => `${r.firstName} ${r.lastName}`.trim() || r.agentCode"
+            :render-primary="(r: AgentListRow) => r.agentCode"
+            :placeholder="t('policyCreate.agentPlaceholder')"
+            icon-class="pi-briefcase"
+            :initial-label="agentPicked ? (`${agentPicked.firstName} ${agentPicked.lastName}`.trim() || agentPicked.agentCode) : ''"
+            @picked="(r) => agentPicked = r as AgentListRow | null"
+          />
+        </FormField>
+      </div>
+    </section>
+
+    <!-- ── Section 2: Product + Coverage ────────────────────────────────── -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.2') }}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <FormField :label="t('policyCreate.insureType')" required>
+          <div class="flex gap-2">
+            <button v-for="opt in (['Non-Life', 'Life', 'Tax'] as const)" :key="opt" type="button"
+              @click="form.insureType = opt"
+              :class="['flex-1 px-2 py-1.5 rounded-lg text-xs border',
+                form.insureType === opt ? 'bg-brand-600 text-white border-brand-600' : 'bg-white border-slate-200']">
+              {{ t(`policyCreate.insureTypeOpt.${opt === 'Non-Life' ? 'nonLife' : opt.toLowerCase()}`) }}
+            </button>
           </div>
-        </template>
+        </FormField>
 
-        <!-- ── STEP 3: Risk (dynamic renderer) ───────────────────────────── -->
-        <template v-if="step === 3">
-          <div v-if="!productDetail" class="p-4 rounded-lg border border-dashed border-slate-200 text-center text-sm text-slate-500">
-            เลือกสินค้าที่ Step 2 ก่อน
-          </div>
-          <template v-else>
-            <div v-if="priorAssets.length > 0" class="p-3 rounded-lg bg-brand-50 border border-brand-200 space-y-2 mb-3">
-              <div class="text-xs font-medium text-brand-800 flex items-center gap-1">
-                <i class="pi pi-history text-[10px]" /> {{ t('policyCreate.reuseFromPrior.label') }}
-              </div>
-              <div class="flex flex-wrap gap-1.5">
-                <button v-for="a in priorAssets" :key="a.dedupeKey" type="button"
-                  @click="applyPriorAsset(a)"
-                  class="px-2.5 py-1 rounded-md text-xs bg-white border border-brand-300 text-brand-700 hover:bg-brand-100">
-                  {{ a.fields.vehicle_brand ?? a.fields.name ?? a.dedupeKey.split('|')[0] }}
-                  <span v-if="a.fields.vehicle_model" class="text-brand-500"> · {{ a.fields.vehicle_model }}</span>
-                  <span v-if="a.lastUsedApplicationNo" class="text-[10px] text-brand-400 ml-1">({{ a.lastUsedApplicationNo }})</span>
-                </button>
-              </div>
-            </div>
+        <FormField :label="t('policyCreate.carrier')" required>
+          <select v-model="form.carrierId"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option value="">
+              {{ carriersLoading ? t('policyCreate.carrierLoading') : t('policyCreate.carrierPlaceholder') }}
+            </option>
+            <option v-for="c in carriers" :key="c.id" :value="c.id">
+              {{ c.code }} · {{ c.name }}
+            </option>
+          </select>
+        </FormField>
 
-            <RiskFieldRenderer
-              :schema="(productDetail.productType?.riskSchema as unknown as RiskSchema | null)"
-              v-model="form.risk"
-              locale="th"
-            />
-          </template>
-        </template>
-
-        <!-- ── STEP 4: Premium ──────────────────────────────────────────── -->
-        <template v-if="step === 4">
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField :label="t('policyCreate.netPremium')" required>
-              <input v-model.number="form.netPremium" type="number" min="0" step="0.01"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
-            <FormField :label="t('policyCreate.dutyStamp')">
-              <input v-model.number="form.dutyStamp" type="number" min="0" step="0.01"
-                @change="touched.dutyStamp = true"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
-            <FormField :label="t('policyCreate.vat')">
-              <input v-model.number="form.vat" type="number" min="0" step="0.01"
-                @change="touched.vat = true"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
-            <FormField :label="t('policyCreate.totalPremiumPaid')">
-              <input v-model.number="form.totalPremiumPaid" type="number" min="0" step="0.01"
-                @change="touched.totalPremiumPaid = true"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
-            <FormField :label="t('policyCreate.whtAmt')">
-              <input v-model.number="form.whtAmt" type="number" min="0" step="0.01"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
-            <FormField :label="t('policyCreate.netCustomerPaid')">
-              <input v-model.number="form.netCustomerPaid" type="number" min="0" step="0.01"
-                @change="touched.netCustomerPaid = true"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
-          </div>
-
-          <p class="text-[10px] text-slate-500 mt-2">
-            <i class="pi pi-info-circle mr-1" /> {{ t('policyCreate.autoRecalc') }}
+        <FormField :label="t('policyCreate.product')" required>
+          <select v-model="form.productId"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option value="">
+              {{ productsLoading ? t('policyCreate.productLoading') : t('policyCreate.productPlaceholder') }}
+            </option>
+            <option v-for="p in products" :key="p.id" :value="p.id">
+              {{ p.code }} · {{ p.name }}
+            </option>
+          </select>
+          <p v-if="productDetail" class="text-[10px] text-slate-500 mt-1">
+            {{ t('policyCreate.productKindLabel') }}: <span class="font-medium">{{ kind }}</span>
           </p>
-
-          <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-4 mb-2">{{ t('policyCreate.installment') }}</h3>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField :label="t('policyCreate.premiumMode')">
-              <select v-model="form.premiumMode"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-                <option value="annual">Annual</option>
-                <option value="single">Single</option>
-                <option value="monthly">Monthly</option>
-                <option value="quarterly">Quarterly</option>
-                <option value="semiannual">Semiannual</option>
-              </select>
-            </FormField>
-            <FormField :label="t('policyCreate.installmentTerm')">
-              <input v-model.trim="form.installmentTerm" type="text"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
-          </div>
-        </template>
-
-        <!-- ── STEP 5: Review ───────────────────────────────────────────── -->
-        <template v-if="step === 5">
-          <div class="space-y-3">
-            <section class="card p-3 text-sm">
-              <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">Party</div>
-              <div>{{ customerPicked?.customerCode }} · {{ customerPicked?.firstName }} {{ customerPicked?.lastName }}</div>
-              <div class="text-slate-500 text-xs">Agent: {{ agentPicked?.agentCode }} · {{ agentPicked?.firstName }} {{ agentPicked?.lastName }}</div>
-            </section>
-            <section class="card p-3 text-sm">
-              <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">Product + Coverage</div>
-              <div>{{ productDetail?.code }} · {{ productDetail?.name }}</div>
-              <div class="text-slate-500 text-xs">
-                {{ form.effectiveDate || '—' }} → {{ form.expiryDate || '—' }}
-                · coverage {{ form.coverage.toLocaleString() }}
-              </div>
-            </section>
-            <section class="card p-3 text-sm">
-              <div class="text-xs uppercase tracking-wider text-slate-400 mb-1">Premium</div>
-              <div>Net {{ form.netPremium.toLocaleString() }} · Total paid {{ form.totalPremiumPaid.toLocaleString() }}</div>
-              <div class="text-slate-500 text-xs">Mode: {{ form.premiumMode }}</div>
-            </section>
-            <FormField :label="t('policyCreate.notes')">
-              <textarea v-model="form.notes" rows="2"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-            </FormField>
-          </div>
-        </template>
+        </FormField>
       </div>
 
-      <!-- Footer -->
-      <footer class="px-6 py-4 border-t border-slate-200 flex items-center justify-between">
-        <div class="flex gap-2">
-          <button v-if="step > 1" type="button" @click="back"
-            class="px-4 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
-            <i class="pi pi-angle-left text-xs mr-1" /> {{ t('policyCreate.back') }}
-          </button>
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+        <FormField :label="t('policyCreate.appDate')">
+          <DateInput v-model="form.appDate" />
+        </FormField>
+        <FormField :label="t('policyCreate.effectiveDate')" required>
+          <DateInput v-model="form.effectiveDate" />
+        </FormField>
+        <FormField :label="t('policyCreate.expiryDate')" required>
+          <DateInput
+            v-model="form.expiryDate"
+            @update:model-value="() => { touched.expiryDate = true }"
+            :min="form.effectiveDate || null"
+          />
+        </FormField>
+        <FormField :label="t('policyCreate.coverage')">
+          <input v-model.number="form.coverage" type="number" min="0" step="1"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+      </div>
+
+      <DurationChip
+        v-if="durationCfg.presets.length > 0 || durationCfg.allowCustomYears"
+        v-model="form.expiryDate"
+        v-model:selected-key="form.durationChipKey"
+        :effective-date="form.effectiveDate || null"
+        :presets="durationCfg.presets"
+        :allow-custom-years="durationCfg.allowCustomYears"
+        :label="t('policyCreate.duration.expiryHint')"
+        class="mt-3"
+      />
+    </section>
+
+    <!-- ── Section 3: Risk (dynamic renderer) ───────────────────────────── -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.3') }}</h2>
+      <div v-if="!productDetail" class="p-4 rounded-lg border border-dashed border-slate-200 text-center text-sm text-slate-500">
+        เลือกสินค้าที่ Section 2 ก่อน
+      </div>
+      <template v-else>
+        <div v-if="priorAssets.length > 0" class="p-3 rounded-lg bg-brand-50 border border-brand-200 space-y-2 mb-4">
+          <div class="text-xs font-medium text-brand-800 flex items-center gap-1">
+            <i class="pi pi-history text-[10px]" /> {{ t('policyCreate.reuseFromPrior.label') }}
+          </div>
+          <div class="flex flex-wrap gap-1.5">
+            <button v-for="a in priorAssets" :key="a.dedupeKey" type="button"
+              @click="applyPriorAsset(a)"
+              class="px-2.5 py-1 rounded-md text-xs bg-white border border-brand-300 text-brand-700 hover:bg-brand-100">
+              {{ a.fields.vehicle_brand ?? a.fields.name ?? a.dedupeKey.split('|')[0] }}
+              <span v-if="a.fields.vehicle_model" class="text-brand-500"> · {{ a.fields.vehicle_model }}</span>
+              <span v-if="a.lastUsedApplicationNo" class="text-[10px] text-brand-400 ml-1">({{ a.lastUsedApplicationNo }})</span>
+            </button>
+          </div>
         </div>
 
-        <div class="flex gap-2">
-          <template v-if="step < 5">
-            <button type="button" @click="emit('close')"
-              class="px-4 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
-              {{ t('policyCreate.cancel') }}
-            </button>
-            <button type="button" @click="next" :disabled="!canNext"
-              class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
-              {{ t('policyCreate.next') }} <i class="pi pi-angle-right text-xs ml-1" />
-            </button>
-          </template>
-          <template v-else>
-            <!-- Three action buttons per B3 §1 Step 5 -->
-            <button type="button" @click="saveDraftNow" :disabled="saving"
-              class="px-4 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
-              <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
-            </button>
-            <button type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
-              class="px-4 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
-              <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
-            </button>
-            <button type="button" @click="submitToCarrier" :disabled="saving"
-              class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-              <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
-            </button>
-          </template>
-        </div>
-      </footer>
-    </div>
+        <RiskFieldRenderer
+          :schema="(productDetail.productType?.riskSchema as unknown as RiskSchema | null)"
+          v-model="form.risk"
+          locale="th"
+        />
+      </template>
+    </section>
+
+    <!-- ── Section 4: Premium ───────────────────────────────────────────── -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.4') }}</h2>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <FormField :label="t('policyCreate.netPremium')" required>
+          <input v-model.number="form.netPremium" type="number" min="0" step="0.01"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <FormField :label="t('policyCreate.dutyStamp')">
+          <input v-model.number="form.dutyStamp" type="number" min="0" step="0.01"
+            @change="touched.dutyStamp = true"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <FormField :label="t('policyCreate.vat')">
+          <input v-model.number="form.vat" type="number" min="0" step="0.01"
+            @change="touched.vat = true"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <FormField :label="t('policyCreate.totalPremiumPaid')">
+          <input v-model.number="form.totalPremiumPaid" type="number" min="0" step="0.01"
+            @change="touched.totalPremiumPaid = true"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <FormField :label="t('policyCreate.whtAmt')">
+          <input v-model.number="form.whtAmt" type="number" min="0" step="0.01"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <FormField :label="t('policyCreate.netCustomerPaid')">
+          <input v-model.number="form.netCustomerPaid" type="number" min="0" step="0.01"
+            @change="touched.netCustomerPaid = true"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+      </div>
+
+      <p class="text-[10px] text-slate-500 mt-2">
+        <i class="pi pi-info-circle mr-1" /> {{ t('policyCreate.autoRecalc') }}
+      </p>
+
+      <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-4 mb-2">{{ t('policyCreate.installment') }}</h3>
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <FormField :label="t('policyCreate.premiumMode')">
+          <select v-model="form.premiumMode"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option value="annual">Annual</option>
+            <option value="single">Single</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+            <option value="semiannual">Semiannual</option>
+          </select>
+        </FormField>
+        <FormField :label="t('policyCreate.installmentTerm')">
+          <input v-model.trim="form.installmentTerm" type="text"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+      </div>
+    </section>
+
+    <!-- ── Section 5: Notes ─────────────────────────────────────────────── -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.5') }}</h2>
+      <FormField :label="t('policyCreate.notes')">
+        <textarea v-model="form.notes" rows="3"
+          class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+      </FormField>
+    </section>
   </div>
 </template>

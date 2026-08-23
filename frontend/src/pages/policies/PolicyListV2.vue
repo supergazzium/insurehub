@@ -12,11 +12,9 @@ import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
 import { api, ApiError, getToken } from '../../api/client'
 import PolicyDetailDrawer from './PolicyDetailDrawer.vue'
-// C-14 — swap the legacy 3-step wizard for the new 5-step
-// PolicyApplicationWizard. Legacy import kept for rollback per B3 §9;
-// remove in C-20 after prod verification.
-// import PolicyCreateWizard from './PolicyCreateWizard.vue'
-import PolicyCreateWizard from './PolicyApplicationWizard.vue'
+// C-18 — PolicyApplicationWizard is now a full-page route
+// (/policies/new + /policies/:id/edit-draft), no longer a modal.
+// New Policy and Resume Draft both navigate via router.push.
 import AgentPicker from '../../components/AgentPicker.vue'
 import DateInput from '../../components/DateInput.vue'
 import { CURRENT_STATUSES, statusBadgeClass } from '../../utils/policyStatus'
@@ -25,10 +23,6 @@ const { t } = useI18n()
 const policyStore = usePolicyStore()
 
 const detailId = ref<string | null>(null)
-const showCreate = ref(false)
-// C-15 — when non-null the wizard opens in resume mode against this draft.
-// Cleared on wizard close so the next New Policy click starts fresh.
-const resumeDraftId = ref<string | null>(null)
 
 // Documents popup — click ปุ่มเรียกดูเอกสารแนบ opens a modal listing every
 // attachment on the selected policy with per-file download buttons. We
@@ -381,11 +375,11 @@ function fmtBaht(n: number): string {
 
 // ── C-15 draft actions ──────────────────────────────────────────────────
 
-/** Open the wizard in resume mode. Wizard fetches GET /policies/{id}
- *  and hydrates its form + productDetail + picker labels. */
+/** Open the full-page wizard in resume mode. The route is
+ *  /policies/:id/edit-draft and PolicyApplicationWizard hydrates
+ *  from GET /policies/{id} on mount. */
 function resumeDraft(policyId: string): void {
-  resumeDraftId.value = policyId
-  showCreate.value = true
+  void router.push({ name: 'policy-edit-draft', params: { id: policyId } })
 }
 
 /** Hard-delete a draft. Backend guard (C-11) blocks non-draft rows with
@@ -442,7 +436,7 @@ const rangeText = computed(() => {
         </button>
         <button type="button"
           class="px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm flex items-center gap-1.5"
-          @click="showCreate = true">
+          @click="router.push({ name: 'policy-new' })">
           <i class="pi pi-plus text-xs" /> New Policy
         </button>
       </div>
@@ -737,11 +731,6 @@ const rangeText = computed(() => {
     </section>
 
     <PolicyDetailDrawer :policy-id="detailId" @close="detailId = null" />
-    <PolicyCreateWizard
-      :open="showCreate"
-      :resume-draft-id="resumeDraftId"
-      @close="() => { showCreate = false; resumeDraftId = null }"
-      @created="() => { page = 1; load() }" />
 
     <!-- Documents popup — list attachments with per-file open button -->
     <div v-if="docsModalPolicyId !== null" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"
