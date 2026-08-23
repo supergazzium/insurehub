@@ -17,6 +17,8 @@ class PolicyResource extends JsonResource
     /** @return array<string,mixed> */
     public function toArray(Request $request): array
     {
+        $commission = $this->commissionSnapshotPayload();
+
         return [
             'id' => (string) $this->id,
             'quoteNo' => $this->quote_no,
@@ -62,6 +64,11 @@ class PolicyResource extends JsonResource
                 'netCustomerPaid' => $this->net_customer_paid !== null ? (float) $this->net_customer_paid : null,
                 'check' => $this->premium_check ?? '',
             ],
+            // C-20: commission basis frozen onto this policy at create
+            // time. `frozen` = a snapshot exists (rate is immutable to
+            // later product edits). Null rates when the product carried
+            // no flat rate; the wizard shows a dash.
+            'commissionSnapshot' => $commission,
             'comRecCheck' => $this->com_rec_check ?? '',
             // Installment / payment terms.
             'installment' => [
@@ -247,5 +254,31 @@ class PolicyResource extends JsonResource
         }
 
         return null;
+    }
+
+    /**
+     * C-20: surface the frozen hub->agent / carrier->hub flat rates for the
+     * wizard's premium+payment section. Reads the policy's commission_snapshot
+     * via the same reader the resolvers use. Returns frozen=false with null
+     * rates when the policy predates snapshotting (resolves live).
+     *
+     * @return array<string,mixed>
+     */
+    private function commissionSnapshotPayload(): array
+    {
+        $snap = \App\Services\Commission\CommissionSnapshot::fromPolicy($this->resource);
+        if ($snap === null) {
+            return ['frozen' => false, 'hubToAgentRate' => null, 'carrierToHubRate' => null, 'capturedAt' => null];
+        }
+
+        $hub = $snap->rateRow(\App\Models\ProductCommissionRate::DIRECTION_HUB_TO_AGENT);
+        $carrier = $snap->rateRow(\App\Models\ProductCommissionRate::DIRECTION_CARRIER_TO_HUB);
+
+        return [
+            'frozen' => true,
+            'hubToAgentRate' => $hub?->flat_rate !== null ? (float) $hub->flat_rate : null,
+            'carrierToHubRate' => $carrier?->flat_rate !== null ? (float) $carrier->flat_rate : null,
+            'capturedAt' => $snap->capturedAt(),
+        ];
     }
 }

@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Observers\PolicyObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+#[ObservedBy([PolicyObserver::class])]
 class Policy extends Model
 {
     use SoftDeletes;
@@ -41,6 +44,8 @@ class Policy extends Model
         // PolicyRequest::toModel() dual-writes; PolicyResource reads via
         // App\Support\PolicyRiskShim which prefers this over the columns.
         'risk_data' => 'array',
+        // C-20: frozen product commission basis, captured at create time.
+        'commission_snapshot' => 'array',
     ];
 
     public function tenant(): BelongsTo

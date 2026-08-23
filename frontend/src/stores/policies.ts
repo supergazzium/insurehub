@@ -171,6 +171,15 @@ export interface PolicyMainCommission {
   rateAg: number | null
   amtAg: number | null
 }
+/** C-20: commission basis frozen onto the policy at create time.
+ *  `frozen` = a snapshot exists; the rate is immutable to later
+ *  edits of the product. Rates are fractions (0.10 = 10%). */
+export interface PolicyCommissionSnapshot {
+  frozen: boolean
+  hubToAgentRate: number | null
+  carrierToHubRate: number | null
+  capturedAt: string | null
+}
 export interface PolicyInstallment {
   term: string
   firstDueAmount: number | null
@@ -264,6 +273,7 @@ export interface Policy {
   freelookActive: boolean
   premium?: PolicyPremium
   mainCommission?: PolicyMainCommission
+  commissionSnapshot?: PolicyCommissionSnapshot
   installment?: PolicyInstallment
   wht?: PolicyWht
   cancellation?: PolicyCancellation | null

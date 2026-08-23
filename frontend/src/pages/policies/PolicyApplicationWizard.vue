@@ -146,6 +146,22 @@ const agentPicked = ref<AgentListRow | null>(null)
 const productDetail = ref<ProductDetail | null>(null)
 const productDetailLoading = ref(false)
 
+/** C-20: commission frozen onto an existing policy (edit mode). Null in
+ *  create mode — there we show the product's LIVE rate that WILL be frozen. */
+const snapshotCommission = ref<{ hubToAgentRate: number | null; capturedAt: string | null } | null>(null)
+
+/** Commission shown in the เบี้ย + การชำระ section.
+ *  - edit mode: the rate frozen on the policy (immutable to product edits)
+ *  - create mode: the product's current hub→agent rate, which will be locked
+ *    onto the policy the moment it is saved. */
+const commissionDisplay = computed<{ rate: number | null; frozen: boolean; capturedAt: string | null }>(() => {
+  if (snapshotCommission.value) {
+    return { rate: snapshotCommission.value.hubToAgentRate, frozen: true, capturedAt: snapshotCommission.value.capturedAt }
+  }
+  const live = productDetail.value?.commissionRates?.hubToAgent?.flatRate ?? null
+  return { rate: live, frozen: false, capturedAt: null }
+})
+
 async function loadCarriersForInsureType(t: 'Life' | 'Non-Life' | 'Tax'): Promise<void> {
   carriersLoading.value = true
   try {
@@ -552,6 +568,12 @@ async function hydrateFromDraft(id: string): Promise<void> {
     form.lastDueInstDate = String(p.lastDueInstDate ?? '')
     form.notes = String(p.notes ?? '')
 
+    // C-20: frozen commission (read-only display in the premium section).
+    const cs = p.commissionSnapshot as { hubToAgentRate?: number | null; capturedAt?: string | null; frozen?: boolean } | undefined
+    snapshotCommission.value = cs?.frozen
+      ? { hubToAgentRate: cs.hubToAgentRate ?? null, capturedAt: cs.capturedAt ?? null }
+      : null
+
     // Every field is now touched so recalc watchers don't stomp saved values.
     touched.expiryDate = true
     touched.dutyStamp = true
@@ -933,6 +955,27 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <input v-model.trim="form.installmentTerm" type="text"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
+      </div>
+
+      <!-- C-20: commission from the product, frozen at policy creation. -->
+      <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-4 mb-2">{{ t('policyCreate.commissionSection') }}</h3>
+      <div class="flex items-center gap-3">
+        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm min-w-[9rem]">
+          <span class="text-slate-500 mr-2">{{ t('policyCreate.commissionRate') }}</span>
+          <span class="font-semibold text-slate-900 tabular-nums">
+            {{ commissionDisplay.rate !== null ? (commissionDisplay.rate * 100).toFixed(2) + '%' : '—' }}
+          </span>
+        </div>
+        <span
+          v-if="commissionDisplay.rate !== null"
+          class="inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5"
+          :class="commissionDisplay.frozen
+            ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
+            : 'bg-amber-50 text-amber-700 border border-amber-200'"
+        >
+          <i class="pi" :class="commissionDisplay.frozen ? 'pi-lock' : 'pi-info-circle'" />
+          {{ commissionDisplay.frozen ? t('policyCreate.commissionFrozen') : t('policyCreate.commissionWillFreeze') }}
+        </span>
       </div>
     </section>
 
