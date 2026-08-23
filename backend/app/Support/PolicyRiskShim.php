@@ -56,15 +56,12 @@ class PolicyRiskShim
             'no_passenger' => 'motor_no_passenger',
             'notes' => 'motor_notes',
         ],
-        // Fire product kind — B4's canonical name for what the legacy
-        // schema calls "property_*". Column names keep their legacy
-        // `property_` prefix because renaming columns is out of scope for
-        // this refactor; the risk_data key mirrors the canonical `fire`
-        // kind so JSON output matches product_types.kind.
-        // Fire + misc share the same 7-field property/contact shape post-C-19.
-        // Legacy risk_data keys (insured_name, insured_address, phone, etc.)
-        // stay in the map so pre-C-19 rows still route correctly on read;
-        // the C-19 canonical keys (contact_name, contact_phone,
+        // Fire + misc share the same 3-section property/contact/coverage
+        // shape post-C-20 (§1 contact, §2 sum insured, §3 notes). Column
+        // names keep their legacy `property_` prefix — renaming columns
+        // is out of scope. Legacy risk_data keys (insured_name, phone,
+        // etc.) stay in the map so pre-C-19 rows still route correctly
+        // on read; the canonical keys (contact_name, contact_phone,
         // property_address) alias to the same columns.
         'fire' => [
             'contact_name' => 'property_insured_name',
@@ -73,17 +70,14 @@ class PolicyRiskShim
             'building_cov' => 'property_building_cov',
             'furniture_cov' => 'property_furniture_cov',
             'stock_cov' => 'property_stock_cov',
-            'other_detail' => 'property_other_detail',
-            // Legacy keys — read-side compat only.
+            'other_cov' => 'property_other_cov',
+            'notes' => 'property_notes',
+            // Legacy pre-C-19 keys — read-side compat only.
             'insured_name' => 'property_insured_name',
             'insured_address' => 'property_insured_address',
             'phone' => 'property_phone',
-            'other_cov' => 'property_other_cov',
-            'notes' => 'property_notes',
+            'other_detail' => 'property_other_detail',
         ],
-        // misc — same 7-field property/contact shape as fire (added C-19
-        // per operator request; misc products historically lived in the
-        // schema-less bucket).
         'misc' => [
             'contact_name' => 'property_insured_name',
             'contact_phone' => 'property_phone',
@@ -91,7 +85,8 @@ class PolicyRiskShim
             'building_cov' => 'property_building_cov',
             'furniture_cov' => 'property_furniture_cov',
             'stock_cov' => 'property_stock_cov',
-            'other_detail' => 'property_other_detail',
+            'other_cov' => 'property_other_cov',
+            'notes' => 'property_notes',
         ],
         'travel' => [
             'destination' => 'trip_destination',

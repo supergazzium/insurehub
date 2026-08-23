@@ -1,11 +1,11 @@
 {
-  "version": 2,
+  "version": 3,
   "kind": "misc",
   "sections": [
     {
-      "key": "property",
-      "label_th": "รายละเอียดทรัพย์สินและผู้ติดต่อ",
-      "label_en": "Property and contact details",
+      "key": "contact",
+      "label_th": "ผู้ติดต่อ",
+      "label_en": "Contact",
       "fields": [
         {
           "key": "contact_name",
@@ -37,11 +37,18 @@
           "storage": "column",
           "column_name": "property_insured_address",
           "validation": { "max": 500 }
-        },
+        }
+      ]
+    },
+    {
+      "key": "coverage",
+      "label_th": "ทุนประกันทรัพย์",
+      "label_en": "Sum insured",
+      "fields": [
         {
           "key": "building_cov",
           "label_th": "สิ่งปลูกสร้าง (บาท)",
-          "label_en": "Building coverage (THB)",
+          "label_en": "Building (THB)",
           "type": "number",
           "storage": "column",
           "column_name": "property_building_cov",
@@ -50,7 +57,7 @@
         {
           "key": "furniture_cov",
           "label_th": "เฟอร์นิเจอร์ (บาท)",
-          "label_en": "Furniture coverage (THB)",
+          "label_en": "Furniture (THB)",
           "type": "number",
           "storage": "column",
           "column_name": "property_furniture_cov",
@@ -59,20 +66,36 @@
         {
           "key": "stock_cov",
           "label_th": "สต๊อกสินค้า (บาท)",
-          "label_en": "Stock coverage (THB)",
+          "label_en": "Stock (THB)",
           "type": "number",
           "storage": "column",
           "column_name": "property_stock_cov",
           "validation": { "min": 0 }
         },
         {
-          "key": "other_detail",
-          "label_th": "อื่นๆ",
-          "label_en": "Other",
+          "key": "other_cov",
+          "label_th": "อื่นๆ (บาท)",
+          "label_en": "Other (THB)",
+          "type": "number",
+          "storage": "column",
+          "column_name": "property_other_cov",
+          "validation": { "min": 0 }
+        }
+      ]
+    },
+    {
+      "key": "notes",
+      "label_th": "หมายเหตุ",
+      "label_en": "Notes",
+      "fields": [
+        {
+          "key": "notes",
+          "label_th": "หมายเหตุ",
+          "label_en": "Notes",
           "type": "text",
           "storage": "column",
-          "column_name": "property_other_detail",
-          "validation": { "max": 1000 }
+          "column_name": "property_notes",
+          "validation": { "max": 2000 }
         }
       ]
     }
