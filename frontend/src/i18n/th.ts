@@ -1649,6 +1649,7 @@ export default {
     vat: 'ภาษีมูลค่าเพิ่ม',
     totalPremiumPaid: 'รวมเบี้ยที่ต้องชำระ',
     totalPremium: 'เบี้ยรวม',
+    discountAmount: 'ส่วนลด',
     totalPremiumHint: 'เบี้ยสุทธิ + อากรแสตมป์ + ภาษีมูลค่าเพิ่ม (คำนวณอัตโนมัติ แก้ไขได้)',
     whtAmt: 'ยอดหัก ณ ที่จ่าย',
     netCustomerPaid: 'ยอดสุทธิที่ลูกค้าชำระ',

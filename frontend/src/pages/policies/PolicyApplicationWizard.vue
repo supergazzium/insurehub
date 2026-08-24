@@ -97,6 +97,7 @@ const form = reactive({
   expiryDate: '' as string,
   durationChipKey: null as string | null,
   coverage: 0 as number,
+  discountAmount: 0 as number,
 
   // Step 3 — Risk (flat "section.field" bag, split at submit)
   risk: {} as Record<string, unknown>,
@@ -611,6 +612,7 @@ function buildDraftPayload(): Record<string, unknown> {
     policyYear: form.policyYear || 1,
     actYear: form.actYear || 1,
     coverage: form.coverage || 0,
+    discountAmount: form.discountAmount || 0,
     netPremium: form.netPremium || 0,
     mainPremium: form.mainPremium || 0,
     dutyStamp: form.dutyStamp || 0,
@@ -756,6 +758,7 @@ async function hydrateFromDraft(id: string): Promise<void> {
     form.effectiveDate = String(p.effectiveDate ?? '')
     form.expiryDate = String(p.expiryDate ?? '')
     form.coverage = Number(p.coverage ?? 0)
+    form.discountAmount = Number((p.installment as { discountAmount?: number } | undefined)?.discountAmount ?? 0)
     form.policyYear = Number(p.policyYear ?? 1)
     form.actYear = Number(p.actYear ?? 1)
     form.netPremium = Number(p.netPremium ?? 0)
@@ -1100,6 +1103,10 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <p class="text-[10px] text-slate-500 mt-1">
             <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.totalPremiumHint') }}
           </p>
+        </FormField>
+        <FormField :label="t('policyCreate.discountAmount')">
+          <input v-model.number="form.discountAmount" type="number" min="0" step="0.01"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
       </div>
 

@@ -590,6 +590,7 @@ export default {
     vat: 'VAT',
     totalPremiumPaid: 'Total premium paid',
     totalPremium: 'Total premium',
+    discountAmount: 'Discount',
     totalPremiumHint: 'Net premium + duty stamp + VAT (auto-calculated, editable)',
     whtAmt: 'WHT amount',
     netCustomerPaid: 'Net customer paid',
