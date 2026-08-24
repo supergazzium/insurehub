@@ -758,24 +758,34 @@ async function hydrateFromDraft(id: string): Promise<void> {
     form.effectiveDate = String(p.effectiveDate ?? '')
     form.expiryDate = String(p.expiryDate ?? '')
     form.coverage = Number(p.coverage ?? 0)
-    form.discountAmount = Number((p.installment as { discountAmount?: number } | undefined)?.discountAmount ?? 0)
     form.policyYear = Number(p.policyYear ?? 1)
     form.actYear = Number(p.actYear ?? 1)
-    form.netPremium = Number(p.netPremium ?? 0)
-    form.mainPremium = Number(p.mainPremium ?? 0)
-    form.dutyStamp = Number(p.dutyStamp ?? 0)
-    form.vat = Number(p.vat ?? 0)
-    form.totalPremiumPaid = Number(p.totalPremiumPaid ?? 0)
-    form.whtAmt = Number(p.whtAmt ?? 0)
-    form.netCustomerPaid = Number(p.netCustomerPaid ?? 0)
     form.annualPremium = Number(p.annualPremium ?? 0)
     form.premiumMode = (p.premiumMode as typeof form.premiumMode) ?? 'annual'
-    form.installmentTerm = String(p.installmentTerm ?? '')
-    form.firstDueInst = Number(p.firstDueInst ?? 0)
-    form.firstDueInstDate = String(p.firstDueInstDate ?? '')
-    form.nextDueInst = Number(p.nextDueInst ?? 0)
-    form.lastDueInstDate = String(p.lastDueInstDate ?? '')
     form.notes = String(p.notes ?? '')
+
+    // PolicyResource nests premium/installment/wht fields; read them from the
+    // nested blocks (with a flat fallback for any older draft-shaped response).
+    // Previously these read flat top-level keys the resource doesn't emit, so
+    // they never hydrated on edit-draft.
+    const premium = (p.premium ?? {}) as Record<string, number | null>
+    const installment = (p.installment ?? {}) as Record<string, number | string | null>
+    const wht = (p.wht ?? {}) as Record<string, number | null>
+
+    form.netPremium = Number(premium.net ?? p.netPremium ?? 0)
+    form.mainPremium = Number(premium.main ?? p.mainPremium ?? 0)
+    form.dutyStamp = Number(premium.dutyStamp ?? p.dutyStamp ?? 0)
+    form.vat = Number(premium.vat ?? p.vat ?? 0)
+    form.totalPremiumPaid = Number(premium.totalPaid ?? p.totalPremiumPaid ?? 0)
+    form.netCustomerPaid = Number(premium.netCustomerPaid ?? p.netCustomerPaid ?? 0)
+    form.whtAmt = Number(wht.amount ?? p.whtAmt ?? 0)
+    form.discountAmount = Number(installment.discountAmount ?? p.discountAmount ?? 0)
+
+    form.installmentTerm = String(installment.term ?? p.installmentTerm ?? '')
+    form.firstDueInst = Number(installment.firstDueAmount ?? p.firstDueInst ?? 0)
+    form.firstDueInstDate = String(installment.firstDueDate ?? p.firstDueInstDate ?? '')
+    form.nextDueInst = Number(installment.nextDueAmount ?? p.nextDueInst ?? 0)
+    form.lastDueInstDate = String(installment.lastDueDate ?? p.lastDueInstDate ?? '')
 
     // C-20: frozen commission (read-only display in the premium section).
     const cs = p.commissionSnapshot as { hubToAgentRate?: number | null; scheme?: string | null; capturedAt?: string | null; frozen?: boolean } | undefined
