@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Observers;
 
 use App\Models\Policy;
+use App\Models\ProductCommissionRate;
 use App\Services\Commission\CommissionSnapshot;
 use Illuminate\Support\Facades\Log;
 
@@ -51,9 +52,35 @@ class PolicyObserver
                 return; // product has no commission basis to freeze
             }
 
+            $policy->commission_snapshot = $snapshot;
+
+            // Seed the editable per-policy commission (both directions) from the
+            // resolved headline rate — but only where the operator hasn't
+            // already supplied an override on the create request. Amount is
+            // rate x net premium (year 1). The operator can edit these later;
+            // when set, the accrual engine prefers them over the product rate.
+            $reader = CommissionSnapshot::fromPolicy($policy);
+            if ($reader !== null) {
+                $sumAssured = (float) $policy->coverage;
+                $entryAge = $this->entryAge($policy);
+                $year = max(1, (int) $policy->policy_year);
+                $premium = (float) ($policy->net_premium ?? 0);
+
+                $h2a = $reader->headlineRate(ProductCommissionRate::DIRECTION_HUB_TO_AGENT, $sumAssured, $entryAge, $year);
+                $c2h = $reader->headlineRate(ProductCommissionRate::DIRECTION_CARRIER_TO_HUB, $sumAssured, $entryAge, $year);
+
+                if ($policy->comm_hub_to_agent_rate === null && $h2a !== null) {
+                    $policy->comm_hub_to_agent_rate = $h2a;
+                    $policy->comm_hub_to_agent_amount = round($premium * $h2a, 2);
+                }
+                if ($policy->comm_carrier_to_hub_rate === null && $c2h !== null) {
+                    $policy->comm_carrier_to_hub_rate = $c2h;
+                    $policy->comm_carrier_to_hub_amount = round($premium * $c2h, 2);
+                }
+            }
+
             // updateQuietly: persist without re-firing observers (no infinite
             // loop, and no spurious `updated` event on a brand-new row).
-            $policy->commission_snapshot = $snapshot;
             $policy->saveQuietly();
         } catch (\Throwable $e) {
             Log::warning('Commission snapshot capture failed on policy.created', [
@@ -63,5 +90,20 @@ class PolicyObserver
             ]);
             // Fall through — policy stays created, resolves commission live.
         }
+    }
+
+    /**
+     * Insured entry age = effective_year - birth_year. Null when either date
+     * is missing (unbounded-age bands still match). Mirrors LifeRateResolver.
+     */
+    private function entryAge(Policy $policy): ?int
+    {
+        $birth = $policy->insured_person_birth_date;
+        $effective = $policy->effective_date;
+        if ($birth === null || $effective === null) {
+            return null;
+        }
+
+        return max(0, (int) $birth->diffInYears($effective));
     }
 }

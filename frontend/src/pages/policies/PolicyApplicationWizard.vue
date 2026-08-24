@@ -117,6 +117,13 @@ const form = reactive({
   nextDueInst: 0 as number,
   lastDueInstDate: '' as string,
 
+  // C-21 — editable commission (both directions). Rate is a 0..1
+  // fraction; amount is rate x netPremium (auto unless touched).
+  commCarrierToHubRate: null as number | null,
+  commCarrierToHubAmount: null as number | null,
+  commHubToAgentRate: null as number | null,
+  commHubToAgentAmount: null as number | null,
+
   // Always
   notes: '' as string,
 })
@@ -129,6 +136,10 @@ const touched = reactive({
   vat: false,
   totalPremiumPaid: false,
   netCustomerPaid: false,
+  commCarrierToHubRate: false,
+  commCarrierToHubAmount: false,
+  commHubToAgentRate: false,
+  commHubToAgentAmount: false,
 })
 
 // ── Picker cascades ──────────────────────────────────────────────────────
@@ -173,6 +184,81 @@ const commissionDisplay = computed<{ rate: number | null; frozen: boolean; isLif
     : (rates?.hubToAgent?.flatRate ?? null)
   return { rate: live, frozen: false, isLife, capturedAt: null }
 })
+
+// ── C-21: editable commission (both directions) ──────────────────────────
+//
+// Headline rate for a direction from the loaded product: the matching
+// sum-assured band's year-1 rate (life banded), else the single rate row
+// (yr1 for life_years, flatRate for flat). Mirrors the backend resolver so
+// the wizard's default equals what the snapshot will freeze.
+function productHeadlineRate(direction: 'carrierToHub' | 'hubToAgent'): number | null {
+  const pd = productDetail.value
+  if (!pd) return null
+  const sa = Number(form.coverage) || 0
+
+  // 1. banded (life) — commissionBands[direction] is an array of bands.
+  const bands = (pd.commissionBands as Record<string, Array<Record<string, number | null>>> | undefined)?.[direction]
+  if (Array.isArray(bands) && bands.length) {
+    const match = bands.find((b) => {
+      const min = b.sumAssuredMin, max = b.sumAssuredMax
+      if (min != null && sa < Number(min)) return false
+      if (max != null && sa > Number(max)) return false
+      return true
+    })
+    if (match && match.yr1 != null) return Number(match.yr1)
+  }
+
+  // 2. single rate row
+  const rates = pd.commissionRates
+  const panel = direction === 'carrierToHub' ? rates?.carrierToHub : rates?.hubToAgent
+  if (!panel) return null
+  return rates?.scheme === 'life_years' ? (panel.yr1 ?? null) : (panel.flatRate ?? null)
+}
+
+/** Seed a direction's rate + amount from the product, unless the operator
+ *  already touched it. Amount = rate x netPremium. */
+function seedCommission(direction: 'carrierToHub' | 'hubToAgent'): void {
+  const rateKey = direction === 'carrierToHub' ? 'commCarrierToHubRate' : 'commHubToAgentRate'
+  const amtKey = direction === 'carrierToHub' ? 'commCarrierToHubAmount' : 'commHubToAgentAmount'
+  const rate = productHeadlineRate(direction)
+  if (!touched[rateKey]) form[rateKey] = rate
+  if (!touched[amtKey]) form[amtKey] = rate != null ? Math.round(rate * (Number(form.netPremium) || 0) * 100) / 100 : null
+}
+
+// Re-seed both directions when the product or coverage changes (create mode).
+// In edit mode the frozen values are hydrated from the policy and marked
+// touched, so this won't overwrite them.
+watch(
+  () => [form.productId, form.coverage, productDetail.value] as const,
+  () => { seedCommission('carrierToHub'); seedCommission('hubToAgent') },
+)
+
+// Recompute amounts when netPremium changes, unless the amount was edited.
+watch(() => form.netPremium, () => {
+  if (!touched.commCarrierToHubAmount && form.commCarrierToHubRate != null)
+    form.commCarrierToHubAmount = Math.round(form.commCarrierToHubRate * (Number(form.netPremium) || 0) * 100) / 100
+  if (!touched.commHubToAgentAmount && form.commHubToAgentRate != null)
+    form.commHubToAgentAmount = Math.round(form.commHubToAgentRate * (Number(form.netPremium) || 0) * 100) / 100
+})
+
+// When the operator edits a rate, recompute its amount (unless amount touched).
+watch(() => form.commCarrierToHubRate, (r) => {
+  if (!touched.commCarrierToHubAmount)
+    form.commCarrierToHubAmount = r != null ? Math.round(r * (Number(form.netPremium) || 0) * 100) / 100 : null
+})
+watch(() => form.commHubToAgentRate, (r) => {
+  if (!touched.commHubToAgentAmount)
+    form.commHubToAgentAmount = r != null ? Math.round(r * (Number(form.netPremium) || 0) * 100) / 100 : null
+})
+
+/** Input handler for the "%" rate fields — converts the displayed percent
+ *  (0..100) back to the stored 0..1 fraction and marks the rate touched. */
+function onCommRatePct(key: 'commCarrierToHubRate' | 'commHubToAgentRate', raw: string): void {
+  const pct = raw === '' ? null : Number(raw)
+  form[key] = pct == null || Number.isNaN(pct) ? null : Math.round((pct / 100) * 100000) / 100000
+  const touchedKey = key === 'commCarrierToHubRate' ? 'commCarrierToHubRate' : 'commHubToAgentRate'
+  touched[touchedKey] = true
+}
 
 async function loadCarriersForInsureType(t: 'Life' | 'Non-Life' | 'Tax'): Promise<void> {
   carriersLoading.value = true
@@ -437,6 +523,11 @@ function buildDraftPayload(): Record<string, unknown> {
     firstDueInstDate: form.firstDueInstDate || null,
     nextDueInst: form.nextDueInst || 0,
     lastDueInstDate: form.lastDueInstDate || null,
+    // C-21: editable commission (both directions). null = use product default.
+    commCarrierToHubRate: form.commCarrierToHubRate,
+    commCarrierToHubAmount: form.commCarrierToHubAmount,
+    commHubToAgentRate: form.commHubToAgentRate,
+    commHubToAgentAmount: form.commHubToAgentAmount,
     notes: form.notes || null,
   }
 
@@ -585,6 +676,23 @@ async function hydrateFromDraft(id: string): Promise<void> {
     snapshotCommission.value = cs?.frozen
       ? { rate: cs.hubToAgentRate ?? null, scheme: cs.scheme ?? null, capturedAt: cs.capturedAt ?? null }
       : null
+
+    // C-21: hydrate the editable commission (both directions) from the policy
+    // and mark touched so the create-mode seeding watcher won't overwrite it.
+    const comm = p.commission as {
+      carrierToHub?: { rate?: number | null; amount?: number | null }
+      hubToAgent?: { rate?: number | null; amount?: number | null }
+    } | undefined
+    if (comm) {
+      form.commCarrierToHubRate = comm.carrierToHub?.rate ?? null
+      form.commCarrierToHubAmount = comm.carrierToHub?.amount ?? null
+      form.commHubToAgentRate = comm.hubToAgent?.rate ?? null
+      form.commHubToAgentAmount = comm.hubToAgent?.amount ?? null
+      touched.commCarrierToHubRate = true
+      touched.commCarrierToHubAmount = true
+      touched.commHubToAgentRate = true
+      touched.commHubToAgentAmount = true
+    }
 
     // Every field is now touched so recalc watchers don't stomp saved values.
     touched.expiryDate = true
@@ -969,20 +1077,12 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         </FormField>
       </div>
 
-      <!-- C-20: commission from the product, frozen at policy creation. -->
-      <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-4 mb-2">{{ t('policyCreate.commissionSection') }}</h3>
-      <div class="flex items-center gap-3">
-        <div class="rounded-lg border border-slate-200 bg-slate-50 px-3 py-2 text-sm min-w-[9rem]">
-          <span class="text-slate-500 mr-2">{{ t('policyCreate.commissionRate') }}</span>
-          <span class="font-semibold text-slate-900 tabular-nums">
-            {{ commissionDisplay.rate !== null ? (commissionDisplay.rate * 100).toFixed(2) + '%' : '—' }}
-          </span>
-          <span v-if="commissionDisplay.isLife && commissionDisplay.rate !== null" class="text-[10px] text-slate-400 ml-1">
-            {{ t('policyCreate.commissionYr1') }}
-          </span>
-        </div>
+      <!-- C-21: editable commission, both directions. Defaults from the
+           product (year-1 rate of the matching sum-assured band); operator
+           can override. Amount auto-computes from rate x net premium. -->
+      <div class="flex items-center justify-between mt-4 mb-2">
+        <h3 class="text-xs uppercase tracking-wider text-slate-400">{{ t('policyCreate.commissionSection') }}</h3>
         <span
-          v-if="commissionDisplay.rate !== null"
           class="inline-flex items-center gap-1 text-[11px] rounded-full px-2 py-0.5"
           :class="commissionDisplay.frozen
             ? 'bg-emerald-50 text-emerald-700 border border-emerald-200'
@@ -990,8 +1090,58 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         >
           <i class="pi" :class="commissionDisplay.frozen ? 'pi-lock' : 'pi-info-circle'" />
           {{ commissionDisplay.frozen ? t('policyCreate.commissionFrozen') : t('policyCreate.commissionWillFreeze') }}
+          <span v-if="commissionDisplay.isLife" class="opacity-70">{{ t('policyCreate.commissionYr1') }}</span>
         </span>
       </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <!-- carrier → hub (insurer pays InsureHub) -->
+        <div class="rounded-lg border border-slate-200 p-3">
+          <p class="text-xs font-medium text-slate-600 mb-2">{{ t('policyCreate.commissionCarrierToHub') }}</p>
+          <div class="grid grid-cols-2 gap-2">
+            <FormField :label="t('policyCreate.commissionRatePct')">
+              <div class="relative">
+                <input
+                  :value="form.commCarrierToHubRate !== null ? +(form.commCarrierToHubRate * 100).toFixed(3) : null"
+                  @input="onCommRatePct('commCarrierToHubRate', ($event.target as HTMLInputElement).value)"
+                  type="number" min="0" max="100" step="0.01"
+                  class="w-full border border-slate-200 rounded-lg pl-3 pr-7 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+                <span class="absolute right-2.5 top-1.5 text-xs text-slate-400">%</span>
+              </div>
+            </FormField>
+            <FormField :label="t('policyCreate.commissionAmount')">
+              <input v-model.number="form.commCarrierToHubAmount" @change="touched.commCarrierToHubAmount = true"
+                type="number" min="0" step="0.01"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+          </div>
+        </div>
+
+        <!-- hub → agent (InsureHub pays agent) -->
+        <div class="rounded-lg border border-slate-200 p-3">
+          <p class="text-xs font-medium text-slate-600 mb-2">{{ t('policyCreate.commissionHubToAgent') }}</p>
+          <div class="grid grid-cols-2 gap-2">
+            <FormField :label="t('policyCreate.commissionRatePct')">
+              <div class="relative">
+                <input
+                  :value="form.commHubToAgentRate !== null ? +(form.commHubToAgentRate * 100).toFixed(3) : null"
+                  @input="onCommRatePct('commHubToAgentRate', ($event.target as HTMLInputElement).value)"
+                  type="number" min="0" max="100" step="0.01"
+                  class="w-full border border-slate-200 rounded-lg pl-3 pr-7 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+                <span class="absolute right-2.5 top-1.5 text-xs text-slate-400">%</span>
+              </div>
+            </FormField>
+            <FormField :label="t('policyCreate.commissionAmount')">
+              <input v-model.number="form.commHubToAgentAmount" @change="touched.commHubToAgentAmount = true"
+                type="number" min="0" step="0.01"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+          </div>
+        </div>
+      </div>
+      <p class="text-[10px] text-slate-500 mt-2">
+        <i class="pi pi-info-circle mr-1" /> {{ t('policyCreate.commissionHint') }}
+      </p>
     </section>
 
     <!-- ── Section 5: Notes ─────────────────────────────────────────────── -->

@@ -69,6 +69,19 @@ class PolicyResource extends JsonResource
             // later product edits). Null rates when the product carried
             // no flat rate; the wizard shows a dash.
             'commissionSnapshot' => $commission,
+            // C-21: editable per-policy commission for both directions.
+            // Each carries the effective rate + amount (defaulted from
+            // the snapshot at creation, overridable by the operator).
+            'commission' => [
+                'carrierToHub' => [
+                    'rate' => $this->comm_carrier_to_hub_rate !== null ? (float) $this->comm_carrier_to_hub_rate : null,
+                    'amount' => $this->comm_carrier_to_hub_amount !== null ? (float) $this->comm_carrier_to_hub_amount : null,
+                ],
+                'hubToAgent' => [
+                    'rate' => $this->comm_hub_to_agent_rate !== null ? (float) $this->comm_hub_to_agent_rate : null,
+                    'amount' => $this->comm_hub_to_agent_amount !== null ? (float) $this->comm_hub_to_agent_amount : null,
+                ],
+            ],
             'comRecCheck' => $this->com_rec_check ?? '',
             // Installment / payment terms.
             'installment' => [

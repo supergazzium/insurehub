@@ -6,6 +6,7 @@ namespace Database\Seeders;
 
 use App\Models\Carrier;
 use App\Models\Product;
+use App\Models\ProductCommissionBand;
 use App\Models\ProductCommissionRate;
 use App\Models\ProductType;
 use Illuminate\Database\Seeder;
@@ -93,6 +94,41 @@ class CommissionTestProductSeeder extends Seeder
                 'carrierToHub' => ['flat' => 0.30],
                 'duration' => 1, 'pay' => 1,
             ],
+            [
+                // Life product whose commission varies by BOTH policy-year AND
+                // sum-assured band. Higher sum-assured → higher rate (a volume
+                // incentive). Resolved by LifeRateResolver, which picks the
+                // band matching the policy's coverage + insured entry age, then
+                // reads the yr_{policy_year} column. Both directions banded.
+                'code' => 'CT-LIFE-BANDED',
+                'name' => '[TEST] ประกันชีวิตแบบขั้นทุนประกัน',
+                'typeCode' => 'WHOLE_LIFE_STANDARD',
+                'type' => 'life',
+                'carrier' => $lifeCarrier,
+                'scheme' => ProductCommissionRate::SCHEME_LIFE_YEARS,
+                // Fallback single-row rate (used only if no band matches — e.g.
+                // a coverage outside every band). Mirrors band-1 year 1.
+                'hubToAgent' => ['yr_1' => 0.35, 'yr_2' => 0.10, 'yr_3' => 0.05, 'yr_4' => 0.05, 'yr_5' => 0.05, 'yr_6_10' => 0.02, 'yr_11_up' => 0.02],
+                'carrierToHub' => ['yr_1' => 0.50, 'yr_2' => 0.15, 'yr_3' => 0.08, 'yr_4' => 0.08, 'yr_5' => 0.08, 'yr_6_10' => 0.03, 'yr_11_up' => 0.03],
+                'duration' => 99, 'pay' => 99,
+                // Bands: [seq, sa_min, sa_max, age_min, age_max, yr1..yr5, yr6_up]
+                'bands' => [
+                    'hub_to_agent' => [
+                        // SA < 1,000,000
+                        ['seq' => 1, 'sa_min' => null, 'sa_max' => 999999.99, 'age_min' => null, 'age_max' => null,
+                         'yr_1' => 0.35, 'yr_2' => 0.10, 'yr_3' => 0.05, 'yr_4' => 0.05, 'yr_5' => 0.05, 'yr_6_up' => 0.02],
+                        // SA >= 1,000,000 (higher rate)
+                        ['seq' => 2, 'sa_min' => 1000000, 'sa_max' => null, 'age_min' => null, 'age_max' => null,
+                         'yr_1' => 0.45, 'yr_2' => 0.12, 'yr_3' => 0.06, 'yr_4' => 0.06, 'yr_5' => 0.06, 'yr_6_up' => 0.03],
+                    ],
+                    'carrier_to_hub' => [
+                        ['seq' => 1, 'sa_min' => null, 'sa_max' => 999999.99, 'age_min' => null, 'age_max' => null,
+                         'yr_1' => 0.50, 'yr_2' => 0.15, 'yr_3' => 0.08, 'yr_4' => 0.08, 'yr_5' => 0.08, 'yr_6_up' => 0.03],
+                        ['seq' => 2, 'sa_min' => 1000000, 'sa_max' => null, 'age_min' => null, 'age_max' => null,
+                         'yr_1' => 0.60, 'yr_2' => 0.18, 'yr_3' => 0.10, 'yr_4' => 0.10, 'yr_5' => 0.10, 'yr_6_up' => 0.04],
+                    ],
+                ],
+            ],
         ];
 
         foreach ($specs as $s) {
@@ -125,13 +161,35 @@ class CommissionTestProductSeeder extends Seeder
             $this->upsertRate($tenantId, $product->id, ProductCommissionRate::DIRECTION_HUB_TO_AGENT, $s['scheme'], $s['hubToAgent']);
             $this->upsertRate($tenantId, $product->id, ProductCommissionRate::DIRECTION_CARRIER_TO_HUB, $s['scheme'], $s['carrierToHub']);
 
+            if (! empty($s['bands'])) {
+                // Clear then re-seed bands for both directions (idempotent).
+                ProductCommissionBand::query()->where('product_id', $product->id)->delete();
+                foreach ($s['bands'] as $direction => $bands) {
+                    foreach ($bands as $b) {
+                        ProductCommissionBand::create([
+                            'tenant_id' => $tenantId,
+                            'product_id' => $product->id,
+                            'direction' => $direction,
+                            'band_seq' => $b['seq'],
+                            'sum_assured_min' => $b['sa_min'],
+                            'sum_assured_max' => $b['sa_max'],
+                            'entry_age_min' => $b['age_min'],
+                            'entry_age_max' => $b['age_max'],
+                            'yr_1' => $b['yr_1'], 'yr_2' => $b['yr_2'], 'yr_3' => $b['yr_3'],
+                            'yr_4' => $b['yr_4'], 'yr_5' => $b['yr_5'], 'yr_6_up' => $b['yr_6_up'],
+                            'effective_from' => null,
+                        ]);
+                    }
+                }
+            }
+
             $rate = $s['scheme'] === ProductCommissionRate::SCHEME_FLAT
                 ? (($s['hubToAgent']['flat'] ?? 0) * 100).'% flat'
                 : (($s['hubToAgent']['yr_1'] ?? 0) * 100).'% yr1';
             $this->command?->info("  {$s['code']} ({$s['type']}) → hub→agent {$rate}  [carrier {$s['carrier']->code}, product #{$product->id}]");
         }
 
-        $this->command?->info('Seeded 4 commission-test products (CT-LIFE-WL, CT-LIFE-ENDOW, CT-MOTOR-C1, CT-FIRE-HOUSE).');
+        $this->command?->info('Seeded 5 commission-test products (CT-LIFE-WL, CT-LIFE-ENDOW, CT-MOTOR-C1, CT-FIRE-HOUSE, CT-LIFE-BANDED).');
     }
 
     /**

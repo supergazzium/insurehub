@@ -158,6 +158,43 @@ final class CommissionSnapshot
         return $this->data['captured_at'] ?? null;
     }
 
+    /**
+     * The single "headline" commission rate for a direction, given the policy
+     * context — mirrors the resolver logic so the wizard and accrual agree:
+     *   1. the matching sum-assured / entry-age band's yr_{year} column, else
+     *   2. the single rate row (flat_rate for flat, yr_{year} for life_years).
+     * Returns null when nothing resolves.
+     *
+     * This is what the policy's editable commission defaults to at creation
+     * (year 1), for both hub_to_agent and carrier_to_hub.
+     */
+    public function headlineRate(string $direction, float $sumAssured, ?int $entryAge, int $policyYear): ?float
+    {
+        $year = max(1, $policyYear);
+
+        foreach ($this->bands($direction) as $band) {
+            if (! $band->matches($sumAssured, $entryAge)) {
+                continue;
+            }
+            $col = ProductCommissionBand::yearColumn($year);
+            $rate = $band->{$col};
+            if ($rate !== null) {
+                return (float) $rate;
+            }
+        }
+
+        $row = $this->rateRow($direction);
+        if ($row === null) {
+            return null;
+        }
+        if ($row->scheme === ProductCommissionRate::SCHEME_LIFE_YEARS) {
+            $col = ProductCommissionRate::lifeYearColumn($year);
+            return $row->{$col} !== null ? (float) $row->{$col} : null;
+        }
+
+        return $row->flat_rate !== null ? (float) $row->flat_rate : null;
+    }
+
     /** @param list<string> $columns @return array<string,mixed> */
     private static function pluck(object $model, array $columns): array
     {

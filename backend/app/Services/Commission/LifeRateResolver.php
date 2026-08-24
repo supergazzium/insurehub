@@ -36,6 +36,14 @@ class LifeRateResolver implements BaseRateResolver
 {
     public function resolve(Policy $policy, PolicyPayment $payment): ?BaseRate
     {
+        // C-21: a per-policy override wins over the product/snapshot rate.
+        if ($policy->comm_hub_to_agent_rate !== null) {
+            return new BaseRate(
+                rate: (float) $policy->comm_hub_to_agent_rate,
+                source: 'policy_override:hub_to_agent',
+            );
+        }
+
         $product = $policy->product;
         $snapshot = CommissionSnapshot::fromPolicy($policy);
 

@@ -63,6 +63,11 @@ class PolicyRequest extends FormRequest
             'subsidiseFromAgent' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'subsidiseToFinance' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'creditCardFee' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            // C-21: per-policy commission overrides (both directions).
+            'commHubToAgentRate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commHubToAgentAmount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'commCarrierToHubRate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            'commCarrierToHubAmount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             // Dates.
             'quoteDate' => ['sometimes', 'nullable', 'date'],
             'appDate' => ['sometimes', 'nullable', 'date'],
@@ -210,6 +215,10 @@ class PolicyRequest extends FormRequest
             'subsidiseFromAgent' => 'subsidise_from_agent',
             'subsidiseToFinance' => 'subsidise_to_finance',
             'creditCardFee' => 'credit_card_fee',
+            'commHubToAgentRate' => 'comm_hub_to_agent_rate',
+            'commHubToAgentAmount' => 'comm_hub_to_agent_amount',
+            'commCarrierToHubRate' => 'comm_carrier_to_hub_rate',
+            'commCarrierToHubAmount' => 'comm_carrier_to_hub_amount',
             'quoteDate' => 'quote_date',
             'appDate' => 'app_date',
             'effectiveDate' => 'effective_date',
