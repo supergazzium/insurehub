@@ -185,6 +185,16 @@ const commissionDisplay = computed<{ rate: number | null; frozen: boolean; isLif
   return { rate: live, frozen: false, isLife, capturedAt: null }
 })
 
+/** Context passed to RiskFieldRenderer's product_search sub-fields (rider
+ *  picker): the main product's carrier + insure_type, so riders are filtered
+ *  to the same carrier + type. insureType is lower-cased to match the API. */
+const productSearchContext = computed(() => ({
+  carrierId: form.carrierId || null,
+  insureType: (form.insureType
+    ? form.insureType.toLowerCase()
+    : null) as 'life' | 'non-life' | 'tax' | null,
+}))
+
 // ── C-21: editable commission (both directions) ──────────────────────────
 //
 // Headline rate for a direction from the loaded product: the matching
@@ -1012,6 +1022,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           v-model="form.risk"
           locale="th"
           :only="['beneficiaries', 'riders']"
+          :product-search-context="productSearchContext"
         />
       </div>
     </section>

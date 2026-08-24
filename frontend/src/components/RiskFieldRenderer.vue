@@ -23,6 +23,8 @@ import { api } from '../api/client'
 import { isThaiMobile } from '../utils/thaiValidation'
 import DateInput from './DateInput.vue'
 import FormField from './FormField.vue'
+import ProductSearchSelect from './ProductSearchSelect.vue'
+import type { ProductListRow } from '../api/products'
 
 const props = defineProps<{
   schema: RiskSchema | null
@@ -33,6 +35,10 @@ const props = defineProps<{
   only?: string[]
   // Render every section EXCEPT these keys (blacklist). Omit for none.
   exclude?: string[]
+  // Context for product_search sub-fields (e.g. rider picker): the main
+  // product's carrier + insure_type, so the dropdown lists matching
+  // riders (main_rider='Rider', same carrier + insure_type).
+  productSearchContext?: { carrierId?: string | null; insureType?: 'life' | 'non-life' | 'tax' | null }
 }>()
 
 const emit = defineEmits<{
@@ -264,6 +270,24 @@ function openRemote(section: RiskSection, field: RiskField): void {
 }
 function closeRemote(): void { openRemoteKey.value = null }
 
+/** When a rider product is picked from the product_search dropdown, capture
+ *  its code alongside the name if the row schema has a `product_code` field.
+ *  Keeps the name (the human label) as the field value; the code gives the
+ *  backend a stable reference. Extend here to auto-fill premium/commission
+ *  from a product-detail fetch if the schema grows those fields. */
+function onRiderSelect(
+  section: RiskSection,
+  field: RiskField,
+  idx: number,
+  _sub: RiskField,
+  row: ProductListRow,
+): void {
+  const hasCode = (field.fields ?? []).some((f) => f.key === 'product_code')
+  if (hasCode) {
+    updateRow(valueKey(section.key, field.key), idx, { product_code: row.code })
+  }
+}
+
 onMounted(() => {
   document.addEventListener('click', (e) => {
     const t = e.target as HTMLElement | null
@@ -308,10 +332,25 @@ onMounted(() => {
               <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
                 <FormField v-for="sub in (field.fields ?? [])" :key="sub.key"
                   :label="label(sub)" :required="sub.required">
+                  <!-- product_search — searchable dropdown of products
+                       (rider picker). Filtered by the main product's carrier
+                       + insure_type via productSearchContext. -->
+                  <ProductSearchSelect
+                    v-if="sub.type === 'product_search'"
+                    :model-value="(row[sub.key] as string | undefined)"
+                    :carrier-id="productSearchContext?.carrierId ?? null"
+                    :insure-type="productSearchContext?.insureType ?? null"
+                    main-rider="Rider"
+                    :placeholder="sub.placeholder"
+                    :disabled="!productSearchContext?.carrierId"
+                    :disabled-hint="sub.placeholder_disabled ?? 'เลือกสินค้าหลักก่อน'"
+                    @update:model-value="(v: string) => updateRow(valueKey(section.key, field.key), idx, { [sub.key]: v })"
+                    @select="(r: ProductListRow) => onRiderSelect(section, field, idx, sub, r)"
+                  />
                   <!-- Nested row fields only support scalar widgets — the
                        recursive array_of_objects case isn't in any current
                        schema and adding it would require a self-import. -->
-                  <input v-if="sub.type === 'number'"
+                  <input v-else-if="sub.type === 'number'"
                     type="number"
                     :min="sub.validation?.min"
                     :max="sub.validation?.max"

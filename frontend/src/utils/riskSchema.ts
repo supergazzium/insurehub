@@ -14,6 +14,7 @@ export type RiskFieldType =
   | 'select'
   | 'radio'
   | 'remote_select'
+  | 'product_search'
   | 'boolean'
   | 'passport'
   | 'phone'
