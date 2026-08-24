@@ -73,10 +73,21 @@ class MgmCommissionEngine
             return [];
         }
 
-        $basePremium = (float) $payment->amount;
-        if ($basePremium <= 0) {
+        // Commission base = NET premium (business standard) — duty stamp + VAT
+        // are pass-through taxes and are never commissioned. The payment amount
+        // is operator-entered and may include tax (full bill) or be a partial;
+        // cap the commissionable base at the policy's net premium so a
+        // tax-inclusive payment never over-accrues, while genuine partial
+        // payments (< net premium) still pro-rate. Falls back to the raw
+        // payment amount when net_premium is unset (legacy policies).
+        $paid = (float) $payment->amount;
+        if ($paid <= 0) {
             return [];
         }
+        $netPremium = $policy->net_premium !== null ? (float) $policy->net_premium : null;
+        $basePremium = ($netPremium !== null && $netPremium > 0)
+            ? min($paid, $netPremium)
+            : $paid;
 
         $seller = Agent::query()->find($policy->writing_agent_id);
         if ($seller === null) {
