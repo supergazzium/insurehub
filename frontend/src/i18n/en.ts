@@ -599,6 +599,7 @@ export default {
     commissionSection: 'Commission (from product)',
     commissionRate: 'Rate (hub → agent)',
     commissionYr1: '(year 1)',
+    commissionYear: 'Year',
     commissionCarrierToHub: 'Insurer → InsureHub',
     commissionHubToAgent: 'InsureHub → Agent',
     commissionRatePct: 'Rate',

@@ -82,6 +82,9 @@ class PolicyResource extends JsonResource
                     'amount' => $this->comm_hub_to_agent_amount !== null ? (float) $this->comm_hub_to_agent_amount : null,
                 ],
             ],
+            // C-22: full per-year override vector (both directions), band form
+            // yr_1..yr_5 + yr_6_up. Null = no vector override on this policy.
+            'commissionOverride' => is_array($this->comm_override) ? $this->comm_override : null,
             'comRecCheck' => $this->com_rec_check ?? '',
             // Installment / payment terms.
             'installment' => [

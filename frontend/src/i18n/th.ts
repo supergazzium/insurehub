@@ -1658,6 +1658,7 @@ export default {
     commissionSection: 'ค่าคอมมิชชั่น (จากสินค้า)',
     commissionRate: 'อัตรา (บริษัท → ตัวแทน)',
     commissionYr1: '(ปีที่ 1)',
+    commissionYear: 'ปีที่',
     commissionCarrierToHub: 'บริษัทประกัน → InsureHub',
     commissionHubToAgent: 'InsureHub → ตัวแทน',
     commissionRatePct: 'อัตรา',

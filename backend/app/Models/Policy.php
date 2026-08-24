@@ -46,6 +46,7 @@ class Policy extends Model
         'risk_data' => 'array',
         // C-20: frozen product commission basis, captured at create time.
         'commission_snapshot' => 'array',
+        'comm_override' => 'array',
     ];
 
     public function tenant(): BelongsTo

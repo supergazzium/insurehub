@@ -195,6 +195,75 @@ final class CommissionSnapshot
         return $row->flat_rate !== null ? (float) $row->flat_rate : null;
     }
 
+    /**
+     * The full per-year commission vector for a direction, in band form
+     * (yr_1..yr_5 + yr_6_up), given the policy context. Prefers the matching
+     * sum-assured / entry-age band; falls back to the single rate row mapped
+     * onto the band columns (yr_6_up ← yr_6_10). Returns null when nothing
+     * resolves. Used to seed the editable per-policy override vector.
+     *
+     * @return array<string,float>|null
+     */
+    public function bandVector(string $direction, float $sumAssured, ?int $entryAge): ?array
+    {
+        $cols = ['yr_1', 'yr_2', 'yr_3', 'yr_4', 'yr_5', 'yr_6_up'];
+
+        foreach ($this->bands($direction) as $band) {
+            if (! $band->matches($sumAssured, $entryAge)) {
+                continue;
+            }
+            $out = [];
+            foreach ($cols as $c) {
+                if ($band->{$c} !== null) {
+                    $out[$c] = (float) $band->{$c};
+                }
+            }
+            if ($out !== []) {
+                return $out;
+            }
+        }
+
+        // Fallback: single life_years rate row → band columns.
+        $row = $this->rateRow($direction);
+        if ($row === null) {
+            return null;
+        }
+        if ($row->scheme === ProductCommissionRate::SCHEME_LIFE_YEARS) {
+            $map = [
+                'yr_1' => 'yr_1', 'yr_2' => 'yr_2', 'yr_3' => 'yr_3',
+                'yr_4' => 'yr_4', 'yr_5' => 'yr_5', 'yr_6_up' => 'yr_6_10',
+            ];
+            $out = [];
+            foreach ($map as $bandCol => $rateCol) {
+                if ($row->{$rateCol} !== null) {
+                    $out[$bandCol] = (float) $row->{$rateCol};
+                }
+            }
+            return $out === [] ? null : $out;
+        }
+
+        // Flat product: same rate for every year.
+        if ($row->flat_rate !== null) {
+            $flat = (float) $row->flat_rate;
+            return array_fill_keys($cols, $flat);
+        }
+
+        return null;
+    }
+
+    /** Map a policy_year to the band-form override column. */
+    public static function overrideYearColumn(int $policyYear): string
+    {
+        return match (true) {
+            $policyYear <= 1 => 'yr_1',
+            $policyYear === 2 => 'yr_2',
+            $policyYear === 3 => 'yr_3',
+            $policyYear === 4 => 'yr_4',
+            $policyYear === 5 => 'yr_5',
+            default => 'yr_6_up',
+        };
+    }
+
     /** @param list<string> $columns @return array<string,mixed> */
     private static function pluck(object $model, array $columns): array
     {

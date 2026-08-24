@@ -77,6 +77,19 @@ class PolicyObserver
                     $policy->comm_carrier_to_hub_rate = $c2h;
                     $policy->comm_carrier_to_hub_amount = round($premium * $c2h, 2);
                 }
+
+                // C-22: seed the full per-year override vector (both directions)
+                // from the matching band, unless one was supplied on create.
+                if ($policy->comm_override === null) {
+                    $h2aVec = $reader->bandVector(ProductCommissionRate::DIRECTION_HUB_TO_AGENT, $sumAssured, $entryAge);
+                    $c2hVec = $reader->bandVector(ProductCommissionRate::DIRECTION_CARRIER_TO_HUB, $sumAssured, $entryAge);
+                    if ($h2aVec !== null || $c2hVec !== null) {
+                        $policy->comm_override = array_filter([
+                            'hubToAgent' => $h2aVec,
+                            'carrierToHub' => $c2hVec,
+                        ], fn ($v) => $v !== null);
+                    }
+                }
             }
 
             // updateQuietly: persist without re-firing observers (no infinite

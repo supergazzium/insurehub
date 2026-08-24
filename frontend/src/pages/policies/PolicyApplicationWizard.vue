@@ -123,6 +123,10 @@ const form = reactive({
   commCarrierToHubAmount: null as number | null,
   commHubToAgentRate: null as number | null,
   commHubToAgentAmount: null as number | null,
+  // C-22: full per-year override vector (life). band form:
+  // { hubToAgent: {yr_1..yr_6_up}, carrierToHub: {...} }.
+  commOverride: null as Record<string, Record<string, number | null>> | null,
+  commOverrideTouched: false as boolean,
 
   // Always
   notes: '' as string,
@@ -260,6 +264,86 @@ watch(() => form.commHubToAgentRate, (r) => {
   if (!touched.commHubToAgentAmount)
     form.commHubToAgentAmount = r != null ? Math.round(r * (Number(form.netPremium) || 0) * 100) / 100 : null
 })
+
+// ── C-22: full per-year commission vector (life products) ────────────────
+//
+// The band year columns shown in the grid.
+const VECTOR_YEARS = ['yr_1', 'yr_2', 'yr_3', 'yr_4', 'yr_5', 'yr_6_up'] as const
+const VECTOR_YEAR_LABELS: Record<string, string> = {
+  yr_1: 'ปีที่ 1', yr_2: 'ปีที่ 2', yr_3: 'ปีที่ 3',
+  yr_4: 'ปีที่ 4', yr_5: 'ปีที่ 5', yr_6_up: 'ปีที่ 6+',
+}
+
+/** True when the product uses a per-year (life) commission scheme — drives
+ *  the vector grid vs the single rate+amount cards. */
+const isVectorScheme = computed(() => productDetail.value?.commissionRates?.scheme === 'life_years')
+
+/** Build the full per-year vector for a direction from the matching
+ *  sum-assured band (life). Falls back to the single life_years rate row. */
+function productVector(direction: 'carrierToHub' | 'hubToAgent'): Record<string, number | null> | null {
+  const pd = productDetail.value
+  if (!pd) return null
+  const sa = Number(form.coverage) || 0
+
+  const bands = (pd.commissionBands as Record<string, Array<Record<string, number | null>>> | undefined)?.[direction]
+  if (Array.isArray(bands) && bands.length) {
+    const match = bands.find((b) => {
+      if (b.sumAssuredMin != null && sa < Number(b.sumAssuredMin)) return false
+      if (b.sumAssuredMax != null && sa > Number(b.sumAssuredMax)) return false
+      return true
+    })
+    if (match) {
+      return {
+        yr_1: match.yr1 ?? null, yr_2: match.yr2 ?? null, yr_3: match.yr3 ?? null,
+        yr_4: match.yr4 ?? null, yr_5: match.yr5 ?? null, yr_6_up: match.yr6Up ?? null,
+      }
+    }
+  }
+  // fallback: single life_years rate row → band columns (yr_6_up ← yr6_10)
+  const panel = direction === 'carrierToHub' ? pd.commissionRates?.carrierToHub : pd.commissionRates?.hubToAgent
+  if (panel && pd.commissionRates?.scheme === 'life_years') {
+    return {
+      yr_1: panel.yr1 ?? null, yr_2: panel.yr2 ?? null, yr_3: panel.yr3 ?? null,
+      yr_4: panel.yr4 ?? null, yr_5: panel.yr5 ?? null, yr_6_up: panel.yr6_10 ?? null,
+    }
+  }
+  return null
+}
+
+/** Seed the whole vector (both directions) from the product, unless edited. */
+function seedVector(): void {
+  if (!isVectorScheme.value || form.commOverrideTouched) return
+  const h2a = productVector('hubToAgent')
+  const c2h = productVector('carrierToHub')
+  if (h2a || c2h) {
+    form.commOverride = {
+      ...(h2a ? { hubToAgent: h2a } : {}),
+      ...(c2h ? { carrierToHub: c2h } : {}),
+    }
+  } else {
+    form.commOverride = null
+  }
+}
+
+// Re-seed the vector when product/coverage changes (create mode).
+watch(() => [form.productId, form.coverage, productDetail.value] as const, () => seedVector())
+
+/** Grid cell input: write a 0..1 fraction from the displayed percent and
+ *  mark the vector touched so seeding stops overwriting it. */
+function onVectorInput(direction: 'carrierToHub' | 'hubToAgent', year: string, raw: string): void {
+  const pct = raw === '' ? null : Number(raw)
+  const val = pct == null || Number.isNaN(pct) ? null : Math.round((pct / 100) * 100000) / 100000
+  const next = { ...(form.commOverride ?? {}) }
+  next[direction] = { ...(next[direction] ?? {}), [year]: val }
+  form.commOverride = next
+  form.commOverrideTouched = true
+}
+
+/** Read a cell as a percent for display (0..100). */
+function vectorPct(direction: 'carrierToHub' | 'hubToAgent', year: string): number | null {
+  const v = form.commOverride?.[direction]?.[year]
+  return v != null ? +(v * 100).toFixed(3) : null
+}
 
 /** Input handler for the "%" rate fields — converts the displayed percent
  *  (0..100) back to the stored 0..1 fraction and marks the rate touched. */
@@ -538,6 +622,7 @@ function buildDraftPayload(): Record<string, unknown> {
     commCarrierToHubAmount: form.commCarrierToHubAmount,
     commHubToAgentRate: form.commHubToAgentRate,
     commHubToAgentAmount: form.commHubToAgentAmount,
+    commOverride: form.commOverride,
     notes: form.notes || null,
   }
 
@@ -702,6 +787,14 @@ async function hydrateFromDraft(id: string): Promise<void> {
       touched.commCarrierToHubAmount = true
       touched.commHubToAgentRate = true
       touched.commHubToAgentAmount = true
+    }
+
+    // C-22: hydrate the per-year override vector; mark touched so create-mode
+    // seeding won't overwrite it.
+    const ov = p.commissionOverride as Record<string, Record<string, number | null>> | null | undefined
+    if (ov && typeof ov === 'object') {
+      form.commOverride = ov
+      form.commOverrideTouched = true
     }
 
     // Every field is now touched so recalc watchers don't stomp saved values.
@@ -1127,11 +1220,51 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         >
           <i class="pi" :class="commissionDisplay.frozen ? 'pi-lock' : 'pi-info-circle'" />
           {{ commissionDisplay.frozen ? t('policyCreate.commissionFrozen') : t('policyCreate.commissionWillFreeze') }}
-          <span v-if="commissionDisplay.isLife" class="opacity-70">{{ t('policyCreate.commissionYr1') }}</span>
-        </span>
+          </span>
       </div>
 
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <!-- C-22: full per-year vector grid (life products). Rows = years,
+           columns = carrier→hub % and hub→agent %. Defaults from the matching
+           sum-assured band; every cell editable per policy. -->
+      <div v-if="isVectorScheme" class="overflow-x-auto">
+        <table class="w-full text-sm border-collapse">
+          <thead>
+            <tr class="text-left text-xs text-slate-500">
+              <th class="py-1.5 pr-3 font-medium">{{ t('policyCreate.commissionYear') }}</th>
+              <th class="py-1.5 px-3 font-medium">{{ t('policyCreate.commissionCarrierToHub') }}</th>
+              <th class="py-1.5 px-3 font-medium">{{ t('policyCreate.commissionHubToAgent') }}</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="yr in VECTOR_YEARS" :key="yr" class="border-t border-slate-100">
+              <td class="py-1.5 pr-3 text-slate-600">{{ VECTOR_YEAR_LABELS[yr] }}</td>
+              <td class="py-1.5 px-3">
+                <div class="relative w-28">
+                  <input
+                    :value="vectorPct('carrierToHub', yr)"
+                    @input="onVectorInput('carrierToHub', yr, ($event.target as HTMLInputElement).value)"
+                    type="number" min="0" max="100" step="0.01"
+                    class="w-full border border-slate-200 rounded-md pl-2 pr-6 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                  <span class="absolute right-2 top-1 text-xs text-slate-400">%</span>
+                </div>
+              </td>
+              <td class="py-1.5 px-3">
+                <div class="relative w-28">
+                  <input
+                    :value="vectorPct('hubToAgent', yr)"
+                    @input="onVectorInput('hubToAgent', yr, ($event.target as HTMLInputElement).value)"
+                    type="number" min="0" max="100" step="0.01"
+                    class="w-full border border-slate-200 rounded-md pl-2 pr-6 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                  <span class="absolute right-2 top-1 text-xs text-slate-400">%</span>
+                </div>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <!-- Flat products: single rate + amount per direction. -->
+      <div v-else class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <!-- carrier → hub (insurer pays InsureHub) -->
         <div class="rounded-lg border border-slate-200 p-3">
           <p class="text-xs font-medium text-slate-600 mb-2">{{ t('policyCreate.commissionCarrierToHub') }}</p>

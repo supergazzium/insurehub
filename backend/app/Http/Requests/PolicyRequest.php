@@ -68,6 +68,11 @@ class PolicyRequest extends FormRequest
             'commHubToAgentAmount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'commCarrierToHubRate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
             'commCarrierToHubAmount' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            // C-22: per-year override vector (both directions).
+            'commOverride' => ['sometimes', 'nullable', 'array'],
+            'commOverride.hubToAgent' => ['sometimes', 'nullable', 'array'],
+            'commOverride.carrierToHub' => ['sometimes', 'nullable', 'array'],
+            'commOverride.*.*' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
             // Dates.
             'quoteDate' => ['sometimes', 'nullable', 'date'],
             'appDate' => ['sometimes', 'nullable', 'date'],
@@ -219,6 +224,7 @@ class PolicyRequest extends FormRequest
             'commHubToAgentAmount' => 'comm_hub_to_agent_amount',
             'commCarrierToHubRate' => 'comm_carrier_to_hub_rate',
             'commCarrierToHubAmount' => 'comm_carrier_to_hub_amount',
+            'commOverride' => 'comm_override',
             'quoteDate' => 'quote_date',
             'appDate' => 'app_date',
             'effectiveDate' => 'effective_date',

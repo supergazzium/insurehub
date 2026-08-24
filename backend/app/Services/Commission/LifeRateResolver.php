@@ -36,7 +36,19 @@ class LifeRateResolver implements BaseRateResolver
 {
     public function resolve(Policy $policy, PolicyPayment $payment): ?BaseRate
     {
-        // C-21: a per-policy override wins over the product/snapshot rate.
+        // C-22: a per-policy per-YEAR override vector wins first (life).
+        $vec = is_array($policy->comm_override) ? ($policy->comm_override['hubToAgent'] ?? null) : null;
+        if (is_array($vec)) {
+            $col = CommissionSnapshot::overrideYearColumn(max(1, (int) $policy->policy_year));
+            if (isset($vec[$col]) && $vec[$col] !== null) {
+                return new BaseRate(
+                    rate: (float) $vec[$col],
+                    source: "policy_override_vector:hub_to_agent:{$col}",
+                );
+            }
+        }
+
+        // C-21: a single-scalar per-policy override wins over product/snapshot.
         if ($policy->comm_hub_to_agent_rate !== null) {
             return new BaseRate(
                 rate: (float) $policy->comm_hub_to_agent_rate,
