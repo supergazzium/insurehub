@@ -54,11 +54,20 @@ const locale = computed(() => props.locale ?? 'th')
  *  and cascade watchers still walk the full schema so nothing breaks. */
 const visibleSections = computed(() => {
   const all = props.schema?.sections ?? []
-  return all.filter((sec) => {
+  const kept = all.filter((sec) => {
     if (props.only && !props.only.includes(sec.key)) return false
     if (props.exclude && props.exclude.includes(sec.key)) return false
     return true
   })
+  // When `only` is given it also dictates ORDER — the caller lists the
+  // section keys in the sequence it wants them rendered (independent of the
+  // schema's own order). Without `only`, schema order is preserved.
+  if (props.only) {
+    return [...kept].sort(
+      (a, b) => props.only!.indexOf(a.key) - props.only!.indexOf(b.key),
+    )
+  }
+  return kept
 })
 
 function label(f: { label_th: string; label_en: string }): string {

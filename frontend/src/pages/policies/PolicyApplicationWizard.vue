@@ -1021,7 +1021,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           :schema="(productDetail.productType?.riskSchema as unknown as RiskSchema | null)"
           v-model="form.risk"
           locale="th"
-          :only="['beneficiaries', 'riders']"
+          :only="['riders', 'beneficiaries']"
           :product-search-context="productSearchContext"
         />
       </div>
