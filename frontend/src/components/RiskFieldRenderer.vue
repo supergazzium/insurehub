@@ -29,6 +29,10 @@ const props = defineProps<{
   modelValue: Record<string, unknown>
   errors?: Record<string, string>
   locale?: 'th' | 'en'
+  // Render only these section keys (whitelist). Omit for all.
+  only?: string[]
+  // Render every section EXCEPT these keys (blacklist). Omit for none.
+  exclude?: string[]
 }>()
 
 const emit = defineEmits<{
@@ -36,6 +40,20 @@ const emit = defineEmits<{
 }>()
 
 const locale = computed(() => props.locale ?? 'th')
+
+/** Sections to render in THIS instance. `only` (whitelist) and `exclude`
+ *  (blacklist) let the wizard split one schema across two cards — e.g.
+ *  render beneficiaries + riders in the Product section and everything else
+ *  in the Risk section. Filtering happens only at render time; the priming
+ *  and cascade watchers still walk the full schema so nothing breaks. */
+const visibleSections = computed(() => {
+  const all = props.schema?.sections ?? []
+  return all.filter((sec) => {
+    if (props.only && !props.only.includes(sec.key)) return false
+    if (props.exclude && props.exclude.includes(sec.key)) return false
+    return true
+  })
+})
 
 function label(f: { label_th: string; label_en: string }): string {
   return locale.value === 'en' ? f.label_en : f.label_th
@@ -256,8 +274,8 @@ onMounted(() => {
 </script>
 
 <template>
-  <div v-if="schema && schema.sections.length > 0" class="space-y-6">
-    <section v-for="section in schema.sections" :key="section.key" class="space-y-3">
+  <div v-if="schema && visibleSections.length > 0" class="space-y-6">
+    <section v-for="section in visibleSections" :key="section.key" class="space-y-3">
       <h3 class="text-sm font-semibold text-slate-700">{{ label(section) }}</h3>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">

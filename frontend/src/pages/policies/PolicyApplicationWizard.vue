@@ -1002,6 +1002,18 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         :label="t('policyCreate.duration.expiryHint')"
         class="mt-3"
       />
+
+      <!-- ผู้รับผลประโยชน์ + สัญญาเพิ่มเติม (Riders) — ย้ายมาจาก Section
+           รายละเอียด. render จาก risk schema เหมือนเดิม แต่เฉพาะ 2 sections
+           นี้ (มีเฉพาะสินค้าที่ schema ประกาศไว้ เช่น ประกันชีวิต). -->
+      <div v-if="productDetail" class="mt-5 pt-4 border-t border-slate-100">
+        <RiskFieldRenderer
+          :schema="(productDetail.productType?.riskSchema as unknown as RiskSchema | null)"
+          v-model="form.risk"
+          locale="th"
+          :only="['beneficiaries', 'riders']"
+        />
+      </div>
     </section>
 
     <!-- ── Section 3: Risk (dynamic renderer) ───────────────────────────── -->
@@ -1030,6 +1042,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           :schema="(productDetail.productType?.riskSchema as unknown as RiskSchema | null)"
           v-model="form.risk"
           locale="th"
+          :exclude="['beneficiaries', 'riders']"
         />
       </template>
     </section>
