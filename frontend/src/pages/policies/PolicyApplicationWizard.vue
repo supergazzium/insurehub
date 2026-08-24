@@ -279,6 +279,66 @@ const VECTOR_YEAR_LABELS: Record<string, string> = {
  *  the vector grid vs the single rate+amount cards. */
 const isVectorScheme = computed(() => productDetail.value?.commissionRates?.scheme === 'life_years')
 
+/** C-23: live warning when the insured age / sum-assured falls outside every
+ *  RATED hub→agent commission band — the policy would accrue no agent
+ *  commission. Computed from the same product data the grid uses; shown as a
+ *  non-blocking banner. Empty string = no warning. */
+const commissionBandWarning = computed<string>(() => {
+  const pd = productDetail.value
+  const bands = (pd?.commissionBands as Record<string, Array<Record<string, number | null>>> | undefined)?.hubToAgent
+  if (!Array.isArray(bands) || bands.length === 0) return ''  // not a banded product
+
+  const sa = Number(form.coverage) || 0
+  // entry age = effective year - birth year (from the life risk bag)
+  const birthStr = form.risk['insured_person.birth_date'] as string | undefined
+  const effStr = form.effectiveDate
+  let age: number | null = null
+  if (birthStr && effStr) {
+    const by = new Date(birthStr).getFullYear(), ey = new Date(effStr).getFullYear()
+    if (!Number.isNaN(by) && !Number.isNaN(ey)) age = Math.max(0, ey - by)
+  }
+
+  const hasRate = (b: Record<string, number | null>) =>
+    ['yr1', 'yr2', 'yr3', 'yr4', 'yr5', 'yr6Up'].some((k) => b[k] != null)
+
+  const matches = (b: Record<string, number | null>) => {
+    if (b.sumAssuredMin != null && sa < Number(b.sumAssuredMin)) return false
+    if (b.sumAssuredMax != null && sa > Number(b.sumAssuredMax)) return false
+    if (b.entryAgeMin != null || b.entryAgeMax != null) {
+      if (age == null) return false
+      if (b.entryAgeMin != null && age < Number(b.entryAgeMin)) return false
+      if (b.entryAgeMax != null && age > Number(b.entryAgeMax)) return false
+    }
+    return true
+  }
+
+  const rated = bands.filter(hasRate)
+  if (rated.length === 0) return ''  // product has no rates configured — different concern
+  if (rated.some((b) => matches(b))) return ''  // covered
+
+  // Build a reason from the rated bands' ranges.
+  const ageMins = rated.filter((b) => b.entryAgeMin != null).map((b) => Number(b.entryAgeMin))
+  const ageMaxes = rated.filter((b) => b.entryAgeMax != null).map((b) => Number(b.entryAgeMax))
+  const parts: string[] = []
+  if ((ageMins.length || ageMaxes.length) && age == null) {
+    parts.push(t('policyCreate.commissionBandNoAge'))
+  } else if (ageMins.length || ageMaxes.length) {
+    const lo = ageMins.length ? Math.min(...ageMins) : 0
+    const hi = ageMaxes.length ? Math.max(...ageMaxes) : 999
+    if (age != null && (age < lo || age > hi)) parts.push(t('policyCreate.commissionBandAge', { age, lo, hi }))
+  }
+  const saMins = rated.filter((b) => b.sumAssuredMin != null).map((b) => Number(b.sumAssuredMin))
+  const saMaxes = rated.filter((b) => b.sumAssuredMax != null).map((b) => Number(b.sumAssuredMax))
+  if (saMins.length || saMaxes.length) {
+    const lo = saMins.length ? Math.min(...saMins) : 0
+    const hi = saMaxes.length ? Math.max(...saMaxes) : null
+    if (sa < lo || (hi != null && sa > hi)) {
+      parts.push(t('policyCreate.commissionBandSa', { sa: sa.toLocaleString(), lo: lo.toLocaleString(), hi: hi != null ? hi.toLocaleString() : '∞' }))
+    }
+  }
+  return parts.length ? parts.join('; ') : t('policyCreate.commissionBandGeneric')
+})
+
 /** Build the full per-year vector for a direction from the matching
  *  sum-assured band (life). Falls back to the single life_years rate row. */
 function productVector(direction: 'carrierToHub' | 'hubToAgent'): Record<string, number | null> | null {
@@ -1246,6 +1306,16 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <i class="pi" :class="commissionDisplay.frozen ? 'pi-lock' : 'pi-info-circle'" />
           {{ commissionDisplay.frozen ? t('policyCreate.commissionFrozen') : t('policyCreate.commissionWillFreeze') }}
           </span>
+      </div>
+
+      <!-- C-23: non-blocking warning — insured age/SA outside every rated
+           commission band → policy would accrue no agent commission. -->
+      <div v-if="commissionBandWarning" class="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <i class="pi pi-exclamation-triangle mt-0.5" />
+        <div>
+          <div class="font-medium">{{ t('policyCreate.commissionBandTitle') }}</div>
+          <div class="opacity-90">{{ commissionBandWarning }}</div>
+        </div>
       </div>
 
       <!-- C-22: full per-year vector grid (life products). Rows = years,

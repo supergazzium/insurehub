@@ -9,6 +9,7 @@ use App\Http\Resources\PolicyListResource;
 use App\Http\Resources\PolicyResource;
 use App\Mail\PolicyRenewalNoticeMail;
 use App\Models\Policy;
+use App\Services\Commission\CommissionBandCoverage;
 use App\Models\PolicyEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -148,7 +149,7 @@ class PolicyController extends ApiController
             return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType']);
         });
 
-        return (new PolicyResource($policy))->response()->setStatusCode(201);
+        return $this->withBandWarning(new PolicyResource($policy))->response()->setStatusCode(201);
     }
 
     public function show(Request $request, Policy $policy): PolicyResource
@@ -231,7 +232,7 @@ class PolicyController extends ApiController
             return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType']);
         });
 
-        return (new PolicyResource($policy))->response()->setStatusCode(201);
+        return $this->withBandWarning(new PolicyResource($policy))->response()->setStatusCode(201);
     }
 
     /**
@@ -318,6 +319,24 @@ class PolicyController extends ApiController
                 'currentStatus' => $policy->status,
                 'allowedFrom' => ['draft', 'quotation'],
             ], 409));
+        }
+
+        // C-23: for banded products, refuse to finalize a policy whose insured
+        // age / sum-assured falls outside every RATED commission band — that
+        // would silently accrue zero agent commission. Operator can override
+        // with ?allowNoCommission=1 after a conscious decision.
+        if (! $request->boolean('allowNoCommission')) {
+            $cov = CommissionBandCoverage::check($policy->loadMissing('product'));
+            if ($cov['banded'] && ! $cov['covered']) {
+                abort(response()->json([
+                    'code' => 'commission_band_gap',
+                    'message' => 'ไม่พบอัตราค่าคอมมิชชั่นสำหรับกรมธรรม์นี้ — '.$cov['reason'],
+                    'reason' => $cov['reason'],
+                    'entryAge' => $cov['entryAge'],
+                    'sumAssured' => $cov['sumAssured'],
+                    'overridable' => true,
+                ], 422));
+            }
         }
 
         $applicationNo = $policy->application_no
@@ -619,6 +638,27 @@ class PolicyController extends ApiController
         return new PolicyResource(
             $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
         );
+    }
+
+    /**
+     * C-23: attach a NON-blocking commission-band warning to a policy resource
+     * response (used on draft/create). The wizard reads
+     * `commissionBandWarning` to alert the operator that this policy currently
+     * resolves to no agent commission — without blocking the save. Finalize
+     * (promoteToSubmitted) turns the same gap into a hard 422.
+     */
+    private function withBandWarning(PolicyResource $resource): PolicyResource
+    {
+        $cov = CommissionBandCoverage::check($resource->resource->loadMissing('product'));
+        if ($cov['banded'] && ! $cov['covered']) {
+            $resource->additional(['commissionBandWarning' => [
+                'reason' => $cov['reason'],
+                'entryAge' => $cov['entryAge'],
+                'sumAssured' => $cov['sumAssured'],
+            ]]);
+        }
+
+        return $resource;
     }
 
     private function syncChildren(PolicyRequest $request, Policy $policy): void
