@@ -589,6 +589,8 @@ export default {
     dutyStamp: 'Duty stamp',
     vat: 'VAT',
     totalPremiumPaid: 'Total premium paid',
+    totalPremium: 'Total premium',
+    totalPremiumHint: 'Net premium + duty stamp + VAT (auto-calculated, editable)',
     whtAmt: 'WHT amount',
     netCustomerPaid: 'Net customer paid',
     installment: 'Installment plan',

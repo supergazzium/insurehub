@@ -979,6 +979,19 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         </FormField>
       </div>
 
+      <!-- เบี้ยรวม = เบี้ยสุทธิ + อากรแสตมป์ + VAT. ผูกกับ totalPremiumPaid
+           ตัวเดียวกับ Section 4 (เบี้ย + การชำระ) — แก้ที่ใดก็ sync กัน. -->
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+        <FormField :label="t('policyCreate.totalPremium')">
+          <input v-model.number="form.totalPremiumPaid" type="number" min="0" step="0.01"
+            @change="touched.totalPremiumPaid = true"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <p class="text-[10px] text-slate-500 mt-1">
+            <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.totalPremiumHint') }}
+          </p>
+        </FormField>
+      </div>
+
       <DurationChip
         v-if="durationCfg.presets.length > 0 || durationCfg.allowCustomYears"
         v-model="form.expiryDate"
