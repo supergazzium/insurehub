@@ -345,6 +345,14 @@ function vectorPct(direction: 'carrierToHub' | 'hubToAgent', year: string): numb
   return v != null ? +(v * 100).toFixed(3) : null
 }
 
+/** The baht amount for a vector cell: rate x net premium. Computed for
+ *  display alongside the %; the vector stores rates, amounts are derived. */
+function vectorAmount(direction: 'carrierToHub' | 'hubToAgent', year: string): number | null {
+  const v = form.commOverride?.[direction]?.[year]
+  if (v == null) return null
+  return Math.round(v * (Number(form.netPremium) || 0) * 100) / 100
+}
+
 /** Input handler for the "%" rate fields — converts the displayed percent
  *  (0..100) back to the stored 0..1 fraction and marks the rate touched. */
 function onCommRatePct(key: 'commCarrierToHubRate' | 'commHubToAgentRate', raw: string): void {
@@ -1227,19 +1235,26 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
            columns = carrier→hub % and hub→agent %. Defaults from the matching
            sum-assured band; every cell editable per policy. -->
       <div v-if="isVectorScheme" class="overflow-x-auto">
-        <table class="w-full text-sm border-collapse">
+        <table class="text-sm border-collapse">
           <thead>
             <tr class="text-left text-xs text-slate-500">
-              <th class="py-1.5 pr-3 font-medium">{{ t('policyCreate.commissionYear') }}</th>
-              <th class="py-1.5 px-3 font-medium">{{ t('policyCreate.commissionCarrierToHub') }}</th>
-              <th class="py-1.5 px-3 font-medium">{{ t('policyCreate.commissionHubToAgent') }}</th>
+              <th rowspan="2" class="py-1.5 pr-3 font-medium align-bottom">{{ t('policyCreate.commissionYear') }}</th>
+              <th colspan="2" class="py-1.5 px-3 font-medium text-center border-b border-slate-100">{{ t('policyCreate.commissionCarrierToHub') }}</th>
+              <th colspan="2" class="py-1.5 px-3 font-medium text-center border-b border-slate-100">{{ t('policyCreate.commissionHubToAgent') }}</th>
+            </tr>
+            <tr class="text-left text-[10px] text-slate-400">
+              <th class="py-1 px-3 font-normal">{{ t('policyCreate.commissionRatePct') }}</th>
+              <th class="py-1 px-3 font-normal">{{ t('policyCreate.commissionAmount') }}</th>
+              <th class="py-1 px-3 font-normal">{{ t('policyCreate.commissionRatePct') }}</th>
+              <th class="py-1 px-3 font-normal">{{ t('policyCreate.commissionAmount') }}</th>
             </tr>
           </thead>
           <tbody>
             <tr v-for="yr in VECTOR_YEARS" :key="yr" class="border-t border-slate-100">
-              <td class="py-1.5 pr-3 text-slate-600">{{ VECTOR_YEAR_LABELS[yr] }}</td>
+              <td class="py-1.5 pr-3 text-slate-600 whitespace-nowrap">{{ VECTOR_YEAR_LABELS[yr] }}</td>
+              <!-- carrier → hub: rate % (editable) + amount (computed) -->
               <td class="py-1.5 px-3">
-                <div class="relative w-28">
+                <div class="relative w-24">
                   <input
                     :value="vectorPct('carrierToHub', yr)"
                     @input="onVectorInput('carrierToHub', yr, ($event.target as HTMLInputElement).value)"
@@ -1248,8 +1263,12 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
                   <span class="absolute right-2 top-1 text-xs text-slate-400">%</span>
                 </div>
               </td>
+              <td class="py-1.5 px-3 text-right tabular-nums text-slate-500 w-28">
+                {{ vectorAmount('carrierToHub', yr) !== null ? vectorAmount('carrierToHub', yr)!.toLocaleString() : '—' }}
+              </td>
+              <!-- hub → agent: rate % (editable) + amount (computed) -->
               <td class="py-1.5 px-3">
-                <div class="relative w-28">
+                <div class="relative w-24">
                   <input
                     :value="vectorPct('hubToAgent', yr)"
                     @input="onVectorInput('hubToAgent', yr, ($event.target as HTMLInputElement).value)"
@@ -1257,6 +1276,9 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
                     class="w-full border border-slate-200 rounded-md pl-2 pr-6 py-1 text-sm focus:outline-none focus:border-brand-400" />
                   <span class="absolute right-2 top-1 text-xs text-slate-400">%</span>
                 </div>
+              </td>
+              <td class="py-1.5 px-3 text-right tabular-nums text-slate-500 w-28">
+                {{ vectorAmount('hubToAgent', yr) !== null ? vectorAmount('hubToAgent', yr)!.toLocaleString() : '—' }}
               </td>
             </tr>
           </tbody>
