@@ -122,6 +122,7 @@ class CustomerRequest extends FormRequest
                 $isCreate && $isForeign ? 'required' : 'sometimes',
                 'nullable', 'string', 'max:255',
             ],
+            'race' => ['sometimes', 'nullable', 'string', 'max:255'],
             'religion' => ['sometimes', 'nullable', 'string', 'max:255'],
             'birthDate' => ['sometimes', 'nullable', 'date', 'before:today'],
             // Storage is single-letter codes (M/F) after the 2027_02_11
@@ -133,6 +134,7 @@ class CustomerRequest extends FormRequest
             'employerName' => ['sometimes', 'nullable', 'string', 'max:255'],
             'monthlyIncome' => ['sometimes', 'numeric', 'min:0'],
             'email' => ['sometimes', 'nullable', 'email:rfc', 'max:255'],
+            'email2' => ['sometimes', 'nullable', 'email:rfc', 'max:255'],
             'phone' => [
                 'sometimes', 'nullable', 'string',
                 'regex:'.($isForeign ? self::INTL_PHONE_REGEX : self::THAI_PHONE_REGEX),
@@ -142,6 +144,7 @@ class CustomerRequest extends FormRequest
                 'regex:'.($isForeign ? self::INTL_PHONE_REGEX : self::THAI_PHONE_REGEX),
             ],
             'lineId' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'facebookName' => ['sometimes', 'nullable', 'string', 'max:255'],
             'address' => ['sometimes', 'nullable', 'string', 'max:255'],
             'district' => ['sometimes', 'nullable', 'string', 'max:255'],
             'amphoe' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -205,6 +208,7 @@ class CustomerRequest extends FormRequest
             'nationalIdExpiry' => 'national_id_expiry',
             'passport' => 'passport',
             'nationality' => 'nationality',
+            'race' => 'race',
             'religion' => 'religion',
             'birthDate' => 'birth_date',
             'gender' => 'gender',
@@ -214,9 +218,11 @@ class CustomerRequest extends FormRequest
             'employerName' => 'employer_name',
             'monthlyIncome' => 'monthly_income',
             'email' => 'email',
+            'email2' => 'email2',
             'phone' => 'phone',
             'telPhone' => 'tel_phone',
             'lineId' => 'line_id',
+            'facebookName' => 'facebook_name',
             'address' => 'address',
             // Frontend `district` is sub-district (tambon); frontend `amphoe` is district (khet).
             'district' => 'sub_district',

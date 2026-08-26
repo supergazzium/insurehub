@@ -204,6 +204,8 @@ function statusBadge(s: string): string {
               <EditableField entity="customers" :id="customer.id" field="maritalStatus" type="select" :options="MARITAL_OPTIONS" :value="customer.maritalStatus" @update="v => apply('maritalStatus', v)" /></div>
             <div><div class="text-xs text-slate-400">Nationality</div>
               <EditableField entity="customers" :id="customer.id" field="nationality" :value="customer.nationality" @update="v => apply('nationality', v)" /></div>
+            <div><div class="text-xs text-slate-400">เชื้อชาติ</div>
+              <EditableField entity="customers" :id="customer.id" field="race" :value="customer.race" @update="v => apply('race', v)" /></div>
             <div><div class="text-xs text-slate-400">Religion</div>
               <EditableField entity="customers" :id="customer.id" field="religion" :value="customer.religion" @update="v => apply('religion', v)" /></div>
           </div>
@@ -234,8 +236,12 @@ function statusBadge(s: string): string {
               <EditableField entity="customers" :id="customer.id" field="telPhone" :value="customer.telPhone" @update="v => apply('telPhone', v)" /></div>
             <div><div class="text-xs text-slate-400">Line ID</div>
               <EditableField entity="customers" :id="customer.id" field="lineId" :value="customer.lineId" @update="v => apply('lineId', v)" /></div>
+            <div><div class="text-xs text-slate-400">Facebook</div>
+              <EditableField entity="customers" :id="customer.id" field="facebookName" :value="customer.facebookName" @update="v => apply('facebookName', v)" /></div>
             <div><div class="text-xs text-slate-400">Email</div>
               <EditableField entity="customers" :id="customer.id" field="email" :value="customer.email" @update="v => apply('email', v)" /></div>
+            <div><div class="text-xs text-slate-400">Email (สำรอง)</div>
+              <EditableField entity="customers" :id="customer.id" field="email2" :value="customer.email2" @update="v => apply('email2', v)" /></div>
           </div>
         </section>
 

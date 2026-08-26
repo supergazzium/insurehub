@@ -13,6 +13,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import CreateModal from '../../components/CreateModal.vue'
 import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
+import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 import { toIsoDate } from '../../util/dateFormat'
 import { api } from '../../api/client'
 import { fetchProvinces, fetchDistricts, fetchSubDistricts, fetchNamePrefixes, fetchNationalities, type NamePrefixRow, type NationalityRow } from '../../api/portal'
@@ -58,6 +59,42 @@ const availableTitles = computed(() => {
   return namePrefixes.value.filter((p) => p.insuredType === bucket)
 })
 
+// ─── SearchSelect option lists (client-side, from the loaded lookups) ──────
+// Every dropdown backed by a lookup table is rendered through SearchSelect
+// so the operator can type-to-filter. Value = the persisted string; label +
+// sublabel drive the search match and display.
+const titleOptions = computed<SearchOption[]>(() =>
+  availableTitles.value.map((p) => ({
+    value: p.descriptionTh,
+    label: p.descriptionTh,
+    sublabel: p.descriptionEn ?? undefined,
+  })),
+)
+// nation_name_th is the persisted value (matches customers.nationality);
+// nation_name_en is the search-friendly sublabel.
+const nationalityOptions = computed<SearchOption[]>(() =>
+  nationalities.value.map((n) => ({
+    value: n.nameTh,
+    label: n.nameTh,
+    sublabel: n.nameEn ?? undefined,
+  })),
+)
+const provinceOptions = computed<SearchOption[]>(() =>
+  provinces.value.map((p) => ({ value: p, label: p })),
+)
+const registeredDistrictOptions = computed<SearchOption[]>(() =>
+  registeredDistricts.value.map((d) => ({ value: d, label: d })),
+)
+const registeredSubDistrictOptions = computed<SearchOption[]>(() =>
+  registeredSubDistricts.value.map((s) => ({ value: s.name, label: s.name, sublabel: s.postcode })),
+)
+const mailingDistrictOptions = computed<SearchOption[]>(() =>
+  mailingDistricts.value.map((d) => ({ value: d, label: d })),
+)
+const mailingSubDistrictOptions = computed<SearchOption[]>(() =>
+  mailingSubDistricts.value.map((s) => ({ value: s.name, label: s.name, sublabel: s.postcode })),
+)
+
 // Switching customer type resets every field whose meaning changes across
 // types: title (Individual bucket vs Corporate), Thai ID vs passport, and
 // the corporate-only juristicName/taxId. Prevents stale data from leaking
@@ -67,8 +104,11 @@ watch(() => form.customerType, () => {
   form.idCard = ''
   form.passport = ''
   form.nationality = ''
+  form.race = ''
   form.juristicName = ''
   form.taxId = ''
+  // Re-seed ไทย for Thai individuals after the reset above.
+  applyPersonDefaults()
 })
 
 // ─── Form state ───────────────────────────────────────────────────────────
@@ -86,7 +126,10 @@ const form = reactive({
   idCard: '',
   // Foreign individual only
   passport: '',
+  // สัญชาติ (nationality) — shown for all persons; defaults ไทย for
+  // Thai individuals. เชื้อชาติ (race) reuses the nationalities lookup.
   nationality: '',
+  race: '',
   // Corporate only
   juristicName: '',
   taxId: '',
@@ -94,6 +137,11 @@ const form = reactive({
   phone: '',
   telPhone: '',
   email: '',
+  // Optional second email (maps to customers.email2).
+  email2: '',
+  // Social media (optional, all types)
+  facebookName: '',
+  lineId: '',
   // Registered address
   address: '',
   province: '',
@@ -108,6 +156,20 @@ const form = reactive({
   mailingSubDistrict: '',
   mailingPostcode: '',
 })
+
+// The optional second email row only shows once the operator asks for it
+// (or when editing a customer that already has an email2).
+const showSecondEmail = ref(false)
+
+/** ไทย is the sensible default nationality + race for Thai individuals.
+ *  Foreign individuals must pick explicitly (no default); corporate has
+ *  neither field. Applied on open and whenever the type flips. */
+function applyPersonDefaults(): void {
+  if (form.customerType === 'individual') {
+    if (form.nationality === '') form.nationality = 'ไทย'
+    if (form.race === '') form.race = 'ไทย'
+  }
+}
 
 // ─── Auto-generated customer code ─────────────────────────────────────────
 const codeLoading = ref(false)
@@ -236,6 +298,7 @@ const errNationality = computed(() => validateNationality())
 const errPhone = computed(() => validateMobile(form.phone))
 const errTelPhone = computed(() => validateLandline(form.telPhone))
 const errEmail = computed(() => validateEmailFmt(form.email))
+const errEmail2 = computed(() => validateEmailFmt(form.email2))
 const errBirth = computed(() => validateBirthDate(form.birthDate))
 
 // ─── Touched + display gate ──────────────────────────────────────────────
@@ -244,11 +307,11 @@ const errBirth = computed(() => validateBirthDate(form.birthDate))
 type FieldName =
   | 'firstName' | 'lastName' | 'juristicName' | 'gender'
   | 'idCard' | 'taxId' | 'passport' | 'nationality'
-  | 'phone' | 'telPhone' | 'email' | 'birthDate'
+  | 'phone' | 'telPhone' | 'email' | 'email2' | 'birthDate'
 const touched = reactive<Record<FieldName, boolean>>({
   firstName: false, lastName: false, juristicName: false, gender: false,
   idCard: false, taxId: false, passport: false, nationality: false,
-  phone: false, telPhone: false, email: false, birthDate: false,
+  phone: false, telPhone: false, email: false, email2: false, birthDate: false,
 })
 const attemptedSubmit = ref(false)
 function markTouched(field: FieldName): void { touched[field] = true }
@@ -268,6 +331,7 @@ const showNationality = computed(() => displayError('nationality', errNationalit
 const showPhone = computed(() => displayError('phone', errPhone.value))
 const showTelPhone = computed(() => displayError('telPhone', errTelPhone.value))
 const showEmail = computed(() => displayError('email', errEmail.value))
+const showEmail2 = computed(() => displayError('email2', errEmail2.value))
 const showBirth = computed(() => displayError('birthDate', errBirth.value))
 
 // ─── Green-check state — filled-in AND passing all rules ─────────────────
@@ -294,6 +358,7 @@ const nationalityValid = computed(() =>
 const phoneValid = computed(() => isFieldValid(errPhone.value, form.phone.trim() !== ''))
 const telPhoneValid = computed(() => isFieldValid(errTelPhone.value, form.telPhone.trim() !== ''))
 const emailValid = computed(() => isFieldValid(errEmail.value, form.email.trim() !== ''))
+const email2Valid = computed(() => isFieldValid(errEmail2.value, form.email2.trim() !== ''))
 const birthValid = computed(() => isFieldValid(errBirth.value, form.birthDate !== ''))
 
 // ─── Input class helper (rose/emerald/slate borders) ─────────────────────
@@ -380,6 +445,7 @@ const canSubmit = computed(() => {
   if (errPhone.value !== null) return false
   if (errTelPhone.value !== null) return false
   if (errEmail.value !== null) return false
+  if (errEmail2.value !== null) return false
   if (errBirth.value !== null) return false
   return true
 })
@@ -405,6 +471,7 @@ function collectValidationProblems(): string[] {
   push('โทรศัพท์มือถือ', errPhone.value)
   push('โทรศัพท์บ้าน', errTelPhone.value)
   push('อีเมล', errEmail.value)
+  push('อีเมล (สำรอง)', errEmail2.value)
   push('วันเกิด', errBirth.value)
   return problems
 }
@@ -417,6 +484,9 @@ const payload = computed(() => {
     phone: form.phone.trim() || null,
     telPhone: form.telPhone.trim() || null,
     email: form.email.trim() || null,
+    email2: form.email2.trim() || null,
+    lineId: form.lineId.trim() || null,
+    facebookName: form.facebookName.trim() || null,
     address: form.address.trim() || null,
     province: form.province || null,
     amphoe: form.amphoe || null,
@@ -432,6 +502,9 @@ const payload = computed(() => {
     base.lastName = form.lastName.trim() || null
     base.nickname = form.nickname.trim() || null
     base.idCard = form.idCard.trim() || null
+    // สัญชาติ + เชื้อชาติ (default ไทย) are sent for Thai individuals too.
+    base.nationality = form.nationality || null
+    base.race = form.race || null
     base.gender = form.gender || null
     base.birthDate = form.birthDate || null
   } else if (form.customerType === 'foreign_individual') {
@@ -443,6 +516,7 @@ const payload = computed(() => {
     // canonical form; server also enforces ^[A-Z0-9]{6,12}$.
     base.passport = form.passport.trim().toUpperCase() || null
     base.nationality = form.nationality || null
+    base.race = form.race || null
     base.gender = form.gender || null
     base.birthDate = form.birthDate || null
   } else {
@@ -471,14 +545,16 @@ watch(
         customerType: 'individual',
         titleTh: '', firstName: '', lastName: '', nickname: '',
         idCard: '', gender: '', birthDate: '',
-        passport: '', nationality: '',
+        passport: '', nationality: '', race: '',
         juristicName: '', taxId: '',
-        phone: '', telPhone: '', email: '',
+        phone: '', telPhone: '', email: '', email2: '',
+        facebookName: '', lineId: '',
         address: '', province: '', amphoe: '', subDistrict: '', postcode: '',
         mailingSameAsRegistered: true,
         mailingAddress: '', mailingProvince: '', mailingAmphoe: '',
         mailingSubDistrict: '', mailingPostcode: '',
       })
+      showSecondEmail.value = false
       registeredDistricts.value = []
       registeredSubDistricts.value = []
       mailingDistricts.value = []
@@ -491,6 +567,8 @@ watch(
       void loadNamePrefixes()
       void loadNationalities()
       void suggestCode()
+      // ไทย defaults for the Thai-individual starting state.
+      applyPersonDefaults()
     }
   },
 )
@@ -545,14 +623,8 @@ watch(
              differ per type; the fields common to both stay here. -->
         <template v-if="isPerson">
           <FormField label="คำนำหน้า" error-key="titleTh" :errors="fieldErrors"
-            hint="รายการดึงมาจากตาราง name_prefixes">
-            <select v-model="form.titleTh"
-              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-              <option value="">—</option>
-              <option v-for="p in availableTitles" :key="p.id" :value="p.descriptionTh">
-                {{ p.descriptionTh }}<span v-if="p.descriptionEn" class="text-slate-400"> · {{ p.descriptionEn }}</span>
-              </option>
-            </select>
+            hint="พิมพ์เพื่อค้นหา (ดึงจากตาราง name_prefixes)">
+            <SearchSelect v-model="form.titleTh" :options="titleOptions" placeholder="— เลือก —" />
           </FormField>
           <FormField label="ชื่อเล่น" error-key="nickname" :errors="fieldErrors">
             <input v-model.trim="form.nickname"
@@ -612,18 +684,24 @@ watch(
             </div>
             <p v-if="showPassport" class="text-xs text-rose-600 mt-0.5">{{ showPassport }}</p>
           </FormField>
-          <FormField v-if="form.customerType === 'foreign_individual'"
-            label="สัญชาติ (Nationality)" required error-key="nationality" :errors="fieldErrors">
-            <div class="relative">
-              <select v-model="form.nationality" @blur="markTouched('nationality')"
-                :class="[inputClass(showNationality, nationalityValid), 'bg-white']">
-                <option value="">— เลือก —</option>
-                <option v-for="n in nationalities" :key="n.id" :value="n.nameTh">
-                  {{ n.nameTh }}<span v-if="n.nameEn" class="text-slate-400"> · {{ n.nameEn }}</span>
-                </option>
-              </select>
-            </div>
+          <!-- สัญชาติ + เชื้อชาติ — shown for ALL persons. Thai individuals
+               default to ไทย; foreign individuals must pick a nationality
+               (server requires it). Both are searchable lookups. -->
+          <FormField
+            :label="form.customerType === 'foreign_individual' ? 'สัญชาติ (Nationality)' : 'สัญชาติ'"
+            :required="form.customerType === 'foreign_individual'"
+            error-key="nationality" :errors="fieldErrors">
+            <SearchSelect
+              v-model="form.nationality" :options="nationalityOptions"
+              placeholder="พิมพ์เพื่อค้นหาสัญชาติ…"
+              :input-class="[inputClass(showNationality, nationalityValid), 'bg-white'].join(' ')"
+              @blur="markTouched('nationality')" />
             <p v-if="showNationality" class="text-xs text-rose-600 mt-0.5">{{ showNationality }}</p>
+          </FormField>
+          <FormField label="เชื้อชาติ" error-key="race" :errors="fieldErrors">
+            <SearchSelect
+              v-model="form.race" :options="nationalityOptions"
+              placeholder="พิมพ์เพื่อค้นหาเชื้อชาติ…" />
           </FormField>
 
           <FormField label="เพศ" required error-key="gender" :errors="fieldErrors">
@@ -649,14 +727,8 @@ watch(
         <!-- Juristic block -->
         <template v-if="form.customerType === 'corporate'">
           <FormField label="คำนำหน้า (นิติบุคคล)" class="col-span-2" error-key="titleTh" :errors="fieldErrors"
-            hint="เลือกประเภทของนิติบุคคล (บริษัท / ห้างหุ้นส่วน / ร้าน …)">
-            <select v-model="form.titleTh"
-              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-              <option value="">—</option>
-              <option v-for="p in availableTitles" :key="p.id" :value="p.descriptionTh">
-                {{ p.descriptionTh }}<span v-if="p.descriptionEn" class="text-slate-400"> · {{ p.descriptionEn }}</span>
-              </option>
-            </select>
+            hint="พิมพ์เพื่อค้นหาประเภทนิติบุคคล (บริษัท / ห้างหุ้นส่วน / ร้าน …)">
+            <SearchSelect v-model="form.titleTh" :options="titleOptions" placeholder="— เลือก —" />
           </FormField>
           <FormField label="ชื่อนิติบุคคล" required class="col-span-2" error-key="juristicName" :errors="fieldErrors">
             <div class="relative">
@@ -707,6 +779,44 @@ watch(
           <p v-if="showEmail" class="text-xs text-rose-600 mt-0.5">{{ showEmail }}</p>
         </FormField>
 
+        <!-- Optional second email. Storage has two email columns
+             (email + email2); the operator opts in with "add another". -->
+        <div v-if="!showSecondEmail && !form.email2" class="col-span-2 -mt-1">
+          <button type="button" @click="showSecondEmail = true"
+            class="text-xs px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50">
+            <i class="pi pi-plus" /> เพิ่มอีเมล
+          </button>
+        </div>
+        <FormField v-if="showSecondEmail || form.email2" label="อีเมล (สำรอง)" class="col-span-2"
+          error-key="email2" :errors="fieldErrors">
+          <div class="relative flex gap-2 items-start">
+            <div class="relative flex-1">
+              <input v-model.trim="form.email2" type="email" placeholder="name2@example.com"
+                :class="inputClass(showEmail2, email2Valid)"
+                @blur="markTouched('email2')" />
+              <i v-if="email2Valid" class="pi pi-check text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2 text-xs" />
+            </div>
+            <button type="button" @click="form.email2 = ''; showSecondEmail = false"
+              class="px-2 py-1.5 rounded border border-slate-300 text-slate-500 hover:bg-slate-50 text-xs">
+              <i class="pi pi-trash" />
+            </button>
+          </div>
+          <p v-if="showEmail2" class="text-xs text-rose-600 mt-0.5">{{ showEmail2 }}</p>
+        </FormField>
+
+        <!-- Social media (optional, all types) -->
+        <div class="col-span-2 border-t border-slate-200 pt-3 mt-2">
+          <div class="text-sm font-semibold text-slate-700 mb-2">โซเชียลมีเดีย</div>
+        </div>
+        <FormField label="Facebook" error-key="facebookName" :errors="fieldErrors">
+          <input v-model.trim="form.facebookName" placeholder="ชื่อ / ลิงก์ Facebook"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <FormField label="LINE ID" error-key="lineId" :errors="fieldErrors">
+          <input v-model.trim="form.lineId" placeholder="@lineid"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+
         <!-- Registered address -->
         <div class="col-span-2 border-t border-slate-200 pt-3 mt-2">
           <div class="text-sm font-semibold text-slate-700 mb-2">ที่อยู่ตามทะเบียนบ้าน</div>
@@ -716,25 +826,15 @@ watch(
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
         <FormField label="จังหวัด" error-key="province" :errors="fieldErrors">
-          <select v-model="form.province"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-            <option value="">— เลือก —</option>
-            <option v-for="p in provinces" :key="p" :value="p">{{ p }}</option>
-          </select>
+          <SearchSelect v-model="form.province" :options="provinceOptions" placeholder="พิมพ์เพื่อค้นหาจังหวัด…" />
         </FormField>
         <FormField label="อำเภอ / เขต" error-key="amphoe" :errors="fieldErrors">
-          <select v-model="form.amphoe" :disabled="!form.province"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400 disabled:bg-slate-50">
-            <option value="">— เลือก —</option>
-            <option v-for="d in registeredDistricts" :key="d" :value="d">{{ d }}</option>
-          </select>
+          <SearchSelect v-model="form.amphoe" :options="registeredDistrictOptions"
+            :disabled="!form.province" disabled-hint="เลือกจังหวัดก่อน" placeholder="พิมพ์เพื่อค้นหาอำเภอ…" />
         </FormField>
         <FormField label="ตำบล / แขวง" error-key="district" :errors="fieldErrors">
-          <select v-model="form.subDistrict" :disabled="!form.amphoe"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400 disabled:bg-slate-50">
-            <option value="">— เลือก —</option>
-            <option v-for="s in registeredSubDistricts" :key="s.name" :value="s.name">{{ s.name }}</option>
-          </select>
+          <SearchSelect v-model="form.subDistrict" :options="registeredSubDistrictOptions"
+            :disabled="!form.amphoe" disabled-hint="เลือกอำเภอก่อน" placeholder="พิมพ์เพื่อค้นหาตำบล…" />
         </FormField>
         <FormField label="รหัสไปรษณีย์" error-key="postcode" :errors="fieldErrors">
           <input v-model.trim="form.postcode" maxlength="5" readonly
@@ -763,25 +863,15 @@ watch(
               class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
           </FormField>
           <FormField label="จังหวัด (จัดส่ง)" error-key="mailing.province" :errors="fieldErrors">
-            <select v-model="form.mailingProvince"
-              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-              <option value="">— เลือก —</option>
-              <option v-for="p in provinces" :key="p" :value="p">{{ p }}</option>
-            </select>
+            <SearchSelect v-model="form.mailingProvince" :options="provinceOptions" placeholder="พิมพ์เพื่อค้นหาจังหวัด…" />
           </FormField>
           <FormField label="อำเภอ / เขต (จัดส่ง)" error-key="mailing.district" :errors="fieldErrors">
-            <select v-model="form.mailingAmphoe" :disabled="!form.mailingProvince"
-              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400 disabled:bg-slate-50">
-              <option value="">— เลือก —</option>
-              <option v-for="d in mailingDistricts" :key="d" :value="d">{{ d }}</option>
-            </select>
+            <SearchSelect v-model="form.mailingAmphoe" :options="mailingDistrictOptions"
+              :disabled="!form.mailingProvince" disabled-hint="เลือกจังหวัดก่อน" placeholder="พิมพ์เพื่อค้นหาอำเภอ…" />
           </FormField>
           <FormField label="ตำบล / แขวง (จัดส่ง)" error-key="mailing.subDistrict" :errors="fieldErrors">
-            <select v-model="form.mailingSubDistrict" :disabled="!form.mailingAmphoe"
-              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400 disabled:bg-slate-50">
-              <option value="">— เลือก —</option>
-              <option v-for="s in mailingSubDistricts" :key="s.name" :value="s.name">{{ s.name }}</option>
-            </select>
+            <SearchSelect v-model="form.mailingSubDistrict" :options="mailingSubDistrictOptions"
+              :disabled="!form.mailingAmphoe" disabled-hint="เลือกอำเภอก่อน" placeholder="พิมพ์เพื่อค้นหาตำบล…" />
           </FormField>
           <FormField label="รหัสไปรษณีย์ (จัดส่ง)" error-key="mailing.postcode" :errors="fieldErrors">
             <input v-model.trim="form.mailingPostcode" maxlength="5" readonly

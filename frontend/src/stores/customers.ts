@@ -81,6 +81,7 @@ export interface Customer {
   nationalIdExpiry: string | null
   passport: string
   nationality: string
+  race: string
   religion: string
   birthDate: string
   gender: Gender
@@ -90,9 +91,11 @@ export interface Customer {
   employerName: string
   monthlyIncome: number
   email: string
+  email2: string
   phone: string
   telPhone: string
   lineId: string
+  facebookName: string
   address: string
   district: string
   amphoe: string
