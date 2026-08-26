@@ -566,6 +566,57 @@ watch(() => form.whtAmt, () => {
   if (!touched.netCustomerPaid) form.netCustomerPaid = Math.round((form.totalPremiumPaid - form.whtAmt) * 100) / 100
 })
 
+// ── Tax formulas (สูตร 1–4, ported from the Access form) ─────────────────
+// The gross VAT/duty-inclusive amount is เบี้ยรวม (form.totalPremiumPaid, the
+// same field bound to Section 2). Each formula back-solves เบี้ยสุทธิ
+// (netPremium), อากรแสตมป์ (dutyStamp) and VAT (vat) from that gross.
+// Buttons set the touched flags on the fields they compute so the forward
+// net→duty→vat→total watcher (L556) does NOT clobber the result; the operator
+// can still override any single field afterwards.
+const round2 = (x: number) => Math.round(x * 100) / 100
+
+/** Access `-Int(-x)` on a non-negative amount = round UP to the next integer. */
+const ceilInt = (x: number) => Math.ceil(x)
+
+function applyFormula(net: number, duty: number, vat: number) {
+  form.netPremium = round2(net)
+  form.dutyStamp = round2(duty)
+  form.vat = round2(vat)
+  // Total is the gross the operator supplied; keep it as-is and protect it.
+  form.totalPremiumPaid = round2(form.totalPremiumPaid)
+  touched.dutyStamp = true
+  touched.vat = true
+  touched.totalPremiumPaid = true
+  form.netCustomerPaid = round2(form.totalPremiumPaid - (form.whtAmt ?? 0))
+}
+
+function runFormula(n: 1 | 2 | 3 | 4) {
+  const gross = Number(form.totalPremiumPaid) || 0
+  if (n === 1) {
+    // Iterative back-solve: duty = ceil(net*0.4%), vat = (duty+net)*7%,
+    // net = gross - vat - duty. Converges to <0.01 baht.
+    let premium = gross
+    let duty = 0
+    let vat = 0
+    let prev: number
+    let i = 0
+    do {
+      prev = premium
+      duty = ceilInt(premium * 0.004)
+      vat = (duty + premium) * 0.07
+      premium = gross - vat - duty
+      i++
+    } while (Math.abs(premium - prev) >= 0.01 && i < 100)
+    applyFormula(premium, duty, vat)
+  } else if (n === 2) {
+    applyFormula(gross / 1.07, 0, 0)
+  } else if (n === 3) {
+    applyFormula(gross - 20, 20, 0)
+  } else {
+    applyFormula(gross - 150, 150, 0)
+  }
+}
+
 // ── BroadcastChannel bridge (KEEP verbatim per B3 §9) ────────────────────
 
 type CreatedKind = 'customer:created' | 'product:created'
@@ -1268,6 +1319,22 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             @change="touched.netCustomerPaid = true"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
+      </div>
+
+      <!-- สูตร 1–4: back-solve เบี้ยสุทธิ/อากร/VAT from เบี้ยรวม (gross).
+           Ported from the Access form. Each button computes differently by
+           product type; the operator can still override any field after. -->
+      <div class="mt-3">
+        <span class="text-[10px] uppercase tracking-wider text-slate-400 mr-2">{{ t('policyCreate.taxFormula') }}</span>
+        <div class="flex flex-wrap gap-2 mt-1">
+          <button v-for="n in ([1, 2, 3, 4] as const)" :key="n" type="button" @click="runFormula(n)"
+            class="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-brand-50 hover:border-brand-300 focus:outline-none focus:border-brand-400">
+            {{ t(`policyCreate.formula${n}`) }}
+          </button>
+        </div>
+        <p class="text-[10px] text-slate-500 mt-1">
+          <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.taxFormulaHint') }}
+        </p>
       </div>
 
       <p class="text-[10px] text-slate-500 mt-2">
