@@ -550,6 +550,21 @@ function applyPriorAsset(asset: PriorAsset): void {
   form.risk = { ...form.risk, ...patch }
 }
 
+// ── Payment frequency (งวดการชำระ) by product type ───────────────────────
+// ประกันชีวิต (Life): monthly / quarterly / semiannual / annual / single.
+// ประกันวินาศภัย (Non-Life) + ภาษี (Tax): annual only.
+type PremiumMode = typeof form.premiumMode
+const premiumModeOptions = computed<PremiumMode[]>(() =>
+  form.insureType === 'Life'
+    ? ['monthly', 'quarterly', 'semiannual', 'annual', 'single']
+    : ['annual'],
+)
+// When the product type changes, snap premiumMode back to a valid option
+// (defaults to annual, which is valid for every type).
+watch(() => form.insureType, () => {
+  if (!premiumModeOptions.value.includes(form.premiumMode)) form.premiumMode = 'annual'
+})
+
 // ── Premium recalc watchers (KEEP verbatim per B3 §9) ────────────────────
 // The Access-parity math: duty = 0.4% net, vat = 7% (net + duty), total =
 // net + duty + vat. Rounded to 2dp. Operator overrides win via touched flags.
@@ -1346,11 +1361,9 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <FormField :label="t('policyCreate.premiumMode')">
           <select v-model="form.premiumMode"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-            <option value="annual">Annual</option>
-            <option value="single">Single</option>
-            <option value="monthly">Monthly</option>
-            <option value="quarterly">Quarterly</option>
-            <option value="semiannual">Semiannual</option>
+            <option v-for="m in premiumModeOptions" :key="m" :value="m">
+              {{ t(`policyCreate.premiumModes.${m}`) }}
+            </option>
           </select>
         </FormField>
         <FormField :label="t('policyCreate.installmentTerm')">
