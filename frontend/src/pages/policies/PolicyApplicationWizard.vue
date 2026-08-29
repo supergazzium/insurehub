@@ -80,7 +80,10 @@ const form = reactive({
   refAppToId: '' as string,
   customerId: '' as string,
   writingAgentId: '' as string,
+  // application_no (เลขที่ใบสมัคร) + job_no (เลขงาน) are auto-run by the
+  // backend at draft creation — read-only in the wizard.
   applicationNo: '' as string,
+  jobNo: '' as string,
   notionNo: '' as string,
 
   // Step 2 — Product + Coverage
@@ -103,6 +106,11 @@ const form = reactive({
   risk: {} as Record<string, unknown>,
 
   // Step 4 — Premium
+  // เบี้ยรวม (Section 2) = the MAIN premium the operator types. It is the
+  // gross the tax formulas back-solve from; for life the formula also adds
+  // the riders' premiums on top. Distinct from totalPremiumPaid, which is
+  // the computed รวมเบี้ยที่ต้องชำระ (main + riders + duty + vat).
+  grossPremiumInput: 0 as number,
   netPremium: 0 as number,
   mainPremium: 0 as number,
   dutyStamp: 0 as number,
@@ -140,6 +148,7 @@ const touched = reactive({
   dutyStamp: false,
   vat: false,
   totalPremiumPaid: false,
+  whtAmt: false,
   netCustomerPaid: false,
   commCarrierToHubRate: false,
   commCarrierToHubAmount: false,
@@ -573,13 +582,28 @@ watch(() => form.netPremium, (net) => {
   if (!touched.dutyStamp) form.dutyStamp = Math.round(net * 0.004 * 100) / 100
   if (!touched.vat) form.vat = Math.round((net + (form.dutyStamp ?? 0)) * 0.07 * 100) / 100
   if (!touched.totalPremiumPaid) form.totalPremiumPaid = Math.round((net + form.dutyStamp + form.vat) * 100) / 100
-  if (!touched.netCustomerPaid) form.netCustomerPaid = Math.round((form.totalPremiumPaid - (form.whtAmt ?? 0)) * 100) / 100
   if (!touched.mainPremium) form.mainPremium = net
   if (!form.annualPremium) form.annualPremium = net
 })
-watch(() => form.whtAmt, () => {
-  if (!touched.netCustomerPaid) form.netCustomerPaid = Math.round((form.totalPremiumPaid - form.whtAmt) * 100) / 100
-})
+
+// ── ยอดหัก ณ ที่จ่าย (WHT) = (เบี้ยสุทธิ + อากรแสตมป์) × 1%. Auto unless the
+//    operator edits it. Recomputes when net or duty changes.
+const WHT_RATE = 0.01
+function recomputeWht(): void {
+  if (touched.whtAmt) return
+  form.whtAmt = Math.round(((Number(form.netPremium) || 0) + (Number(form.dutyStamp) || 0)) * WHT_RATE * 100) / 100
+}
+watch(() => [form.netPremium, form.dutyStamp], recomputeWht)
+
+// ── ยอดสุทธิที่ต้องชำระ = รวมเบี้ยที่ต้องชำระ − ส่วนลด − ยอดหัก ณ ที่จ่าย.
+//    Auto unless edited. Recomputes when total / discount / wht changes.
+function recomputeNetCustomerPaid(): void {
+  if (touched.netCustomerPaid) return
+  form.netCustomerPaid = Math.round(
+    ((Number(form.totalPremiumPaid) || 0) - (Number(form.discountAmount) || 0) - (Number(form.whtAmt) || 0)) * 100,
+  ) / 100
+}
+watch(() => [form.totalPremiumPaid, form.discountAmount, form.whtAmt], recomputeNetCustomerPaid)
 
 // ── Tax formulas (สูตร 1–4, ported from the Access form) ─────────────────
 // The gross VAT/duty-inclusive amount is เบี้ยรวม (form.totalPremiumPaid, the
@@ -593,20 +617,76 @@ const round2 = (x: number) => Math.round(x * 100) / 100
 /** Access `-Int(-x)` on a non-negative amount = round UP to the next integer. */
 const ceilInt = (x: number) => Math.ceil(x)
 
-function applyFormula(net: number, duty: number, vat: number) {
+/** Sum of the rider premiums (form.risk['riders.rows'][].premium). For life
+ *  products the total premium must include the riders' premiums. */
+const riderPremiumTotal = computed<number>(() => {
+  const rows = form.risk['riders.rows']
+  if (!Array.isArray(rows)) return 0
+  return rows.reduce((sum, r) => {
+    const p = Number((r as Record<string, unknown>)?.premium)
+    return sum + (Number.isFinite(p) ? p : 0)
+  }, 0)
+})
+
+/** Which formula buttons show. ประกันชีวิต (Life) uses only สูตร 2; every
+ *  other product type gets all four. */
+const visibleFormulas = computed<(1 | 2 | 3 | 4)[]>(() =>
+  form.insureType === 'Life' ? [2] : [1, 2, 3, 4],
+)
+
+// ── Per-rider commission (ค่าคอมมิชชั่น Inh % / Agent %) ──────────────────
+// These used to be columns in the rider table (สินค้า section). They now
+// live in the commission section as a per-rider table, editing the same
+// form.risk['riders.rows'][i].rate_inh / rate_ag the schema no longer renders.
+const riderRows = computed<Record<string, unknown>[]>(() => {
+  const rows = form.risk['riders.rows']
+  return Array.isArray(rows) ? (rows as Record<string, unknown>[]) : []
+})
+
+/** Read a rider's rate_inh / rate_ag as a display number (or ''). */
+function riderRate(idx: number, key: 'rate_inh' | 'rate_ag'): number | '' {
+  const v = riderRows.value[idx]?.[key]
+  return v === null || v === undefined || v === '' ? '' : Number(v)
+}
+
+/** Write a rider's rate_inh / rate_ag back into the risk bag immutably. */
+function setRiderRate(idx: number, key: 'rate_inh' | 'rate_ag', raw: string): void {
+  const rows = riderRows.value.slice()
+  if (!rows[idx]) return
+  const n = raw === '' ? null : Number(raw)
+  rows[idx] = { ...rows[idx], [key]: Number.isFinite(n as number) ? n : null }
+  form.risk = { ...form.risk, 'riders.rows': rows }
+}
+
+/** Label for a rider row in the commission table (its picked name or index). */
+function riderLabel(idx: number): string {
+  const name = riderRows.value[idx]?.name
+  return (typeof name === 'string' && name.trim()) ? name : `${t('policyCreate.riders.title')} #${idx + 1}`
+}
+
+/** @param gross the VAT/duty-inclusive amount the formula back-solved from;
+ *  it becomes รวมเบี้ยที่ต้องชำระ (may include rider premiums for life). */
+function applyFormula(net: number, duty: number, vat: number, gross: number) {
   form.netPremium = round2(net)
   form.dutyStamp = round2(duty)
   form.vat = round2(vat)
-  // Total is the gross the operator supplied; keep it as-is and protect it.
-  form.totalPremiumPaid = round2(form.totalPremiumPaid)
+  form.totalPremiumPaid = round2(gross)
   touched.dutyStamp = true
   touched.vat = true
   touched.totalPremiumPaid = true
-  form.netCustomerPaid = round2(form.totalPremiumPaid - (form.whtAmt ?? 0))
+  // Re-derive WHT + net-customer-paid from the freshly-computed net/duty
+  // (unless the operator has pinned them).
+  recomputeWht()
+  recomputeNetCustomerPaid()
 }
 
 function runFormula(n: 1 | 2 | 3 | 4) {
-  const gross = Number(form.totalPremiumPaid) || 0
+  // Base = เบี้ยรวม (grossPremiumInput = main premium the operator entered).
+  // For life the total premium also includes the riders' premiums, so fold
+  // them in. Idempotent: derived from the entered main premium + riders each
+  // click, never by re-reading a value we already inflated.
+  const riderAdd = form.insureType === 'Life' ? riderPremiumTotal.value : 0
+  const gross = round2((Number(form.grossPremiumInput) || 0) + riderAdd)
   if (n === 1) {
     // Iterative back-solve: duty = ceil(net*0.4%), vat = (duty+net)*7%,
     // net = gross - vat - duty. Converges to <0.01 baht.
@@ -622,13 +702,13 @@ function runFormula(n: 1 | 2 | 3 | 4) {
       premium = gross - vat - duty
       i++
     } while (Math.abs(premium - prev) >= 0.01 && i < 100)
-    applyFormula(premium, duty, vat)
+    applyFormula(premium, duty, vat, gross)
   } else if (n === 2) {
-    applyFormula(gross / 1.07, 0, 0)
+    applyFormula(gross / 1.07, 0, 0, gross)
   } else if (n === 3) {
-    applyFormula(gross - 20, 20, 0)
+    applyFormula(gross - 20, 20, 0, gross)
   } else {
-    applyFormula(gross - 150, 150, 0)
+    applyFormula(gross - 150, 150, 0, gross)
   }
 }
 
@@ -698,7 +778,11 @@ async function doAutosave(): Promise<void> {
     const payload = buildDraftPayload()
     if (!draftId.value) {
       const res = await createDraftPolicy(payload)
-      draftId.value = (res.data as unknown as { id: string }).id
+      const created = res.data as unknown as { id: string; applicationNo?: string; jobNo?: string }
+      draftId.value = created.id
+      // Reflect the auto-run numbers the backend minted at draft creation.
+      if (created.applicationNo) form.applicationNo = created.applicationNo
+      if (created.jobNo) form.jobNo = created.jobNo
       flash.value = t('policyCreate.action.draftSaved')
     } else {
       await updateDraftPolicy(draftId.value, payload)
@@ -731,6 +815,7 @@ function buildDraftPayload(): Record<string, unknown> {
     newOrRenew: form.newOrRenew,
     refAppToId: form.refAppToId || null,
     applicationNo: form.applicationNo || null,
+    jobNo: form.jobNo || null,
     notionNo: form.notionNo || null,
     appDate: form.appDate || null,
     effectiveDate: form.effectiveDate || null,
@@ -740,7 +825,8 @@ function buildDraftPayload(): Record<string, unknown> {
     coverage: form.coverage || 0,
     discountAmount: form.discountAmount || 0,
     netPremium: form.netPremium || 0,
-    mainPremium: form.mainPremium || 0,
+    // เบี้ยรวม (main premium the operator entered) persists to main_premium.
+    mainPremium: form.grossPremiumInput || form.mainPremium || 0,
     dutyStamp: form.dutyStamp || 0,
     vat: form.vat || 0,
     totalPremiumPaid: form.totalPremiumPaid || 0,
@@ -879,6 +965,7 @@ async function hydrateFromDraft(id: string): Promise<void> {
     form.newOrRenew = (p.newOrRenew as 'new' | 'renew' | null) ?? 'new'
     form.refAppToId = String(p.refAppToId ?? '')
     form.applicationNo = String(p.applicationNo ?? '')
+    form.jobNo = String(p.jobNo ?? '')
     form.notionNo = String(p.notionNo ?? '')
     form.appDate = String(p.appDate ?? '')
     form.effectiveDate = String(p.effectiveDate ?? '')
@@ -900,6 +987,8 @@ async function hydrateFromDraft(id: string): Promise<void> {
 
     form.netPremium = Number(premium.net ?? p.netPremium ?? 0)
     form.mainPremium = Number(premium.main ?? p.mainPremium ?? 0)
+    // Restore เบี้ยรวม (grossPremiumInput) from the persisted main premium.
+    form.grossPremiumInput = form.mainPremium
     form.dutyStamp = Number(premium.dutyStamp ?? p.dutyStamp ?? 0)
     form.vat = Number(premium.vat ?? p.vat ?? 0)
     form.totalPremiumPaid = Number(premium.totalPaid ?? p.totalPremiumPaid ?? 0)
@@ -1133,9 +1222,19 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           </div>
         </FormField>
 
+        <!-- เลขที่ใบสมัคร (application_no) — auto-run by the backend at draft
+             creation. Read-only; shows a hint until the first save mints it. -->
         <FormField :label="t('policyCreate.applicationNo')">
-          <input v-model.trim="form.applicationNo" type="text" maxlength="32"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <input :value="form.applicationNo || t('policyCreate.autoRunPending')" type="text" readonly
+            :class="['w-full border rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none',
+              form.applicationNo ? 'border-slate-200 bg-slate-50 text-slate-700' : 'border-slate-200 bg-slate-50 text-slate-400']" />
+        </FormField>
+
+        <!-- เลขงาน (job_no) — auto-run running work number. Read-only. -->
+        <FormField :label="t('policyCreate.jobNo')">
+          <input :value="form.jobNo || t('policyCreate.autoRunPending')" type="text" readonly
+            :class="['w-full border rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none',
+              form.jobNo ? 'border-slate-200 bg-slate-50 text-slate-700' : 'border-slate-200 bg-slate-50 text-slate-400']" />
         </FormField>
 
         <FormField :label="t('policyCreate.customer')" required>
@@ -1229,20 +1328,16 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         </FormField>
       </div>
 
-      <!-- เบี้ยรวม = เบี้ยสุทธิ + อากรแสตมป์ + VAT. ผูกกับ totalPremiumPaid
-           ตัวเดียวกับ Section 4 (เบี้ย + การชำระ) — แก้ที่ใดก็ sync กัน. -->
+      <!-- เบี้ยรวม = เบี้ยหลัก (main premium) ที่ operator กรอก. เป็น gross ที่
+           สูตรภาษีใช้ back-solve; สำหรับประกันชีวิตสูตรจะบวกเบี้ย Rider เพิ่ม.
+           ส่วนลดย้ายไปอยู่ Section เบี้ย + การชำระ. -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
         <FormField :label="t('policyCreate.totalPremium')">
-          <input v-model.number="form.totalPremiumPaid" type="number" min="0" step="0.01"
-            @change="touched.totalPremiumPaid = true"
+          <input v-model.number="form.grossPremiumInput" type="number" min="0" step="0.01"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
           <p class="text-[10px] text-slate-500 mt-1">
             <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.totalPremiumHint') }}
           </p>
-        </FormField>
-        <FormField :label="t('policyCreate.discountAmount')">
-          <input v-model.number="form.discountAmount" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
       </div>
 
@@ -1305,7 +1400,26 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
     <!-- ── Section 4: Premium ───────────────────────────────────────────── -->
     <section class="card p-5">
       <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.4') }}</h2>
-      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+
+      <!-- ── Group A: เบี้ยประกัน (formulas on top) ─────────────────────── -->
+      <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">{{ t('policyCreate.premiumGroup') }}</h3>
+
+      <!-- สูตร: back-solve เบี้ยสุทธิ/อากร/VAT from เบี้ยรวม (gross). For life
+           only สูตร 2 is shown; the life gross also includes rider premiums. -->
+      <div class="mb-3">
+        <span class="text-[10px] uppercase tracking-wider text-slate-400 mr-2">{{ t('policyCreate.taxFormula') }}</span>
+        <div class="flex flex-wrap gap-2 mt-1">
+          <button v-for="n in visibleFormulas" :key="n" type="button" @click="runFormula(n)"
+            class="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-brand-50 hover:border-brand-300 focus:outline-none focus:border-brand-400">
+            {{ t(`policyCreate.formula${n}`) }}
+          </button>
+        </div>
+        <p class="text-[10px] text-slate-500 mt-1">
+          <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.taxFormulaHint') }}
+        </p>
+      </div>
+
+      <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <FormField :label="t('policyCreate.netPremium')" required>
           <input v-model.number="form.netPremium" type="number" min="0" step="0.01"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
@@ -1325,9 +1439,26 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             @change="touched.totalPremiumPaid = true"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
+      </div>
+
+      <p class="text-[10px] text-slate-500 mt-2">
+        <i class="pi pi-info-circle mr-1" /> {{ t('policyCreate.autoRecalc') }}
+      </p>
+
+      <!-- ── Group B: ส่วนลดและหัก ณ ที่จ่าย ───────────────────────────── -->
+      <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-5 mb-2 pt-4 border-t border-slate-100">{{ t('policyCreate.discountWhtGroup') }}</h3>
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+        <FormField :label="t('policyCreate.discountAmount')">
+          <input v-model.number="form.discountAmount" type="number" min="0" step="0.01"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
         <FormField :label="t('policyCreate.whtAmt')">
           <input v-model.number="form.whtAmt" type="number" min="0" step="0.01"
+            @change="touched.whtAmt = true"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <p class="text-[10px] text-slate-500 mt-1">
+            <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.whtHint') }}
+          </p>
         </FormField>
         <FormField :label="t('policyCreate.netCustomerPaid')">
           <input v-model.number="form.netCustomerPaid" type="number" min="0" step="0.01"
@@ -1335,26 +1466,6 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
       </div>
-
-      <!-- สูตร 1–4: back-solve เบี้ยสุทธิ/อากร/VAT from เบี้ยรวม (gross).
-           Ported from the Access form. Each button computes differently by
-           product type; the operator can still override any field after. -->
-      <div class="mt-3">
-        <span class="text-[10px] uppercase tracking-wider text-slate-400 mr-2">{{ t('policyCreate.taxFormula') }}</span>
-        <div class="flex flex-wrap gap-2 mt-1">
-          <button v-for="n in ([1, 2, 3, 4] as const)" :key="n" type="button" @click="runFormula(n)"
-            class="px-3 py-1.5 text-sm rounded-lg border border-slate-200 bg-white hover:bg-brand-50 hover:border-brand-300 focus:outline-none focus:border-brand-400">
-            {{ t(`policyCreate.formula${n}`) }}
-          </button>
-        </div>
-        <p class="text-[10px] text-slate-500 mt-1">
-          <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.taxFormulaHint') }}
-        </p>
-      </div>
-
-      <p class="text-[10px] text-slate-500 mt-2">
-        <i class="pi pi-info-circle mr-1" /> {{ t('policyCreate.autoRecalc') }}
-      </p>
 
       <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-4 mb-2">{{ t('policyCreate.installment') }}</h3>
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -1498,6 +1609,47 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           </div>
         </div>
       </div>
+
+      <!-- Per-rider commission (ค่าคอมมิชชั่น Inh % / Agent %) — moved here
+           from the rider table in the สินค้า section. One row per rider. -->
+      <div v-if="riderRows.length" class="mt-4 pt-4 border-t border-slate-100">
+        <h4 class="text-xs font-medium text-slate-600 mb-2">{{ t('policyCreate.riderCommission') }}</h4>
+        <div class="overflow-x-auto">
+          <table class="text-sm border-collapse min-w-[420px]">
+            <thead>
+              <tr class="text-left text-[10px] text-slate-400">
+                <th class="py-1 pr-3 font-normal">{{ t('policyCreate.riders.name') }}</th>
+                <th class="py-1 px-3 font-normal">{{ t('policyCreate.riders.rateInh') }}</th>
+                <th class="py-1 px-3 font-normal">{{ t('policyCreate.riders.rateAg') }}</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr v-for="(_row, idx) in riderRows" :key="idx" class="border-t border-slate-100">
+                <td class="py-1.5 pr-3 text-slate-600 whitespace-nowrap max-w-[200px] truncate">{{ riderLabel(idx) }}</td>
+                <td class="py-1.5 px-3">
+                  <div class="relative w-24">
+                    <input :value="riderRate(idx, 'rate_inh')"
+                      @input="setRiderRate(idx, 'rate_inh', ($event.target as HTMLInputElement).value)"
+                      type="number" min="0" max="100" step="0.01"
+                      class="w-full border border-slate-200 rounded-md pl-2 pr-6 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                    <span class="absolute right-2 top-1 text-xs text-slate-400">%</span>
+                  </div>
+                </td>
+                <td class="py-1.5 px-3">
+                  <div class="relative w-24">
+                    <input :value="riderRate(idx, 'rate_ag')"
+                      @input="setRiderRate(idx, 'rate_ag', ($event.target as HTMLInputElement).value)"
+                      type="number" min="0" max="100" step="0.01"
+                      class="w-full border border-slate-200 rounded-md pl-2 pr-6 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                    <span class="absolute right-2 top-1 text-xs text-slate-400">%</span>
+                  </div>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
       <p class="text-[10px] text-slate-500 mt-2">
         <i class="pi pi-info-circle mr-1" /> {{ t('policyCreate.commissionHint') }}
       </p>

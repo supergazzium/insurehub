@@ -30,6 +30,7 @@ class PolicyRequest extends FormRequest
         return [
             'quoteNo' => ['sometimes', 'nullable', 'string', 'max:32'],
             'applicationNo' => ['sometimes', 'nullable', 'string', 'max:32'],
+            'jobNo' => ['sometimes', 'nullable', 'string', 'max:32'],
             'policyNo' => ['sometimes', 'nullable', 'string', 'max:64'],
             'notionNo' => ['sometimes', 'nullable', 'string', 'max:32'],
             'customerId' => [$strict ? 'required' : 'sometimes', 'nullable', Rule::exists('customers', 'id')->where('tenant_id', $tenantId)],
@@ -189,6 +190,7 @@ class PolicyRequest extends FormRequest
         $map = [
             'quoteNo' => 'quote_no',
             'applicationNo' => 'application_no',
+            'jobNo' => 'job_no',
             'policyNo' => 'policy_no',
             'notionNo' => 'notion_no',
             'customerId' => 'customer_id',

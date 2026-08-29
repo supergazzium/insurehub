@@ -143,26 +143,6 @@
               "validation": {
                 "min": 0
               }
-            },
-            {
-              "key": "rate_inh",
-              "label_th": "ค่าคอมมิชชั่น Inh (%)",
-              "label_en": "Comm rate (Inh)",
-              "type": "number",
-              "validation": {
-                "min": 0,
-                "max": 100
-              }
-            },
-            {
-              "key": "rate_ag",
-              "label_th": "ค่าคอมมิชชั่น Agent (%)",
-              "label_en": "Comm rate (Agent)",
-              "type": "number",
-              "validation": {
-                "min": 0,
-                "max": 100
-              }
             }
           ]
         }

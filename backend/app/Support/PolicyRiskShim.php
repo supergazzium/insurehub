@@ -240,6 +240,20 @@ class PolicyRiskShim
             }
         }
 
+        // Surface any extra risk_data[kind] keys that aren't in the column
+        // map — array_of_objects blocks like `rows` (riders) and
+        // `beneficiaries` are written straight to risk_data with no backing
+        // column, so the mapped loop above never returns them. Without this
+        // they'd write on save but vanish on read (edit-draft hydration).
+        $risk = $policy->risk_data ?? null;
+        if (is_array($risk) && isset($risk[$kind]) && is_array($risk[$kind])) {
+            foreach ($risk[$kind] as $key => $value) {
+                if (! array_key_exists($key, $out) && $value !== null) {
+                    $out[$key] = $value;
+                }
+            }
+        }
+
         return $out;
     }
 }

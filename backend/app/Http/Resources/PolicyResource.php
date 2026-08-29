@@ -23,6 +23,7 @@ class PolicyResource extends JsonResource
             'id' => (string) $this->id,
             'quoteNo' => $this->quote_no,
             'applicationNo' => $this->application_no,
+            'jobNo' => $this->job_no,
             'policyNo' => $this->policy_no,
             'customerId' => (string) $this->customer_id,
             'productId' => (string) $this->product_id,

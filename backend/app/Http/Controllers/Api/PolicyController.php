@@ -142,7 +142,18 @@ class PolicyController extends ApiController
     public function store(PolicyRequest $request): JsonResponse
     {
         $policy = DB::transaction(function () use ($request) {
-            $payload = $request->toModel() + ['tenant_id' => $this->tenantId($request)];
+            $tenantId = $this->tenantId($request);
+            $model = $request->toModel();
+            // Assign directly (not via array-union `+`, which keeps a client-sent
+            // null and discards the mint). Only mint when the client did not
+            // supply a value.
+            if (empty($model['application_no'])) {
+                $model['application_no'] = \App\Support\PolicyNumbering::nextApplicationNo($tenantId);
+            }
+            if (empty($model['job_no'])) {
+                $model['job_no'] = \App\Support\PolicyNumbering::nextJobNo($tenantId);
+            }
+            $payload = $model + ['tenant_id' => $tenantId];
             $policy = Policy::create($payload);
             $this->syncChildren($request, $policy);
 
@@ -206,14 +217,26 @@ class PolicyController extends ApiController
      *
      * Any subset of PolicyRequest fields accepted; status defaults to
      * 'draft'. Emits a draftCreated PolicyEvent so the audit trail records
-     * the wizard opening. Does NOT mint quote_no / application_no —
-     * promote endpoints below do that when the operator commits.
+     * the wizard opening. Mints application_no (เลขที่ใบสมัคร) + job_no
+     * (เลขงาน) here so the auto-run numbers are visible in the wizard the
+     * moment the draft is first saved.
      */
     public function storeDraft(PolicyRequest $request): JsonResponse
     {
         $policy = DB::transaction(function () use ($request) {
-            $payload = $request->toModel() + [
-                'tenant_id' => $this->tenantId($request),
+            $tenantId = $this->tenantId($request);
+            $model = $request->toModel();
+            // Assign directly (not via array-union `+`, which keeps a
+            // client-sent null and discards the mint). Only mint when the
+            // client did not supply a value (edit-draft re-save keeps it).
+            if (empty($model['application_no'])) {
+                $model['application_no'] = \App\Support\PolicyNumbering::nextApplicationNo($tenantId);
+            }
+            if (empty($model['job_no'])) {
+                $model['job_no'] = \App\Support\PolicyNumbering::nextJobNo($tenantId);
+            }
+            $payload = $model + [
+                'tenant_id' => $tenantId,
                 'status' => 'draft',
                 'writing_agent_id' => $request->input('writingAgentId')
                     ?? $request->user()?->agent_id
