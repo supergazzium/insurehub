@@ -25,6 +25,12 @@ const props = defineProps<{
    * even while `canSubmit` is false so this gate can run.
    */
   validate?: () => string[]
+  /**
+   * Hard block — force the Save buttons disabled regardless of `validate`.
+   * Use for unrecoverable states (e.g. a duplicate customer) where clicking
+   * should be impossible, not just gated by an alert. Defaults false.
+   */
+  hardBlock?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -39,7 +45,7 @@ const flash = ref<string | null>(null)
 const fieldErrors = ref<Record<string, string[]>>({})
 
 async function submit(keepOpen = false): Promise<void> {
-  if (saving.value) return
+  if (saving.value || props.hardBlock) return
   if (props.validate) {
     const problems = props.validate()
     if (problems.length > 0) {
@@ -139,14 +145,14 @@ watch(
           </button>
           <button type="button"
             class="px-3 py-1.5 rounded-lg border border-brand-500 text-brand-600 hover:bg-brand-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
-            :disabled="(!canSubmit && !validate) || saving" @click="submit(true)"
+            :disabled="(!canSubmit && !validate) || hardBlock || saving" @click="submit(true)"
             title="บันทึกแล้วเปิดฟอร์มใหม่โดยคงประเภทประกันและบริษัทไว้">
             <i class="pi pi-plus text-xs" />
             บันทึกและเพิ่มอีก
           </button>
           <button type="button"
             class="px-4 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
-            :disabled="(!canSubmit && !validate) || saving" @click="submit(false)">
+            :disabled="(!canSubmit && !validate) || hardBlock || saving" @click="submit(false)">
             <i class="pi pi-check text-xs" v-if="!saving" />
             <i class="pi pi-spin pi-spinner text-xs" v-else />
             {{ saving ? 'Saving…' : 'Create' }}

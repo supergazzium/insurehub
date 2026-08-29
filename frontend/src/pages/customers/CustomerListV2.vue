@@ -1,11 +1,9 @@
 <script setup lang="ts">
 // Server-side paginated customer list.
-import { onBeforeUnmount, onMounted, reactive, ref, watch, computed } from 'vue'
+import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useCustomerStore } from '../../stores/customers'
-import CustomerDetailDrawer from './CustomerDetailDrawer.vue'
-import CustomerCreateModal from './CustomerCreateModal.vue'
 import {
   customerDisplayName,
   customerInitials,
@@ -18,33 +16,9 @@ const route = useRoute()
 const router = useRouter()
 const customerStore = useCustomerStore()
 
-const detailId = ref<string | null>(null)
-// Auto-open the create modal when the URL has ?new=1 — used by the policy
-// create wizard's "New customer" button, which opens this page in a new tab
-// pre-set to open the customer form.
-const openedForNew = route.query.new === '1'
-const showCreate = ref(openedForNew)
-
-/** Broadcast a newly-created customer to any parent tab (the policy wizard)
- *  and close ourselves. Only fires when we were opened via ?new=1 — regular
- *  list-page create should not close the tab. */
-function handleCreated(row: Record<string, unknown>): void {
-  if (openedForNew) {
-    try {
-      const bc = new BroadcastChannel('insurehub')
-      bc.postMessage({ type: 'customer:created', row })
-      bc.close()
-    } catch {
-      // BroadcastChannel unavailable (very old browsers) — fall through and
-      // just close; the parent tab will still work via manual re-search.
-    }
-    window.close()
-    return
-  }
-  // Normal list-page usage: reload the list.
-  page.value = 1
-  load()
-}
+// Create + view/edit are now full-page routes (customer-new / customer-edit).
+function goCreate(): void { router.push({ name: 'customer-new' }) }
+function openCustomer(id: string): void { router.push({ name: 'customer-edit', params: { id } }) }
 
 const filters = reactive({
   q: '',
@@ -87,47 +61,19 @@ async function load(): Promise<void> {
   })
 }
 
-// ── Deep-linked detail drawer ───────────────────────────────────────────
-// Sync `detailId` ↔ ?open=<id> in the URL so the drawer is bookmarkable
-// and the browser back/forward buttons close/reopen it. Also hydrate on
-// mount so /customers?open=42 lands with that drawer already open.
-watch(detailId, (id) => {
-  const currentOpen = route.query.open
-  const want = id ?? undefined
-  if ((currentOpen ?? undefined) === (want ?? undefined)) return
-  const nextQuery = { ...route.query }
-  if (want === undefined) delete nextQuery.open
-  else nextQuery.open = want
-  router.replace({ query: nextQuery })
-})
-watch(() => route.query.open, (openId) => {
-  const next = typeof openId === 'string' && openId.trim() !== '' ? openId.trim() : null
-  if (detailId.value !== next) detailId.value = next
-})
-
+// ── Mount + legacy deep-link redirects ───────────────────────────────────
 onMounted(() => {
+  // Back-compat redirects for old deep links now that create/view are pages:
+  //   ?new=1     (policy wizard's "new customer") → the create page
+  //   ?open=<id> (old drawer bookmark)            → the edit page
+  if (route.query.new === '1') { router.replace({ name: 'customer-new' }); return }
   const openId = route.query.open
-  if (typeof openId === 'string' && openId.trim() !== '') detailId.value = openId.trim()
-  void load()
-})
-
-// ── Esc closes the drawer ────────────────────────────────────────────────
-// Guarded so it doesn't fire while an EditableField input/textarea is in
-// edit mode — EditableField uses Esc to cancel that specific edit and
-// re-uses the same key. Checking the active element keeps both flows
-// working: Esc in an editable input cancels the edit; Esc anywhere else
-// closes the drawer.
-function onEscape(e: KeyboardEvent): void {
-  if (e.key !== 'Escape') return
-  if (!detailId.value) return
-  const active = document.activeElement
-  if (active && (active.tagName === 'INPUT' || active.tagName === 'TEXTAREA' || active.tagName === 'SELECT')) {
+  if (typeof openId === 'string' && openId.trim() !== '') {
+    router.replace({ name: 'customer-edit', params: { id: openId.trim() } })
     return
   }
-  detailId.value = null
-}
-window.addEventListener('keydown', onEscape)
-onBeforeUnmount(() => window.removeEventListener('keydown', onEscape))
+  void load()
+})
 
 let debounceTimer: number | undefined
 watch(
@@ -172,7 +118,7 @@ const rangeText = computed(() => {
         <div v-if="customerStore.listMeta" class="text-sm text-slate-500">{{ rangeText }}</div>
         <button type="button"
           class="px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm flex items-center gap-1.5"
-          @click="showCreate = true">
+          @click="goCreate">
           <i class="pi pi-plus text-xs" /> New Customer
         </button>
       </div>
@@ -264,7 +210,7 @@ const rangeText = computed(() => {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="c in customerStore.list" :key="c.id" class="hover:bg-slate-50 cursor-pointer" @click="detailId = c.id">
+            <tr v-for="c in customerStore.list" :key="c.id" class="hover:bg-slate-50 cursor-pointer" @click="openCustomer(c.id)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ c.customerCode }}</td>
               <td class="px-4 py-2">
                 <div class="flex items-center gap-2">
@@ -323,8 +269,5 @@ const rangeText = computed(() => {
         </div>
       </div>
     </section>
-
-    <CustomerDetailDrawer :customer-id="detailId" @close="detailId = null" />
-    <CustomerCreateModal :open="showCreate" @close="showCreate = false" @created="handleCreated" />
   </div>
 </template>

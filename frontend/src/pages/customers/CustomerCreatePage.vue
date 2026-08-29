@@ -1,16 +1,17 @@
 <script setup lang="ts">
-// New Customer modal — full rewrite covering individual + juristic
-// customers, inline field validation modeled on AgentRegister.vue, and
-// cascading province → amphoe → tambon dropdowns backed by the shared
-// /public/lookup endpoints.
+// New Customer — full-page form (mirrors the policy create/edit page style
+// instead of a cramped modal). Covers individual / foreign / juristic
+// customers with inline validation, live duplicate detection, and cascading
+// province → amphoe → tambon dropdowns backed by the shared /public/lookup
+// endpoints.
 //
 // Registered vs mailing address: the mailing block starts identical to
 // the registered block (mailingSameAsRegistered=true, checkbox checked).
 // Unchecking exposes a mirror block; on-submit we send the mailing
 // fields only when the checkbox is off (backend defaults them to null).
 
-import { computed, reactive, ref, watch } from 'vue'
-import CreateModal from '../../components/CreateModal.vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
 import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
@@ -20,13 +21,12 @@ import { fetchCustomerList, type CustomerListRow } from '../../api/customers'
 import { fetchProvinces, fetchDistricts, fetchSubDistricts, fetchNamePrefixes, fetchNationalities, type NamePrefixRow, type NationalityRow } from '../../api/portal'
 import { isThaiName, isThaiJuristicName, isThaiId13, isThaiMobile, isThaiLandline, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
 
-const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{
-  (e: 'close'): void
-  (e: 'created', row: Record<string, unknown>): void
-  // Operator clicked "เปิดดู" on a duplicate — open that existing customer.
-  (e: 'open-existing', id: string): void
-}>()
+const router = useRouter()
+
+// Submit state (replaces CreateModal's internal saving/error handling).
+const saving = ref(false)
+const submitError = ref<string | null>(null)
+const fieldErrors = ref<Record<string, string[]>>({})
 
 // ─── Reference data (loaded once) ─────────────────────────────────────────
 const provinces = ref<string[]>([])
@@ -246,9 +246,9 @@ const dupLabel = computed(() => {
   return `${name} · ${r.customerCode}`
 })
 
-/** Open the matched existing customer (closes this modal). */
+/** Open the matched existing customer's edit page. */
 function openDuplicate(): void {
-  if (dupMatch.value) emit('open-existing', dupMatch.value.id)
+  if (dupMatch.value) router.push({ name: 'customer-edit', params: { id: dupMatch.value.id } })
 }
 
 // ─── Auto-generated customer code ─────────────────────────────────────────
@@ -637,56 +637,92 @@ const payload = computed(() => {
   return base
 })
 
-// ─── Modal lifecycle ──────────────────────────────────────────────────────
-watch(
-  () => props.open,
-  (v) => {
-    if (v) {
-      Object.assign(form, {
-        customerCode: '',
-        customerType: 'individual',
-        titleTh: '', firstName: '', lastName: '', nickname: '',
-        idCard: '', gender: '', birthDate: '',
-        passport: '', nationality: '', race: '',
-        juristicName: '', taxId: '',
-        phone: '', telPhone: '', email: '', email2: '',
-        facebookName: '', lineId: '',
-        address: '', province: '', amphoe: '', subDistrict: '', postcode: '',
-        mailingSameAsRegistered: true,
-        mailingAddress: '', mailingProvince: '', mailingAmphoe: '',
-        mailingSubDistrict: '', mailingPostcode: '',
-        contactName: '', contactPosition: '', contactPhone: '', contactEmail: '',
-      })
-      showSecondEmail.value = false
-      dupMatch.value = null
-      dupChecking.value = false
-      registeredDistricts.value = []
-      registeredSubDistricts.value = []
-      mailingDistricts.value = []
-      mailingSubDistricts.value = []
-      codeAutoFilled.value = false
-      // Reset touched state so red errors don't flash immediately on reopen.
-      Object.keys(touched).forEach((k) => { touched[k as FieldName] = false })
-      attemptedSubmit.value = false
-      void loadProvinces()
-      void loadNamePrefixes()
-      void loadNationalities()
-      void suggestCode()
-      // ไทย defaults for the Thai-individual starting state.
-      applyPersonDefaults()
-    }
-  },
-)
+// ─── Page lifecycle ────────────────────────────────────────────────────────
+onMounted(() => {
+  void loadProvinces()
+  void loadNamePrefixes()
+  void loadNationalities()
+  void suggestCode()
+  // ไทย defaults for the Thai-individual starting state.
+  applyPersonDefaults()
+})
+
+// ─── Submit ────────────────────────────────────────────────────────────────
+// Mirrors CreateModal's submit flow: run the pre-submit gate (alerts on
+// problems, including the duplicate block), then POST. On success navigate
+// to the new customer's edit page.
+async function submit(): Promise<void> {
+  if (saving.value || dupMatch.value !== null) return
+  const problems = collectValidationProblems()
+  if (problems.length > 0) {
+    window.alert(`กรอกข้อมูลไม่ครบหรือไม่ถูกต้อง:\n\n• ${problems.join('\n• ')}`)
+    return
+  }
+  if (!canSubmit.value) return
+  saving.value = true
+  submitError.value = null
+  fieldErrors.value = {}
+  try {
+    const res = await api.post<{ data: Record<string, unknown> }>('customers', payload.value)
+    const row = (res.data ?? res) as Record<string, unknown>
+    // Notify any listening tab (e.g. the policy wizard) that a customer was
+    // created — same BroadcastChannel contract the list handler used.
+    try {
+      const bc = new BroadcastChannel('insurehub')
+      bc.postMessage({ type: 'customer:created', row })
+      bc.close()
+    } catch { /* BroadcastChannel unavailable — ignore */ }
+    const id = row.id
+    if (id != null) router.push({ name: 'customer-edit', params: { id: String(id) } })
+    else router.push({ name: 'customers' })
+  } catch (e: unknown) {
+    // Surface Laravel 422 field errors inline; otherwise a generic message.
+    const err = e as { response?: { data?: { errors?: Record<string, string[]>; message?: string } } }
+    if (err.response?.data?.errors) fieldErrors.value = err.response.data.errors
+    submitError.value = err.response?.data?.message ?? 'บันทึกไม่สำเร็จ กรุณาลองใหม่'
+  } finally {
+    saving.value = false
+  }
+}
+
+function cancel(): void {
+  router.push({ name: 'customers' })
+}
 </script>
 
 <template>
-  <CreateModal
-    :open="open" entity="customers" title="New Customer"
-    :payload="payload" :can-submit="canSubmit" :validate="collectValidationProblems"
-    :hard-block="dupMatch !== null"
-    @close="emit('close')" @created="(row) => emit('created', row)"
-  >
-    <template #default="{ fieldErrors }">
+  <div class="space-y-6 max-w-5xl">
+    <!-- Header — mirrors the policy create/edit page (breadcrumb / title / actions) -->
+    <header class="flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <div class="text-xs text-slate-400">
+          <RouterLink :to="{ name: 'customers' }" class="hover:text-brand-600">ลูกค้า</RouterLink>
+          <span class="mx-1">/</span>
+          <span>สร้างลูกค้าใหม่</span>
+        </div>
+        <h1 class="text-2xl font-semibold text-slate-900">สร้างลูกค้าใหม่</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" @click="cancel"
+          class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
+          ยกเลิก
+        </button>
+        <button type="button" @click="submit" :disabled="saving || dupMatch !== null"
+          class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5">
+          <i class="pi pi-check text-xs" v-if="!saving" />
+          <i class="pi pi-spin pi-spinner text-xs" v-else />
+          {{ saving ? 'กำลังบันทึก…' : 'บันทึกลูกค้า' }}
+        </button>
+      </div>
+    </header>
+
+    <p v-if="submitError" class="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">
+      <i class="pi pi-exclamation-circle mr-1" />{{ submitError }}
+    </p>
+
+    <!-- Section 1: ประเภท + รหัสลูกค้า -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">ประเภทและรหัสลูกค้า</h2>
       <div class="grid grid-cols-2 gap-4">
         <!-- Customer type — 3-way: Thai individual, foreign individual
              (passport instead of Thai national ID + international phone
@@ -722,7 +758,13 @@ watch(
             </button>
           </div>
         </FormField>
+      </div>
+    </section>
 
+    <!-- Section 2: ข้อมูลตัวตน -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">ข้อมูลตัวตน</h2>
+      <div class="grid grid-cols-2 gap-4">
         <!-- Individual block -->
         <!-- Person block — shared between Thai + foreign individuals.
              Charset expectations and ID mechanism (national ID vs passport)
@@ -873,7 +915,13 @@ watch(
             </div>
           </FormField>
         </template>
+      </div>
+    </section>
 
+    <!-- Section 3: ช่องทางติดต่อ -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">ช่องทางติดต่อ</h2>
+      <div class="grid grid-cols-2 gap-4">
         <!-- Contact (both types) -->
         <FormField label="โทรศัพท์มือถือ" error-key="phone" :errors="fieldErrors">
           <div class="relative">
@@ -941,11 +989,14 @@ watch(
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
 
-        <!-- ผู้ติดต่อแทน (contact person) — optional, all types.
-             Maps to contact_* columns via CustomerRequest::toModel. -->
-        <div class="col-span-2 border-t border-slate-200 pt-3 mt-2">
-          <div class="text-sm font-semibold text-slate-700 mb-2">ผู้ติดต่อแทน (ถ้ามี)</div>
-        </div>
+      </div>
+    </section>
+
+    <!-- Section 4: ผู้ติดต่อแทน (contact person) — optional, all types.
+         Maps to contact_* columns via CustomerRequest::toModel. -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">ผู้ติดต่อแทน <span class="text-xs font-normal text-slate-400">(ถ้ามี)</span></h2>
+      <div class="grid grid-cols-2 gap-4">
         <FormField label="ชื่อผู้ติดต่อแทน" error-key="contactPerson.name" :errors="fieldErrors">
           <input v-model.trim="form.contactName" placeholder="ชื่อ-นามสกุล"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
@@ -965,10 +1016,13 @@ watch(
           <p v-if="showContactEmail" class="text-xs text-rose-600 mt-0.5">{{ showContactEmail }}</p>
         </FormField>
 
-        <!-- Registered address -->
-        <div class="col-span-2 border-t border-slate-200 pt-3 mt-2">
-          <div class="text-sm font-semibold text-slate-700 mb-2">ที่อยู่ตามทะเบียนบ้าน</div>
-        </div>
+      </div>
+    </section>
+
+    <!-- Section 5: ที่อยู่ (ทะเบียนบ้าน + จัดส่ง) -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">ที่อยู่ตามทะเบียนบ้าน</h2>
+      <div class="grid grid-cols-2 gap-4">
         <FormField label="ที่อยู่ (บ้านเลขที่, หมู่, ซอย, ถนน)" class="col-span-2" error-key="address" :errors="fieldErrors">
           <input v-model.trim="form.address"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
@@ -1027,6 +1081,20 @@ watch(
           </FormField>
         </template>
       </div>
-    </template>
-  </CreateModal>
+    </section>
+
+    <!-- Bottom action bar (mirrors the top header actions for long forms) -->
+    <div class="flex items-center justify-end gap-2 pb-6">
+      <button type="button" @click="cancel"
+        class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
+        ยกเลิก
+      </button>
+      <button type="button" @click="submit" :disabled="saving || dupMatch !== null"
+        class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5">
+        <i class="pi pi-check text-xs" v-if="!saving" />
+        <i class="pi pi-spin pi-spinner text-xs" v-else />
+        {{ saving ? 'กำลังบันทึก…' : 'บันทึกลูกค้า' }}
+      </button>
+    </div>
+  </div>
 </template>

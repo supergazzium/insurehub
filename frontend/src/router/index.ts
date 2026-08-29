@@ -146,6 +146,9 @@ const routes: RouteRecordRaw[] = [
       { path: 'agents/recruitment', name: 'agents-recruitment', component: AgentRecruitment, meta: { moduleKey: 'agents' } },
       { path: 'customers', name: 'customers', component: CustomerList, meta: { moduleKey: 'customers' } },
       { path: 'customers/referrals', name: 'customers-referrals', component: CustomerReferral, meta: { moduleKey: 'customers' } },
+      // Full-page customer create + view/edit (replaced the modal + drawer).
+      { path: 'customers/new', name: 'customer-new', component: () => import('../pages/customers/CustomerCreatePage.vue'), meta: { moduleKey: 'customers' } },
+      { path: 'customers/:id/edit', name: 'customer-edit', component: () => import('../pages/customers/CustomerEditPage.vue'), meta: { moduleKey: 'customers' } },
       { path: 'policies', name: 'policies', component: PolicyList, meta: { moduleKey: 'policies' } },
       { path: 'policies/expiring', name: 'policies-expiring', component: ExpiringSoon, meta: { moduleKey: 'renewal-pipeline' } },
       { path: 'commissions/rebates', name: 'commission-rebates', component: RebateReconciliation, meta: { moduleKey: 'rebate-reconciliation' } },
