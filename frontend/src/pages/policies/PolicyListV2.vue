@@ -11,7 +11,6 @@ import { fetchPolicy, policyDocumentDownloadUrl } from '../../api/policies'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
 import { api, ApiError, getToken } from '../../api/client'
-import PolicyDetailDrawer from './PolicyDetailDrawer.vue'
 // C-18 — PolicyApplicationWizard is now a full-page route
 // (/policies/new + /policies/:id/edit-draft), no longer a modal.
 // New Policy and Resume Draft both navigate via router.push.
@@ -21,8 +20,6 @@ import { CURRENT_STATUSES, statusBadgeClass } from '../../utils/policyStatus'
 
 const { t } = useI18n()
 const policyStore = usePolicyStore()
-
-const detailId = ref<string | null>(null)
 
 // Documents popup — click ปุ่มเรียกดูเอกสารแนบ opens a modal listing every
 // attachment on the selected policy with per-file download buttons. We
@@ -191,11 +188,11 @@ onMounted(async () => {
   await loadCarriers()
   if (filters.carrierId) await loadProducts(filters.carrierId)
   await load()
-  // Cross-page deep-link — /policies?open=<id> opens that policy's drawer
-  // automatically. Used by the customer detail drawer to link to a policy.
+  // Cross-page deep-link — /policies?open=<id> now routes to the full-page
+  // wizard editor (drawer removed). Back-compat for existing links.
   const openId = route.query.open
   if (typeof openId === 'string' && openId.trim() !== '') {
-    detailId.value = openId.trim()
+    void router.replace({ name: 'policy-edit-draft', params: { id: openId.trim() } })
   }
 })
 
@@ -598,9 +595,10 @@ const rangeText = computed(() => {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <!-- C-15 — draft rows route to resume; issued+ rows open the drawer. -->
+            <!-- Every row opens the full-page wizard (create/edit share the
+                 same UI + fields). Drafts resume; issued+ edit in place. -->
             <tr v-for="p in policyStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer"
-              @click="p.status === 'draft' ? resumeDraft(p.id) : (detailId = p.id)">
+              @click="resumeDraft(p.id)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">
                 <div>{{ p.applicationNo ?? '—' }}</div>
                 <div v-if="p.policyNo" class="text-[10px] text-slate-400">{{ p.policyNo }}</div>
@@ -729,8 +727,6 @@ const rangeText = computed(() => {
         </div>
       </div>
     </section>
-
-    <PolicyDetailDrawer :policy-id="detailId" @close="detailId = null" />
 
     <!-- Documents popup — list attachments with per-file open button -->
     <div v-if="docsModalPolicyId !== null" class="fixed inset-0 z-50 bg-black/40 flex items-center justify-center p-4"

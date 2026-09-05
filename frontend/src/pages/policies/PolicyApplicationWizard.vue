@@ -28,12 +28,22 @@
 
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
 import DurationChip from '../../components/DurationChip.vue'
 import RiskFieldRenderer from '../../components/RiskFieldRenderer.vue'
 import EntityPicker from '../../components/EntityPicker.vue'
+import PolicyPaymentModal, { type ExpectedPremium } from './PolicyPaymentModal.vue'
+import PolicyEndorsementModal, { type EndorsementInitial } from './PolicyEndorsementModal.vue'
+import {
+  fetchEndorsements,
+  createPremiumEndorsement,
+  updatePremiumEndorsement,
+  deletePremiumEndorsement,
+  type Endorsement,
+  type PremiumEndorsementPayload,
+} from '../../api/endorsements'
 import { ApiError } from '../../api/client'
 import { fetchCustomerList, fetchPriorAssets, type CustomerListRow, type PriorAsset } from '../../api/customers'
 import { fetchProduct, fetchProductList, type ProductDetail, type ProductListRow } from '../../api/products'
@@ -43,8 +53,9 @@ import { fetchPolicy } from '../../api/policies'
 import { hydrateSchemaValues } from '../../utils/riskSchema'
 import { fetchAgentList, type AgentListRow } from '../../api/agents'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
+import { fetchPolicyStatuses, type PolicyStatusRow } from '../../api/portal'
 import {
-  createDraftPolicy, updateDraftPolicy,
+  createDraftPolicy, updateDraftPolicy, updatePolicy,
   promotePolicyToQuotation, promotePolicyToSubmitted,
 } from '../../api/policies'
 import { durationConfig } from '../../utils/durationPresets'
@@ -59,6 +70,7 @@ const props = defineProps<{
 }>()
 
 const router = useRouter()
+const route = useRoute()
 
 const { t } = useI18n()
 
@@ -67,6 +79,88 @@ const { t } = useI18n()
 // Full-page layout — no step gating. All 5 sections visible at once,
 // matching PolicyEdit.vue. `draftId` still tracks the persisted row.
 const draftId = ref<string | null>(props.id ?? null)
+// Status of the loaded policy (edit mode). Null in create mode. When the
+// policy is past 'draft', autosave must use the general PATCH /policies/{id}
+// instead of /draft (which rejects non-draft rows).
+const loadedStatus = ref<string | null>(null)
+const isDraftMode = computed(() => loadedStatus.value === null || loadedStatus.value === 'draft')
+
+// ── Policy status lookup (manually-editable status dropdown) ──────────────
+const policyStatuses = ref<PolicyStatusRow[]>([])
+/** Settable statuses = lookup rows with a machine code (the ~10 the backend
+ *  accepts). Follow-up sub-statuses (code=null) aren't a policy status. */
+const statusOptions = computed(() =>
+  policyStatuses.value.filter((s): s is PolicyStatusRow & { code: string } => !!s.code),
+)
+async function loadPolicyStatuses(): Promise<void> {
+  if (policyStatuses.value.length) return
+  try { policyStatuses.value = (await fetchPolicyStatuses()).data } catch { /* silent */ }
+}
+// Earliest effective_date across the customer's policies (from the resource).
+// Anchors the "years with InsureHub" tenure metric.
+const customerFirstPolicyDate = ref<string | null>(null)
+
+/** Completed-year cycles from `startIso` to today, as an ordinal (ปีที่ N).
+ *  A policy in its first 12 months is year 1; each full year bumps it. */
+function yearsSince(startIso: string | null): number | null {
+  if (!startIso) return null
+  const start = new Date(startIso)
+  if (Number.isNaN(start.getTime())) return null
+  const now = new Date()
+  let years = now.getFullYear() - start.getFullYear()
+  // Subtract a year if today hasn't yet reached the anniversary month/day.
+  const beforeAnniv = now.getMonth() < start.getMonth()
+    || (now.getMonth() === start.getMonth() && now.getDate() < start.getDate())
+  if (beforeAnniv) years--
+  return years + 1 // ordinal: within the first year → ปีที่ 1
+}
+
+/** Add `n` years to an ISO date string; null-safe. Rolls a renewal's coverage
+ *  window forward from the source's expiry. */
+function rollForwardYear(iso: string | null, n = 1): string | null {
+  if (!iso) return null
+  const d = new Date(iso)
+  if (Number.isNaN(d.getTime())) return null
+  d.setFullYear(d.getFullYear() + n)
+  return d.toISOString().slice(0, 10)
+}
+
+// ── Renewal (ต่ออายุ) prefill context ────────────────────────────────────
+// Set when the wizard is opened via ?renewFrom=<sourceId>. Holds the source
+// policy's year figures so the renewed badges compute from them:
+//   customer year = source tenure + 1 (always)
+//   policy year   = source policy year + 1, UNLESS the product was changed,
+//                   in which case it resets to 1 (a new product = fresh policy).
+const renewSource = ref<{
+  policyYear: number | null
+  customerTenure: number | null
+  productId: string
+} | null>(null)
+const isRenewingFromSource = computed(() => renewSource.value !== null)
+/** True once the renewed policy is on a different product than the source. */
+const renewProductChanged = computed(() =>
+  isRenewingFromSource.value && String(form.productId) !== String(renewSource.value?.productId ?? ''),
+)
+
+/** ปีที่ของกรมธรรม์. In a renewal: source year + 1, or reset to 1 if the
+ *  product was changed. Otherwise computed from this policy's effective_date. */
+const policyYear = computed<number | null>(() => {
+  if (isRenewingFromSource.value) {
+    if (renewProductChanged.value) return 1
+    const base = renewSource.value?.policyYear
+    return base != null ? base + 1 : 1
+  }
+  return yearsSince(form.effectiveDate || null)
+})
+/** อายุการเป็นลูกค้า. In a renewal: source tenure + 1. Otherwise from the
+ *  customer's earliest policy effective_date. */
+const customerTenureYears = computed<number | null>(() => {
+  if (isRenewingFromSource.value) {
+    const base = renewSource.value?.customerTenure
+    return base != null ? base + 1 : yearsSince(customerFirstPolicyDate.value)
+  }
+  return yearsSince(customerFirstPolicyDate.value)
+})
 const saving = ref(false)
 const error = ref<string | null>(null)
 const flash = ref<string | null>(null)
@@ -77,6 +171,9 @@ const flash = ref<string | null>(null)
 const form = reactive({
   // Step 1 — Party
   newOrRenew: 'new' as 'new' | 'renew',
+  // Manually-editable policy status (edit mode). Options from the
+  // policy_statuses lookup — only settable statuses (those with a code).
+  status: '' as string,
   refAppToId: '' as string,
   customerId: '' as string,
   writingAgentId: '' as string,
@@ -84,6 +181,9 @@ const form = reactive({
   // backend at draft creation — read-only in the wizard.
   applicationNo: '' as string,
   jobNo: '' as string,
+  // policy_no (เลขที่กรมธรรม์) — issued by the carrier later once payment is
+  // made and the policy is approved. Editable; usually filled in on edit.
+  policyNo: '' as string,
   notionNo: '' as string,
 
   // Step 2 — Product + Coverage
@@ -120,6 +220,10 @@ const form = reactive({
   netCustomerPaid: 0 as number,
   annualPremium: 0 as number,
   premiumMode: 'annual' as 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'single',
+  // จำนวนงวด — auto-set from premiumMode (monthly 12 / quarterly 4 /
+  // semiannual 2 / annual|single 1) but editable. Drives the prefilled
+  // installment rows in the payment modal.
+  installmentCount: 1 as number,
   installmentTerm: '' as string,
   firstDueInst: 0 as number,
   firstDueInstDate: '' as string,
@@ -139,6 +243,16 @@ const form = reactive({
 
   // Always
   notes: '' as string,
+
+  // การรับกรมธรรม์และจัดส่ง — received-from-carrier + delivered-to-customer
+  // tracking. `received`/`delivered` are UI-only "done" checkboxes derived
+  // from / driving the presence of the paired date.
+  received: false as boolean,
+  receivedDate: '' as string,
+  receivedNote: '' as string,
+  delivered: false as boolean,
+  mailingDate: '' as string,
+  mailingNote: '' as string,
 })
 
 // Touched flags for auto-fills (mirrors legacy wizard L556-681).
@@ -574,6 +688,18 @@ watch(() => form.insureType, () => {
   if (!premiumModeOptions.value.includes(form.premiumMode)) form.premiumMode = 'annual'
 })
 
+// จำนวนงวด per payment frequency. รายเดือน 12 / รายสามเดือน 4 /
+// รายหกเดือน 2 / รายปี | จ่ายครั้งเดียว 1.
+const INSTALLMENTS_BY_MODE: Record<PremiumMode, number> = {
+  monthly: 12, quarterly: 4, semiannual: 2, annual: 1, single: 1,
+}
+// Auto-set the installment count from the chosen frequency. The operator can
+// still edit installmentCount afterwards (this only fires when the mode
+// changes, so a manual override survives until the next mode switch).
+watch(() => form.premiumMode, (mode) => {
+  form.installmentCount = INSTALLMENTS_BY_MODE[mode] ?? 1
+}, { immediate: true })
+
 // ── Premium recalc watchers (KEEP verbatim per B3 §9) ────────────────────
 // The Access-parity math: duty = 0.4% net, vat = 7% (net + duty), total =
 // net + duty + vat. Rounded to 2dp. Operator overrides win via touched flags.
@@ -633,6 +759,137 @@ const riderPremiumTotal = computed<number>(() => {
 const visibleFormulas = computed<(1 | 2 | 3 | 4)[]>(() =>
   form.insureType === 'Life' ? [2] : [1, 2, 3, 4],
 )
+
+// ── Payment tracking (C-24, frontend-only skeleton) ──────────────────────
+const showPaymentModal = ref(false)
+/** Human label for the picked carrier (for the payment modal's payee radio). */
+const carrierLabel = computed<string>(() => {
+  const c = carriers.value.find((x) => String(x.id) === String(form.carrierId))
+  return c ? `${c.code} · ${c.name}` : ''
+})
+/** Additional (pro-rata) premium recorded across premium-change endorsements
+ *  on this policy — folded into the payment modal's expected total so the
+ *  operator collects it alongside the base premium for the period. */
+const endorsementPremiumTotal = ref(0)
+
+/** Expected premium numbers (from the 4 สูตร) passed to the payment modal.
+ *  Any outstanding สลักหลังเบี้ยเพิ่ม is added onto the total owed. */
+const expectedPremium = computed<ExpectedPremium>(() => ({
+  netPremium: Number(form.netPremium) || 0,
+  dutyStamp: Number(form.dutyStamp) || 0,
+  vat: Number(form.vat) || 0,
+  totalPremiumPaid: (Number(form.totalPremiumPaid) || 0) + (Number(endorsementPremiumTotal.value) || 0),
+  discountAmount: Number(form.discountAmount) || 0,
+  commissionAmount: Number(form.commHubToAgentAmount) || 0,
+}))
+
+// ── สลักหลัง (endorsement) — history + premium-increase modal ─────────────
+const showEndorsementModal = ref(false)
+const endorsements = ref<Endorsement[]>([])
+const endorsementSaving = ref(false)
+const endorsementErrors = ref<Record<string, string[]>>({})
+/** The endorsement being edited (null = create mode) + its prefill. */
+const editingEndorsementId = ref<string | null>(null)
+const endorsementInitial = ref<EndorsementInitial | null>(null)
+
+function openNewEndorsement(): void {
+  editingEndorsementId.value = null
+  endorsementInitial.value = null
+  endorsementErrors.value = {}
+  showEndorsementModal.value = true
+}
+
+function openEditEndorsement(ev: Endorsement): void {
+  const p = endorsementSummary(ev)
+  if (!p) return
+  editingEndorsementId.value = ev.id
+  endorsementInitial.value = {
+    reason: p.reason,
+    effectiveDate: p.effectiveDate,
+    newAnnualPremium: p.after.annualPremium,
+    newCoverage: p.after.coverage,
+    additionalPremium: p.additionalPremium,
+    additionalDutyStamp: p.additionalDutyStamp,
+    additionalVat: p.additionalVat,
+    beforeAnnualPremium: p.before.annualPremium,
+    beforeCoverage: p.before.coverage,
+  }
+  endorsementErrors.value = {}
+  showEndorsementModal.value = true
+}
+
+async function deleteEndorsement(ev: Endorsement): Promise<void> {
+  if (!draftId.value) return
+  if (!window.confirm(t('endorsement.confirmDelete'))) return
+  try {
+    await deletePremiumEndorsement(draftId.value, ev.id)
+    await hydrateFromDraft(draftId.value)
+    await loadEndorsements()
+    flash.value = t('endorsement.deleted')
+  } catch { /* surfaced by the reload; keep the row */ }
+}
+
+/** Endorsements are available on any saved (non-draft) policy — most useful
+ *  when in force, but also allowed on expired/other statuses so a late
+ *  correction can be recorded. Hidden only on an unsaved / draft form. */
+const canEndorse = computed<boolean>(() =>
+  !!draftId.value && !isDraftMode.value,
+)
+
+/** Only the premium-change endorsements, newest first, for the history list. */
+const premiumEndorsements = computed(() =>
+  endorsements.value.filter((e) => e.type === 'endorsement.premium_change'),
+)
+
+async function loadEndorsements(): Promise<void> {
+  if (!draftId.value) return
+  try {
+    const res = await fetchEndorsements(draftId.value)
+    endorsements.value = res.data ?? []
+  } catch { /* non-fatal — history just stays empty */ }
+}
+
+async function submitEndorsement(payload: {
+  reason: string
+  effectiveDate: string
+  newAnnualPremium: number
+  newCoverage: number | null
+  additionalPremium: number
+  additionalDutyStamp: number | null
+  additionalVat: number | null
+}): Promise<void> {
+  if (!draftId.value) return
+  endorsementSaving.value = true
+  endorsementErrors.value = {}
+  try {
+    if (editingEndorsementId.value) {
+      await updatePremiumEndorsement(draftId.value, editingEndorsementId.value, payload)
+    } else {
+      await createPremiumEndorsement(draftId.value, payload)
+    }
+    showEndorsementModal.value = false
+    // The policy premium changed server-side — re-hydrate so the form and the
+    // payment total reflect the new figures, then refresh the history list.
+    await hydrateFromDraft(draftId.value)
+    await loadEndorsements()
+    flash.value = editingEndorsementId.value ? t('endorsement.updated') : t('endorsement.saved')
+    editingEndorsementId.value = null
+    endorsementInitial.value = null
+  } catch (e: unknown) {
+    const err = e as { response?: { data?: { errors?: Record<string, string[]> } } }
+    endorsementErrors.value = err.response?.data?.errors ?? {}
+  } finally {
+    endorsementSaving.value = false
+  }
+}
+
+/** Human summary for a premium-endorsement history row. */
+function endorsementSummary(ev: Endorsement): PremiumEndorsementPayload | null {
+  return (ev.payload as unknown as PremiumEndorsementPayload) ?? null
+}
+function fmtMoney(x: number): string {
+  return new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(x || 0)
+}
 
 // ── Per-rider commission (ค่าคอมมิชชั่น Inh % / Agent %) ──────────────────
 // These used to be columns in the rider table (สินค้า section). They now
@@ -778,14 +1035,19 @@ async function doAutosave(): Promise<void> {
     const payload = buildDraftPayload()
     if (!draftId.value) {
       const res = await createDraftPolicy(payload)
-      const created = res.data as unknown as { id: string; applicationNo?: string; jobNo?: string }
+      const created = res.data as unknown as { id: string; applicationNo?: string; jobNo?: string; status?: string }
       draftId.value = created.id
       // Reflect the auto-run numbers the backend minted at draft creation.
       if (created.applicationNo) form.applicationNo = created.applicationNo
       if (created.jobNo) form.jobNo = created.jobNo
+      // Seed the status dropdown from the freshly-created draft's status.
+      if (!form.status && created.status) form.status = created.status
       flash.value = t('policyCreate.action.draftSaved')
-    } else {
+    } else if (isDraftMode.value) {
       await updateDraftPolicy(draftId.value, payload)
+    } else {
+      // Editing a non-draft policy — use the general update endpoint.
+      await updatePolicy(draftId.value, payload)
     }
   } catch {
     // Silent failure — the operator sees a stale state banner via the
@@ -813,9 +1075,13 @@ function buildDraftPayload(): Record<string, unknown> {
     productId: form.productId || null,
     carrierId: form.carrierId || null,
     newOrRenew: form.newOrRenew,
+    // Manual status — sent once the policy exists (draft or beyond) so the
+    // status dropdown works everywhere. Not sent on the very first create.
+    ...(draftId.value && form.status ? { status: form.status } : {}),
     refAppToId: form.refAppToId || null,
     applicationNo: form.applicationNo || null,
     jobNo: form.jobNo || null,
+    policyNo: form.policyNo || null,
     notionNo: form.notionNo || null,
     appDate: form.appDate || null,
     effectiveDate: form.effectiveDate || null,
@@ -846,6 +1112,13 @@ function buildDraftPayload(): Record<string, unknown> {
     commHubToAgentAmount: form.commHubToAgentAmount,
     commOverride: form.commOverride,
     notes: form.notes || null,
+    // การรับกรมธรรม์ (received from carrier) — when the "done" box is off we
+    // clear the date so the status is unambiguous.
+    receivedDate: form.received ? (form.receivedDate || null) : null,
+    receivedNote: form.receivedNote || null,
+    // การจัดส่ง (delivered to customer) — reuses the mailing_* columns.
+    mailingDate: form.delivered ? (form.mailingDate || null) : null,
+    mailingNote: form.mailingNote || null,
   }
 
   // Split the risk value bag into top-level columns + risk_data.<kind>.
@@ -888,6 +1161,29 @@ async function saveDraftNow(): Promise<void> {
   await doAutosave()
   flash.value = t('policyCreate.action.draftSaved')
   window.setTimeout(() => { flash.value = null }, 2000)
+}
+
+/** Save a NON-draft policy edit via the general update endpoint, then return
+ *  to the list. Flushes any pending autosave first. */
+async function savePolicyNow(): Promise<void> {
+  if (saving.value || !draftId.value) return
+  saving.value = true
+  error.value = null
+  try {
+    window.clearTimeout(autosaveTimer)
+    await updatePolicy(draftId.value, buildDraftPayload())
+    await router.push({ name: 'policies' })
+  } catch (e) {
+    error.value = e instanceof ApiError ? (e.body as { message?: string })?.message ?? e.message : (e instanceof Error ? e.message : 'Save failed.')
+  } finally {
+    saving.value = false
+  }
+}
+
+/** ต่ออายุ — open a fresh renewal draft prefilled from THIS policy. */
+function startRenewal(): void {
+  if (!draftId.value) return
+  void router.push({ name: 'policy-new', query: { renewFrom: draftId.value } })
 }
 
 async function saveAsQuotation(): Promise<void> {
@@ -950,32 +1246,72 @@ async function submitToCarrier(): Promise<void> {
  */
 const hydrating = ref(false)
 
-async function hydrateFromDraft(id: string): Promise<void> {
+/** @param renewMode when true, prefill a NEW renewal draft from this policy:
+ *  keep the party/product/premium/risk, but drop the identifiers + dates and
+ *  set the renewal context (newOrRenew='renew', refAppToId=<source>). */
+async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
   hydrating.value = true
   error.value = null
   try {
     const res = await fetchPolicy(id)
     const p = res.data as unknown as Record<string, unknown>
 
+    if (renewMode) {
+      // Capture the source's year figures so the renewed badges compute from
+      // them (customer +1; policy +1 unless the product is later changed).
+      renewSource.value = {
+        policyYear: yearsSince((p.effectiveDate as string | null) ?? null),
+        customerTenure: yearsSince((p.customerFirstPolicyDate as string | null) ?? null),
+        productId: String(p.productId ?? ''),
+      }
+      loadedStatus.value = null // a brand-new draft, not editing the source
+    } else {
+      // Remember the loaded status so autosave picks the right save endpoint
+      // (draft → /draft, otherwise → general PATCH /policies/{id}).
+      loadedStatus.value = (p.status as string | null) ?? null
+    }
+    customerFirstPolicyDate.value = (p.customerFirstPolicyDate as string | null) ?? null
+    // Manual status edit value (edit mode only; renewals start as a fresh draft).
+    form.status = renewMode ? '' : String(p.status ?? '')
+
     // Scalars — same field names as buildDraftPayload emits.
     form.customerId = String(p.customerId ?? '')
     form.writingAgentId = String(p.writingAgentId ?? '')
     form.productId = String(p.productId ?? '')
     form.carrierId = String(p.carrierId ?? '')
-    form.newOrRenew = (p.newOrRenew as 'new' | 'renew' | null) ?? 'new'
-    form.refAppToId = String(p.refAppToId ?? '')
-    form.applicationNo = String(p.applicationNo ?? '')
-    form.jobNo = String(p.jobNo ?? '')
-    form.notionNo = String(p.notionNo ?? '')
-    form.appDate = String(p.appDate ?? '')
-    form.effectiveDate = String(p.effectiveDate ?? '')
-    form.expiryDate = String(p.expiryDate ?? '')
+    form.newOrRenew = renewMode ? 'renew' : ((p.newOrRenew as 'new' | 'renew' | null) ?? 'new')
+    form.refAppToId = renewMode ? id : String(p.refAppToId ?? '')
+    // Identifiers + dates: fresh for a renewal (numbers re-minted; dates rolled
+    // forward one year from the source's coverage window).
+    form.applicationNo = renewMode ? '' : String(p.applicationNo ?? '')
+    form.jobNo = renewMode ? '' : String(p.jobNo ?? '')
+    form.policyNo = renewMode ? '' : String(p.policyNo ?? '')
+    form.notionNo = renewMode ? '' : String(p.notionNo ?? '')
+    form.appDate = renewMode ? '' : String(p.appDate ?? '')
+    // Renewal coverage window = starts where the old one ended, +1 year.
+    form.effectiveDate = renewMode ? (String(p.expiryDate ?? '')) : String(p.effectiveDate ?? '')
+    form.expiryDate = renewMode ? (rollForwardYear(p.expiryDate as string | null, 1) ?? '') : String(p.expiryDate ?? '')
     form.coverage = Number(p.coverage ?? 0)
     form.policyYear = Number(p.policyYear ?? 1)
     form.actYear = Number(p.actYear ?? 1)
     form.annualPremium = Number(p.annualPremium ?? 0)
     form.premiumMode = (p.premiumMode as typeof form.premiumMode) ?? 'annual'
     form.notes = String(p.notes ?? '')
+
+    // การรับกรมธรรม์และจัดส่ง — cleared on renewal (fresh document lifecycle).
+    // The "done" checkbox is derived from whether a date is present.
+    const receivedDate = renewMode ? '' : String(p.receivedDate ?? '')
+    form.receivedDate = receivedDate
+    form.received = !!receivedDate
+    form.receivedNote = renewMode ? '' : String(p.receivedNote ?? '')
+    const mailingDate = renewMode ? '' : String(p.mailingDate ?? '')
+    form.mailingDate = mailingDate
+    form.delivered = !!mailingDate
+    form.mailingNote = renewMode ? '' : String(p.mailingNote ?? '')
+
+    // สลักหลังเบี้ยเพิ่ม — outstanding endorsement premium (cleared on renewal,
+    // a fresh policy year starts with no carried-over endorsement charge).
+    endorsementPremiumTotal.value = renewMode ? 0 : Number(p.endorsementPremiumTotal ?? 0)
 
     // PolicyResource nests premium/installment/wht fields; read them from the
     // nested blocks (with a flat fallback for any older draft-shaped response).
@@ -1120,6 +1456,9 @@ async function hydrateFromDraft(id: string): Promise<void> {
 
     // Trigger prior-assets load after customer + kind resolved.
     void loadPriorAssets()
+
+    // Load สลักหลัง history (skip on a renewal draft — it starts clean).
+    if (!renewMode) void loadEndorsements()
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Draft resume failed.'
   } finally {
@@ -1135,12 +1474,31 @@ async function hydrateFromDraft(id: string): Promise<void> {
 // The page mounts fresh on every visit, so no reset-on-close watcher
 // needed — the form's reactive() defaults do the reset. If `id` prop is
 // present (resume path), fire hydrateFromDraft after mount.
-onMounted(() => {
+function initFromRoute(): void {
+  void loadPolicyStatuses()
   if (props.id) {
     draftId.value = props.id
     void hydrateFromDraft(props.id)
+    return
   }
-})
+  // Renewal: /policies/new?renewFrom=<sourceId> — prefill a new draft from the
+  // source policy (party/product/premium/risk), fresh identifiers + dates.
+  const renewFrom = route.query.renewFrom
+  if (typeof renewFrom === 'string' && renewFrom.trim() !== '') {
+    void hydrateFromDraft(renewFrom.trim(), true)
+  }
+}
+
+onMounted(initFromRoute)
+
+// The wizard component is reused across its routes (new / edit-draft), so a
+// navigation like edit-draft → new?renewFrom=<id> does NOT remount it and
+// onMounted won't refire. Re-run init when the route identity changes, after
+// reloading so the previous form is fully cleared.
+watch(
+  () => [props.id, route.query.renewFrom] as const,
+  () => { window.location.reload() },
+)
 
 // ── Search closures for EntityPicker ─────────────────────────────────────
 
@@ -1162,14 +1520,24 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <div class="text-xs text-slate-400">
           <RouterLink :to="{ name: 'policies' }" class="hover:text-brand-600">{{ t('modules.policies.name') }}</RouterLink>
           <span class="mx-1">/</span>
-          <span>{{ props.id ? t('policyCreate.resumeDraft.title') : t('policyCreate.title') }}</span>
+          <span>{{ isRenewingFromSource ? t('policyCreate.renewTitle') : (props.id ? (isDraftMode ? t('policyCreate.resumeDraft.title') : t('policyEdit.title')) : t('policyCreate.title')) }}</span>
         </div>
         <h1 class="text-2xl font-semibold text-slate-900 font-mono">
-          {{ draftId ? `#${draftId}` : t('policyCreate.title') }}
+          {{ form.applicationNo || (draftId ? `#${draftId}` : t('policyCreate.title')) }}
         </h1>
-        <div class="mt-1 flex items-center gap-2 text-xs">
-          <span :class="['inline-flex px-2 py-0.5 rounded', statusBadgeClass('draft' as PolicyStatus)]">
-            {{ t('policies.status.draft') }}
+        <div class="mt-1 flex items-center gap-2 text-xs flex-wrap">
+          <!-- Header shows the current status as a badge; edit it via the
+               "สถานะกรมธรรม์" dropdown in the ผู้เอาประกัน section. -->
+          <span :class="['inline-flex px-2 py-0.5 rounded', statusBadgeClass(((!isDraftMode && form.status) || loadedStatus || 'draft') as PolicyStatus)]">
+            {{ t(`policies.status.${(!isDraftMode && form.status) || loadedStatus || 'draft'}`) }}
+          </span>
+          <!-- ปีที่ของกรมธรรม์ (from this policy's effective_date) -->
+          <span v-if="policyYear !== null" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-100">
+            <i class="pi pi-calendar text-[10px]" /> {{ t('policyCreate.policyYearBadge', { n: policyYear }) }}
+          </span>
+          <!-- อายุการเป็นลูกค้า InsureHub (from the customer's first policy) -->
+          <span v-if="customerTenureYears !== null" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">
+            <i class="pi pi-user text-[10px]" /> {{ t('policyCreate.customerTenureBadge', { n: customerTenureYears }) }}
           </span>
           <span v-if="autosaving" class="text-slate-400">
             <i class="pi pi-spin pi-spinner text-[10px] mr-1" /> {{ t('policyCreate.action.savingDraft') }}
@@ -1184,18 +1552,32 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
           {{ t('policyCreate.cancel') }}
         </button>
-        <button type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
-          class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
-          <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
-        </button>
-        <button type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
-          class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
-          <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
-        </button>
-        <button type="button" @click="submitToCarrier" :disabled="saving"
-          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-          <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
-        </button>
+        <!-- Draft / create mode: the three draft → quotation → submit actions. -->
+        <template v-if="isDraftMode">
+          <button type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
+            class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
+            <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
+          </button>
+          <button type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
+            class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
+            <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
+          </button>
+          <button type="button" @click="submitToCarrier" :disabled="saving"
+            class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
+          </button>
+        </template>
+        <!-- Editing a non-draft policy: renew (pull data forward) + save. -->
+        <template v-else>
+          <button type="button" @click="startRenewal" :disabled="saving"
+            class="px-3 py-1.5 rounded-lg text-sm text-brand-700 border border-brand-300 hover:bg-brand-50 disabled:opacity-50">
+            <i class="pi pi-replay text-xs mr-1" /> {{ t('policyCreate.action.renew') }}
+          </button>
+          <button type="button" @click="savePolicyNow" :disabled="saving"
+            class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+            <i class="pi pi-check text-xs mr-1" /> {{ t('policyCreate.action.save') }}
+          </button>
+        </template>
       </div>
     </header>
 
@@ -1235,6 +1617,23 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <input :value="form.jobNo || t('policyCreate.autoRunPending')" type="text" readonly
             :class="['w-full border rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none',
               form.jobNo ? 'border-slate-200 bg-slate-50 text-slate-700' : 'border-slate-200 bg-slate-50 text-slate-400']" />
+        </FormField>
+
+        <!-- เลขที่กรมธรรม์ (policy_no) — issued by the carrier later once the
+             payment is made and the policy is approved. Editable. -->
+        <FormField :label="t('policyCreate.policyNo')" :hint="t('policyCreate.policyNoHint')">
+          <input v-model.trim="form.policyNo" type="text" maxlength="64"
+            :placeholder="t('policyCreate.policyNoPlaceholder')"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand-400" />
+        </FormField>
+
+        <!-- สถานะกรมธรรม์ — editable dropdown once the policy exists (draft or
+             beyond). Options queried from the policy_statuses lookup. -->
+        <FormField v-if="draftId" :label="t('policyCreate.statusLabel')" :hint="t('policyCreate.statusHint')">
+          <select v-model="form.status"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option v-for="s in statusOptions" :key="s.code" :value="s.code">{{ s.nameTh }}</option>
+          </select>
         </FormField>
 
         <FormField :label="t('policyCreate.customer')" required>
@@ -1468,7 +1867,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </div>
 
       <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-4 mb-2">{{ t('policyCreate.installment') }}</h3>
-      <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <FormField :label="t('policyCreate.premiumMode')">
           <select v-model="form.premiumMode"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
@@ -1476,6 +1875,11 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
               {{ t(`policyCreate.premiumModes.${m}`) }}
             </option>
           </select>
+        </FormField>
+        <!-- จำนวนงวด — auto from frequency, editable. Prefills the payment modal. -->
+        <FormField :label="t('policyCreate.installmentCount')" :hint="t('policyCreate.installmentCountHint')">
+          <input v-model.number="form.installmentCount" type="number" min="1" max="60" step="1"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
         <FormField :label="t('policyCreate.installmentTerm')">
           <input v-model.trim="form.installmentTerm" type="text"
@@ -1655,6 +2059,131 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </p>
     </section>
 
+    <!-- ── Section: การชำระเงิน (payment tracking, C-24 FE-only) ─────────── -->
+    <section class="card p-5">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-semibold text-slate-900">การชำระเงิน</h2>
+          <p class="text-xs text-slate-500 mt-0.5">บันทึกการชำระเงินจากลูกค้า — จ่ายเต็ม / หักคอมมิสชั่น / มีส่วนลด / ผ่อน</p>
+        </div>
+        <button type="button" @click="showPaymentModal = true"
+          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5">
+          <i class="pi pi-wallet text-xs" /> บันทึกการชำระเงิน
+        </button>
+      </div>
+    </section>
+
+    <!-- ── Section: สลักหลัง (endorsement, v1 premium-increase) ──────────── -->
+    <section v-if="canEndorse" class="card p-5">
+      <div class="flex items-center justify-between">
+        <div>
+          <h2 class="font-semibold text-slate-900">{{ t('endorsement.sectionTitle') }}</h2>
+          <p class="text-xs text-slate-500 mt-0.5">{{ t('endorsement.sectionSubtitle') }}</p>
+        </div>
+        <button type="button" @click="openNewEndorsement"
+          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5">
+          <i class="pi pi-file-edit text-xs" /> {{ t('endorsement.newButton') }}
+        </button>
+      </div>
+
+      <!-- History (before → after diff rows) -->
+      <div v-if="premiumEndorsements.length" class="mt-4 overflow-x-auto">
+        <table class="w-full text-sm">
+          <thead>
+            <tr class="text-left text-xs text-slate-500 border-b border-slate-100">
+              <th class="py-2 pr-3">{{ t('endorsement.col.date') }}</th>
+              <th class="py-2 pr-3">{{ t('endorsement.col.reason') }}</th>
+              <th class="py-2 pr-3 text-right">{{ t('endorsement.col.premiumChange') }}</th>
+              <th class="py-2 pr-3 text-right">{{ t('endorsement.col.coverageChange') }}</th>
+              <th class="py-2 px-3 text-right">{{ t('endorsement.col.additional') }}</th>
+              <th class="py-2 pl-3 text-right w-20"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="ev in premiumEndorsements" :key="ev.id" class="border-b border-slate-50">
+              <template v-if="endorsementSummary(ev)">
+                <td class="py-2 pr-3 whitespace-nowrap text-slate-600">{{ endorsementSummary(ev)!.effectiveDate }}</td>
+                <td class="py-2 pr-3 text-slate-700">{{ endorsementSummary(ev)!.reason }}</td>
+                <td class="py-2 pr-3 text-right whitespace-nowrap">
+                  <span class="text-slate-400">{{ fmtMoney(endorsementSummary(ev)!.before.annualPremium) }}</span>
+                  <span class="text-slate-400 mx-1">→</span>
+                  <span class="text-slate-800 font-medium">{{ fmtMoney(endorsementSummary(ev)!.after.annualPremium) }}</span>
+                </td>
+                <td class="py-2 pr-3 text-right whitespace-nowrap text-slate-500">
+                  <template v-if="endorsementSummary(ev)!.after.coverage !== endorsementSummary(ev)!.before.coverage">
+                    {{ fmtMoney(endorsementSummary(ev)!.before.coverage) }} → {{ fmtMoney(endorsementSummary(ev)!.after.coverage) }}
+                  </template>
+                  <template v-else>—</template>
+                </td>
+                <td class="py-2 px-3 text-right whitespace-nowrap text-brand-700 font-medium">
+                  {{ fmtMoney(endorsementSummary(ev)!.additionalTotal) }}
+                </td>
+                <td class="py-2 pl-3 text-right whitespace-nowrap">
+                  <button type="button" @click="openEditEndorsement(ev)"
+                    class="text-slate-400 hover:text-brand-600 px-1" :title="t('endorsement.edit')">
+                    <i class="pi pi-pencil text-xs" />
+                  </button>
+                  <button type="button" @click="deleteEndorsement(ev)"
+                    class="text-slate-400 hover:text-rose-600 px-1" :title="t('endorsement.delete')">
+                    <i class="pi pi-trash text-xs" />
+                  </button>
+                </td>
+              </template>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p v-else class="mt-4 text-xs text-slate-400">{{ t('endorsement.empty') }}</p>
+    </section>
+
+    <!-- ── Section: การรับกรมธรรม์และจัดส่ง (received + delivery) ────────── -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900">{{ t('policyCreate.fulfilment.title') }}</h2>
+      <p class="text-xs text-slate-500 mt-0.5 mb-4">{{ t('policyCreate.fulfilment.subtitle') }}</p>
+
+      <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <!-- การได้รับกรมธรรม์ — received from carrier -->
+        <div class="rounded-lg border border-slate-200 p-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" v-model="form.received"
+              class="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            <span class="font-medium text-sm text-slate-800">{{ t('policyCreate.fulfilment.receivedDone') }}</span>
+          </label>
+          <div v-if="form.received" class="mt-3 space-y-3">
+            <FormField :label="t('policyCreate.fulfilment.receivedDate')">
+              <input type="date" v-model="form.receivedDate"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+            <FormField :label="t('policyCreate.fulfilment.note')">
+              <textarea v-model="form.receivedNote" rows="2"
+                :placeholder="t('policyCreate.fulfilment.receivedNotePlaceholder')"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+          </div>
+        </div>
+
+        <!-- การจัดส่ง — delivered to customer (reuses mailing_* columns) -->
+        <div class="rounded-lg border border-slate-200 p-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" v-model="form.delivered"
+              class="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            <span class="font-medium text-sm text-slate-800">{{ t('policyCreate.fulfilment.deliveredDone') }}</span>
+          </label>
+          <div v-if="form.delivered" class="mt-3 space-y-3">
+            <FormField :label="t('policyCreate.fulfilment.deliveredDate')">
+              <input type="date" v-model="form.mailingDate"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+            <FormField :label="t('policyCreate.fulfilment.note')">
+              <textarea v-model="form.mailingNote" rows="2"
+                :placeholder="t('policyCreate.fulfilment.deliveredNotePlaceholder')"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+          </div>
+        </div>
+      </div>
+    </section>
+
     <!-- ── Section 5: Notes ─────────────────────────────────────────────── -->
     <section class="card p-5">
       <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.5') }}</h2>
@@ -1663,5 +2192,31 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
       </FormField>
     </section>
+
+    <!-- Payment modal (frontend-only skeleton). installmentCount prefills the
+         ผ่อน rows; premiumMode label shown as the plan. -->
+    <PolicyPaymentModal
+      :open="showPaymentModal"
+      :expected="expectedPremium"
+      :carrier-label="carrierLabel"
+      :installment-count="Number(form.installmentCount) || 1"
+      :frequency-label="t(`policyCreate.premiumModes.${form.premiumMode}`)"
+      @close="showPaymentModal = false"
+    />
+
+    <!-- สลักหลังเบี้ยเพิ่ม (v1) modal. Submits to the endorsement API, which
+         updates the policy premium and records the before→after delta. -->
+    <PolicyEndorsementModal
+      :open="showEndorsementModal"
+      :current-annual-premium="Number(form.annualPremium) || 0"
+      :current-coverage="Number(form.coverage) || 0"
+      :effective-date="form.effectiveDate || null"
+      :expiry-date="form.expiryDate || null"
+      :initial="endorsementInitial"
+      :saving="endorsementSaving"
+      :errors="endorsementErrors"
+      @close="showEndorsementModal = false"
+      @submit="submitEndorsement"
+    />
   </div>
 </template>
