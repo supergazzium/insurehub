@@ -80,6 +80,8 @@ class PolicyRequest extends FormRequest
             'effectiveDate' => ['sometimes', 'nullable', 'date'],
             'expiryDate' => ['sometimes', 'nullable', 'date'],
             'issueDate' => ['sometimes', 'nullable', 'date'],
+            'receivedDate' => ['sometimes', 'nullable', 'date'],
+            'receivedNote' => ['sometimes', 'nullable', 'string'],
             'nextPremiumDue' => ['sometimes', 'nullable', 'date'],
             'cancelDate' => ['sometimes', 'nullable', 'date'],
             'lapseDate' => ['sometimes', 'nullable', 'date'],
@@ -91,7 +93,9 @@ class PolicyRequest extends FormRequest
             // reinstated) still accepted on READ paths for the shim window;
             // writes go through PolicyEventController which enforces the
             // full transition matrix on top of this basic enum check.
-            'status' => ['sometimes', 'string', 'in:draft,quotation,submitted,approved,issued,active,expired,cancelled,rejected,lapsed'],
+            // Accept every coded policy_statuses lookup value so the manual
+            // status dropdown (queried from that table) can set any of them.
+            'status' => ['sometimes', 'string', 'in:draft,quotation,submitted,approved,issued,active,expired,cancelled,rejected,lapsed,reinstated,quote,application'],
             'notes' => ['sometimes', 'nullable', 'string'],
             'internalNote' => ['sometimes', 'nullable', 'string', 'max:255'],
             // Motor block — sent when the picked product is motor.
@@ -232,6 +236,8 @@ class PolicyRequest extends FormRequest
             'effectiveDate' => 'effective_date',
             'expiryDate' => 'expiry_date',
             'issueDate' => 'issue_date',
+            'receivedDate' => 'received_date',
+            'receivedNote' => 'received_note',
             'nextPremiumDue' => 'next_premium_due',
             'cancelDate' => 'cancel_date',
             'lapseDate' => 'lapse_date',

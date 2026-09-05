@@ -28,6 +28,7 @@ class Policy extends Model
         'insured_person_birth_date' => 'date',
         'expiry_date' => 'date',
         'issue_date' => 'date',
+        'received_date' => 'date',
         'next_premium_due' => 'date',
         'cancel_date' => 'date',
         'lapse_date' => 'date',

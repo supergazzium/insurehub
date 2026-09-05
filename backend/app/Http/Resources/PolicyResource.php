@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\Policy;
+use App\Models\PolicyEvent;
 use App\Support\PolicyRiskShim;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -36,8 +37,19 @@ class PolicyResource extends JsonResource
             'appDate' => $this->app_date?->toDateString(),
             'createDate' => $this->create_date?->toDateString(),
             'effectiveDate' => $this->effective_date?->toDateString(),
+            // Earliest effective_date across ALL of this customer's policies —
+            // anchors the "customer tenure with InsureHub" metric shown in the
+            // wizard. Null when the customer has no dated policy yet.
+            'customerFirstPolicyDate' => $this->customerFirstPolicyDate(),
             'expiryDate' => $this->expiry_date?->toDateString(),
             'issueDate' => $this->issue_date?->toDateString(),
+            // การได้รับกรมธรรม์ (received from carrier) + การจัดส่ง (delivered to
+            // customer) tracking, surfaced flat for the wizard's received/
+            // delivery section. Delivery reuses the mailing_* columns.
+            'receivedDate' => $this->received_date?->toDateString(),
+            'receivedNote' => $this->received_note ?? '',
+            'mailingDate' => $this->mailing_date?->toDateString(),
+            'mailingNote' => $this->mailing_note ?? '',
             'nextPremiumDue' => $this->next_premium_due?->toDateString(),
             'cancelDate' => $this->cancel_date?->toDateString(),
             'lapseDate' => $this->lapse_date?->toDateString(),
@@ -65,6 +77,10 @@ class PolicyResource extends JsonResource
                 'netCustomerPaid' => $this->net_customer_paid !== null ? (float) $this->net_customer_paid : null,
                 'check' => $this->premium_check ?? '',
             ],
+            // เบี้ยเพิ่มจากสลักหลัง — total additional (pro-rata) premium recorded
+            // across premium-change endorsements. Surfaced so the payment modal
+            // can fold it into the amount still owed for the current period.
+            'endorsementPremiumTotal' => $this->endorsementPremiumTotal(),
             // C-20: commission basis frozen onto this policy at create
             // time. `frozen` = a snapshot exists (rate is immutable to
             // later product edits). Null rates when the product carried
@@ -227,6 +243,44 @@ class PolicyResource extends JsonResource
      *
      * @return array{kind: string|null, fields: array<string, mixed>}|null
      */
+    /**
+     * The customer's earliest policy effective_date (across all their
+     * policies, this one included), as an ISO date string or null.
+     * Powers the "years with InsureHub" tenure metric.
+     */
+    private function customerFirstPolicyDate(): ?string
+    {
+        if ($this->customer_id === null) {
+            return null;
+        }
+        $min = Policy::query()
+            ->where('tenant_id', $this->tenant_id)
+            ->where('customer_id', $this->customer_id)
+            ->whereNull('deleted_at')
+            ->whereNotNull('effective_date')
+            ->min('effective_date');
+
+        return $min ? \Illuminate\Support\Carbon::parse($min)->toDateString() : null;
+    }
+
+    /**
+     * Sum of additional (pro-rata) premium recorded across this policy's
+     * premium-change endorsements (สลักหลังเบี้ยเพิ่ม). 0 when there are none.
+     */
+    private function endorsementPremiumTotal(): float
+    {
+        $sum = 0.0;
+        $events = PolicyEvent::query()
+            ->where('policy_id', $this->id)
+            ->where('type', 'endorsement.premium_change')
+            ->get(['payload']);
+        foreach ($events as $e) {
+            $sum += (float) ($e->payload['additionalTotal'] ?? 0);
+        }
+
+        return round($sum, 2);
+    }
+
     private function buildRiskBlock(): ?array
     {
         $kind = $this->resolveRiskKind();

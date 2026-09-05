@@ -200,6 +200,10 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // Phase 9 — endorsements (event log per policy).
     Route::get('policies/{policy}/endorsements', [EndorsementController::class, 'index']);
     Route::post('policies/{policy}/endorsements', [EndorsementController::class, 'store']);
+    // สลักหลังเบี้ยเพิ่ม (v1) — mutates the policy premium + records the delta.
+    Route::post('policies/{policy}/endorsements/premium', [EndorsementController::class, 'storePremiumChange']);
+    Route::patch('policies/{policy}/endorsements/premium/{event}', [EndorsementController::class, 'updatePremiumChange']);
+    Route::delete('policies/{policy}/endorsements/premium/{event}', [EndorsementController::class, 'destroyPremiumChange']);
     // Phase 9 — motor tariff admin CRUD.
     Route::get('motor-act-tariffs', [MotorActTariffController::class, 'index']);
     Route::post('motor-act-tariffs', [MotorActTariffController::class, 'store']);
