@@ -91,6 +91,13 @@ export function updateDraftPolicy(id: string, payload: Record<string, unknown>) 
   return api.patch<Single<Policy>>(`policies/${id}/draft`, payload)
 }
 
+/** PATCH /policies/{id} — general update for a NON-draft policy (issued /
+ *  active / quotation / …). The wizard uses this when editing a policy that
+ *  has moved past draft, since /draft rejects non-draft rows. */
+export function updatePolicy(id: string, payload: Record<string, unknown>) {
+  return api.patch<Single<Policy>>(`policies/${id}`, payload)
+}
+
 /** POST /policies/{id}/promote-to-quotation — mints quote_no and flips
  *  status to `quotation`. Backend rejects any source state other than
  *  draft with `code:invalid_transition`. */

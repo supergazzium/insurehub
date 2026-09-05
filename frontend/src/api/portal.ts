@@ -162,6 +162,20 @@ export function fetchNationalities() {
   return api.get<{ data: NationalityRow[] }>('lookups/nationalities')
 }
 
+/** One row from lookups/policy-statuses — LookupController::policyStatuses.
+ *  `code` is the machine value stored on policies.status (null for follow-up
+ *  sub-statuses that aren't a settable policy status). */
+export interface PolicyStatusRow {
+  id: string
+  nameTh: string
+  groupNameTh: string | null
+  code: string | null
+}
+
+export function fetchPolicyStatuses() {
+  return api.get<{ data: PolicyStatusRow[] }>('lookups/policy-statuses')
+}
+
 export function fetchReferralLink() {
   return api.get<ReferralLinkInfo>('me/agent/referral-link')
 }
