@@ -8,9 +8,12 @@ use App\Http\Requests\PolicyRequest;
 use App\Http\Resources\PolicyListResource;
 use App\Http\Resources\PolicyResource;
 use App\Mail\PolicyRenewalNoticeMail;
+use App\Mail\RenewalQuoteRequestMail;
+use App\Mail\RenewalQuoteToCustomerMail;
 use App\Models\Policy;
-use App\Services\Commission\CommissionBandCoverage;
 use App\Models\PolicyEvent;
+use App\Services\Commission\CommissionBandCoverage;
+use App\Support\PolicyNumbering;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -148,10 +151,10 @@ class PolicyController extends ApiController
             // null and discards the mint). Only mint when the client did not
             // supply a value.
             if (empty($model['application_no'])) {
-                $model['application_no'] = \App\Support\PolicyNumbering::nextApplicationNo($tenantId);
+                $model['application_no'] = PolicyNumbering::nextApplicationNo($tenantId);
             }
             if (empty($model['job_no'])) {
-                $model['job_no'] = \App\Support\PolicyNumbering::nextJobNo($tenantId);
+                $model['job_no'] = PolicyNumbering::nextJobNo($tenantId);
             }
             $payload = $model + ['tenant_id' => $tenantId];
             $policy = Policy::create($payload);
@@ -230,10 +233,10 @@ class PolicyController extends ApiController
             // client-sent null and discards the mint). Only mint when the
             // client did not supply a value (edit-draft re-save keeps it).
             if (empty($model['application_no'])) {
-                $model['application_no'] = \App\Support\PolicyNumbering::nextApplicationNo($tenantId);
+                $model['application_no'] = PolicyNumbering::nextApplicationNo($tenantId);
             }
             if (empty($model['job_no'])) {
-                $model['job_no'] = \App\Support\PolicyNumbering::nextJobNo($tenantId);
+                $model['job_no'] = PolicyNumbering::nextJobNo($tenantId);
             }
             $payload = $model + [
                 'tenant_id' => $tenantId,
@@ -244,7 +247,7 @@ class PolicyController extends ApiController
             ];
             $policy = Policy::create($payload);
             $this->syncChildren($request, $policy);
-            \App\Models\PolicyEvent::create([
+            PolicyEvent::create([
                 'policy_id' => $policy->id,
                 'type' => 'draftCreated',
                 'occurred_at' => now(),
@@ -302,7 +305,7 @@ class PolicyController extends ApiController
             ], 409));
         }
 
-        $quoteNo = \App\Support\PolicyNumbering::nextQuoteNo($policy->tenant_id);
+        $quoteNo = PolicyNumbering::nextQuoteNo($policy->tenant_id);
 
         DB::transaction(function () use ($policy, $quoteNo, $request): void {
             $policy->update([
@@ -310,7 +313,7 @@ class PolicyController extends ApiController
                 'quote_no' => $quoteNo,
                 'quote_date' => now()->toDateString(),
             ]);
-            \App\Models\PolicyEvent::create([
+            PolicyEvent::create([
                 'policy_id' => $policy->id,
                 'type' => 'quotationMinted',
                 'occurred_at' => now(),
@@ -363,7 +366,7 @@ class PolicyController extends ApiController
         }
 
         $applicationNo = $policy->application_no
-            ?? \App\Support\PolicyNumbering::nextApplicationNo($policy->tenant_id);
+            ?? PolicyNumbering::nextApplicationNo($policy->tenant_id);
         $appDate = now()->toDateString();
         $verb = $policy->status === 'draft' ? 'submittedFromDraft' : 'convertedToApplication';
 
@@ -373,7 +376,7 @@ class PolicyController extends ApiController
                 'application_no' => $applicationNo,
                 'app_date' => $appDate,
             ]);
-            \App\Models\PolicyEvent::create([
+            PolicyEvent::create([
                 'policy_id' => $policy->id,
                 'type' => $verb,
                 'occurred_at' => now(),
@@ -849,6 +852,226 @@ class PolicyController extends ApiController
                 : 'Notice sent to the customer.',
             'sentTo' => $to,
             'sentToAgent' => $sentToAgent,
+        ]);
+    }
+
+    /**
+     * Request a next-term renewal quotation (Phase B of the renewal quotation
+     * pipeline). The operator chooses the recipient:
+     *   - `carrier` → the insurance company (uses the carrier's email on file)
+     *   - `agent`   → the writing agent, to relay the request off-system
+     * An optional custom message overrides the default body. On success a
+     * `renewalQuoteRequested` event is logged, advancing the derived
+     * renewalStage to `quote_requested` on the pipeline UI.
+     */
+    public function requestRenewalQuote(Request $request, Policy $policy): JsonResponse
+    {
+        $this->authorizeTenant($request, $policy);
+        $data = $request->validate([
+            'recipient' => ['required', 'string', 'in:carrier,agent'],
+            'subject' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'message' => ['sometimes', 'nullable', 'string', 'max:2000'],
+            // 'system' = the app sends the email; 'manual' = the operator sent it
+            // themselves via their own mail app and is just logging that it's done.
+            'mode' => ['sometimes', 'string', 'in:system,manual'],
+        ]);
+        $mode = $data['mode'] ?? 'system';
+        $policy->loadMissing(['customer', 'writingAgent', 'carrier', 'product']);
+
+        // Resolve the target address from the chosen recipient. Fail with a
+        // clear per-recipient message so the UI can tell the operator exactly
+        // what's missing rather than a generic "no email".
+        if ($data['recipient'] === 'carrier') {
+            $to = $policy->carrier?->email;
+        } else {
+            $to = $policy->writingAgent?->email;
+        }
+
+        // In system mode we must have a deliverable address; in manual mode the
+        // operator handles delivery, so a missing address is fine (we still log).
+        if ($mode === 'system' && empty($to)) {
+            throw ValidationException::withMessages([
+                'recipient' => [$data['recipient'] === 'carrier'
+                    ? 'บริษัทประกันนี้ยังไม่มีอีเมลติดต่อในระบบ — ใช้ “ส่งเอง” แทน หรือเพิ่มอีเมลบริษัทก่อน'
+                    : 'ตัวแทนผู้เขียนกรมธรรม์ยังไม่มีอีเมลในระบบ — ใช้ “ส่งเอง” แทน'],
+            ]);
+        }
+
+        if ($mode === 'system') {
+            try {
+                Mail::to($to)->send(new RenewalQuoteRequestMail(
+                    $policy,
+                    $data['recipient'],
+                    $data['message'] ?? null,
+                    $data['subject'] ?? null,
+                ));
+            } catch (\Throwable $e) {
+                Log::warning('Renewal quote request send failed', [
+                    'policy_id' => $policy->id, 'to' => $to, 'error' => $e->getMessage(),
+                ]);
+                throw ValidationException::withMessages([
+                    'email' => ['ส่งอีเมลไม่สำเร็จ: '.$e->getMessage()],
+                ]);
+            }
+        }
+
+        PolicyEvent::create([
+            'policy_id' => $policy->id,
+            'type' => 'renewalQuoteRequested',
+            'occurred_at' => now(),
+            'by_user_id' => $request->user()->id,
+            'payload' => [
+                'recipient' => $data['recipient'],
+                'sentTo' => $to,
+                'subject' => $data['subject'] ?? null,
+                'message' => $data['message'] ?? null,
+                'mode' => $mode,
+            ],
+        ]);
+
+        $who = $data['recipient'] === 'carrier' ? 'บริษัทประกัน' : 'ตัวแทน';
+
+        return response()->json([
+            'message' => $mode === 'manual'
+                ? "บันทึกว่าส่งคำขอถึง{$who}เองแล้ว"
+                : "ส่งคำขอใบเสนอราคาถึง{$who}แล้ว",
+            'sentTo' => $to,
+            'recipient' => $data['recipient'],
+            'mode' => $mode,
+        ]);
+    }
+
+    /**
+     * Send the generated InsureHub quotation to the customer (Phase E). Attaches
+     * the most recent `renewal_quote_insurehub` document and logs a
+     * `renewalQuoteSent` event (stage: quote_sent). Refuses if no InsureHub
+     * quote has been generated yet, or the customer has no email on file.
+     */
+    public function sendRenewalQuote(Request $request, Policy $policy): JsonResponse
+    {
+        $this->authorizeTenant($request, $policy);
+        $data = $request->validate([
+            'message' => ['sometimes', 'nullable', 'string', 'max:2000'],
+        ]);
+        $policy->loadMissing(['customer', 'product']);
+
+        $to = $policy->customer?->email;
+        if (empty($to)) {
+            throw ValidationException::withMessages([
+                'email' => ['ลูกค้ายังไม่มีอีเมลในระบบ'],
+            ]);
+        }
+
+        // The quote to attach = the latest generated InsureHub quotation.
+        $quoteDoc = $policy->documents()
+            ->where('type', 'renewal_quote_insurehub')
+            ->orderByDesc('uploaded_at')
+            ->first();
+        if ($quoteDoc === null) {
+            throw ValidationException::withMessages([
+                'quote' => ['ยังไม่มีใบเสนอราคา InsureHub ที่จัดทำไว้'],
+            ]);
+        }
+
+        try {
+            Mail::to($to)->send(new RenewalQuoteToCustomerMail(
+                $policy,
+                $quoteDoc,
+                $data['message'] ?? null,
+            ));
+        } catch (\Throwable $e) {
+            Log::warning('Renewal quote to customer send failed', [
+                'policy_id' => $policy->id, 'to' => $to, 'error' => $e->getMessage(),
+            ]);
+            throw ValidationException::withMessages([
+                'email' => ['ส่งอีเมลไม่สำเร็จ: '.$e->getMessage()],
+            ]);
+        }
+
+        PolicyEvent::create([
+            'policy_id' => $policy->id,
+            'type' => 'renewalQuoteSent',
+            'occurred_at' => now(),
+            'by_user_id' => $request->user()->id,
+            'payload' => [
+                'sentTo' => $to,
+                'documentId' => (string) $quoteDoc->id,
+            ],
+        ]);
+
+        return response()->json([
+            'message' => 'ส่งใบเสนอราคาถึงลูกค้าแล้ว',
+            'sentTo' => $to,
+        ]);
+    }
+
+    /**
+     * Mark a renewal as declined/lost (Phase E). Terminal off-track stage.
+     * Records an optional reason for reporting. Logs a `renewalDeclined` event
+     * (stage: declined).
+     */
+    public function declineRenewal(Request $request, Policy $policy): JsonResponse
+    {
+        $this->authorizeTenant($request, $policy);
+        $data = $request->validate([
+            'reason' => ['sometimes', 'nullable', 'string', 'max:500'],
+        ]);
+
+        PolicyEvent::create([
+            'policy_id' => $policy->id,
+            'type' => 'renewalDeclined',
+            'occurred_at' => now(),
+            'by_user_id' => $request->user()->id,
+            'payload' => [
+                'reason' => $data['reason'] ?? null,
+            ],
+        ]);
+
+        return response()->json([
+            'message' => 'บันทึกว่าลูกค้าปฏิเสธการต่ออายุแล้ว',
+        ]);
+    }
+
+    /**
+     * Manually mark a renewal as having reached a given stage — the "I did this
+     * outside the system, just log it" escape hatch on every step. Writes the
+     * event that drives the derived renewalStage, WITHOUT performing the real
+     * side-effect (no email sent, no document required). Lets an operator move
+     * a policy forward when the concrete action happened elsewhere.
+     */
+    public function markRenewalStage(Request $request, Policy $policy): JsonResponse
+    {
+        $this->authorizeTenant($request, $policy);
+        $data = $request->validate([
+            'stage' => ['required', 'string', 'in:contacted,quote_requested,quote_received,quote_prepared,quote_sent,renewed,declined'],
+            'note' => ['sometimes', 'nullable', 'string', 'max:500'],
+        ]);
+
+        // Map each pipeline stage to the event type the derivation reads.
+        $eventType = [
+            'contacted' => 'renewalContacted',
+            'quote_requested' => 'renewalQuoteRequested',
+            'quote_received' => 'renewalQuoteReceived',
+            'quote_prepared' => 'renewalQuotePrepared',
+            'quote_sent' => 'renewalQuoteSent',
+            'renewed' => 'renewalStarted',
+            'declined' => 'renewalDeclined',
+        ][$data['stage']];
+
+        PolicyEvent::create([
+            'policy_id' => $policy->id,
+            'type' => $eventType,
+            'occurred_at' => now(),
+            'by_user_id' => $request->user()->id,
+            'payload' => [
+                'manual' => true,
+                'note' => $data['note'] ?? null,
+            ],
+        ]);
+
+        return response()->json([
+            'message' => 'บันทึกสถานะแล้ว',
+            'stage' => $data['stage'],
         ]);
     }
 }

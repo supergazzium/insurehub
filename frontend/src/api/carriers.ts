@@ -132,6 +132,9 @@ export function fetchCredentialLabels() {
 /** Sub-resource CRUD for /carriers/{id}/contacts. */
 export type CarrierContactPayload = Partial<Omit<CarrierContact, 'id' | 'carrierId'>>
 
+export function fetchCarrierContacts(carrierId: string) {
+  return api.get<{ data: CarrierContact[] }>(`carriers/${carrierId}/contacts`)
+}
 export function createCarrierContact(carrierId: string, payload: CarrierContactPayload) {
   return api.post<{ data: CarrierContact }>(`carriers/${carrierId}/contacts`, payload)
 }

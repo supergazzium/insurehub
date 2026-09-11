@@ -50,6 +50,7 @@ export interface ExpiringPolicy {
   carrierId?: string | null
   carrierCode: string | null
   carrierName: string | null
+  carrierEmail?: string | null
   carrierInsureType?: string | null
   productId?: string | null
   productCode: string | null
@@ -61,7 +62,26 @@ export interface ExpiringPolicy {
   lastContactedAt?: string | null
   lastNoticeSentAt?: string | null
   renewalStartedAt?: string | null
+  // Renewal quotation pipeline (Phase A) — event timestamps + derived stage.
+  quoteRequestedAt?: string | null
+  quoteReceivedAt?: string | null
+  quotePreparedAt?: string | null
+  quoteSentAt?: string | null
+  renewalDeclinedAt?: string | null
+  renewalStage?: RenewalStage
 }
+
+/** Ordered renewal-pipeline stages, derived server-side from policy events. */
+export type RenewalStage =
+  | 'not_started'
+  | 'contacted'
+  | 'quote_requested'
+  | 'quote_received'
+  | 'quote_prepared'
+  | 'quote_sent'
+  | 'renewed'
+  | 'declined'
+  | 'expired'
 
 // Phase 8b — renewal actions
 export interface RenewalContactedPayload {
@@ -92,6 +112,48 @@ export function markRenewalStarted(policyId: string) {
 export function sendRenewalNotice(policyId: string) {
   return api.post<{ message: string; sentTo: string; sentToAgent: boolean }>(
     `policies/${policyId}/renewal/send-notice`,
+  )
+}
+
+// Renewal quotation pipeline — Phase B: request a next-term quotation.
+export type QuoteRequestRecipient = 'carrier' | 'agent'
+// 'system' = the app sends the email; 'manual' = the operator sent it via their
+// own mail app and is just logging that it's done.
+export type QuoteRequestMode = 'system' | 'manual'
+export interface RequestRenewalQuotePayload {
+  recipient: QuoteRequestRecipient
+  subject?: string
+  message?: string
+  mode?: QuoteRequestMode
+}
+export function requestRenewalQuote(policyId: string, payload: RequestRenewalQuotePayload) {
+  return api.post<{ message: string; sentTo: string | null; recipient: QuoteRequestRecipient; mode: QuoteRequestMode }>(
+    `policies/${policyId}/renewal/request-quote`, payload,
+  )
+}
+
+// Phase E — send the generated InsureHub quote to the customer.
+export function sendRenewalQuote(policyId: string, message?: string) {
+  return api.post<{ message: string; sentTo: string }>(
+    `policies/${policyId}/renewal/send-quote`, { message },
+  )
+}
+
+// Phase E — mark the renewal declined/lost, with an optional reason.
+export function declineRenewal(policyId: string, reason?: string) {
+  return api.post<{ message: string }>(
+    `policies/${policyId}/renewal/decline`, { reason },
+  )
+}
+
+// Manual stage marker — advance a policy to a stage without performing the
+// real side-effect (no email/upload). The "I did this outside the system" path.
+export type ManualStage =
+  | 'contacted' | 'quote_requested' | 'quote_received'
+  | 'quote_prepared' | 'quote_sent' | 'renewed' | 'declined'
+export function markRenewalStage(policyId: string, stage: ManualStage, note?: string) {
+  return api.post<{ message: string; stage: ManualStage }>(
+    `policies/${policyId}/renewal/mark-stage`, { stage, note },
   )
 }
 

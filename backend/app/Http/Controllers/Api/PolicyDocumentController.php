@@ -17,11 +17,18 @@ use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class PolicyDocumentController extends ApiController
 {
+    /**
+     * Allowed document types, shared by store() + upload(). The two
+     * `renewal_quote_*` types feed the renewal quotation pipeline: uploading
+     * one advances the policy's renewal stage (see recordRenewalStageEvent).
+     */
+    private const DOC_TYPES = 'application,policy,receipt,medical,endorsement,cancellation,renewal_quote_carrier,renewal_quote_insurehub,other';
+
     public function store(Request $request, Policy $policy): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
         $data = $request->validate([
-            'type' => ['required', 'string', 'in:application,policy,receipt,medical,endorsement,cancellation,other'],
+            'type' => ['required', 'string', 'in:'.self::DOC_TYPES],
             'fileName' => ['required', 'string', 'max:255'],
             'filePath' => ['nullable', 'string', 'max:512'],
         ]);
@@ -45,6 +52,8 @@ class PolicyDocumentController extends ApiController
                     'fileName' => $data['fileName'],
                 ],
             ]);
+            $this->recordRenewalStageEvent($policy, $data['type'], $doc, $request);
+
             return $doc;
         });
 
@@ -61,7 +70,7 @@ class PolicyDocumentController extends ApiController
     {
         $this->authorizeTenant($request, $policy);
         $data = $request->validate([
-            'type' => ['required', 'string', 'in:application,policy,receipt,medical,endorsement,cancellation,other'],
+            'type' => ['required', 'string', 'in:'.self::DOC_TYPES],
             'file' => ['required', 'file', 'mimes:pdf,jpeg,jpg,png,webp', 'max:10240'],  // 10 MB
         ]);
 
@@ -90,10 +99,42 @@ class PolicyDocumentController extends ApiController
                     'fileName' => $originalName,
                 ],
             ]);
+            $this->recordRenewalStageEvent($policy, $data['type'], $doc, $request);
+
             return $doc;
         });
 
         return (new PolicyDocumentResource($doc))->response()->setStatusCode(201);
+    }
+
+    /**
+     * Emit the renewal-pipeline stage event that corresponds to a just-uploaded
+     * quotation document, so the renewal stage advances automatically:
+     *   renewal_quote_carrier   → renewalQuoteReceived  (stage: quote_received)
+     *   renewal_quote_insurehub → renewalQuotePrepared   (stage: quote_prepared)
+     * Any other document type advances no stage. Called inside the upload/store
+     * transaction so the document + stage event commit together.
+     */
+    private function recordRenewalStageEvent(Policy $policy, string $docType, PolicyDocument $doc, Request $request): void
+    {
+        $eventType = match ($docType) {
+            'renewal_quote_carrier' => 'renewalQuoteReceived',
+            'renewal_quote_insurehub' => 'renewalQuotePrepared',
+            default => null,
+        };
+        if ($eventType === null) {
+            return;
+        }
+        PolicyEvent::create([
+            'policy_id' => $policy->id,
+            'type' => $eventType,
+            'occurred_at' => now(),
+            'by_user_id' => $request->user()->id,
+            'payload' => [
+                'documentId' => (string) $doc->id,
+                'fileName' => $doc->file_name,
+            ],
+        ]);
     }
 
     /**
@@ -113,6 +154,7 @@ class PolicyDocumentController extends ApiController
         }
         $mime = Storage::disk('local')->mimeType($document->file_path) ?: 'application/octet-stream';
         $name = $document->file_name ?: basename($document->file_path);
+
         return Storage::disk('local')->download($document->file_path, $name, [
             'Content-Type' => $mime,
             'Content-Disposition' => 'inline; filename="'.addslashes($name).'"',
@@ -127,9 +169,13 @@ class PolicyDocumentController extends ApiController
         }
         // Best-effort: remove the file too. Missing files don't block deletion.
         if ($document->file_path && Storage::disk('local')->exists($document->file_path)) {
-            try { Storage::disk('local')->delete($document->file_path); } catch (\Throwable) { /* ignore */ }
+            try {
+                Storage::disk('local')->delete($document->file_path);
+            } catch (\Throwable) { /* ignore */
+            }
         }
         $document->delete();
+
         return response()->json(['message' => 'Deleted.']);
     }
 

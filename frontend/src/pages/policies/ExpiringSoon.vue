@@ -1,27 +1,69 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref, watch, computed } from 'vue'
+import { onMounted, onUnmounted, reactive, ref, watch, computed } from 'vue'
 import { useRouter } from 'vue-router'
 import {
   fetchExpiringSoon, markRenewalContacted, markRenewalStarted, sendRenewalNotice,
+  requestRenewalQuote, sendRenewalQuote, declineRenewal, markRenewalStage,
   type ExpiringPolicy, type ExpiringSoonMeta, type ExpiringSoonSummary,
+  type ManualStage,
 } from '../../api/reports'
-import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
+import {
+  fetchCarrierList, fetchCarrierContacts, createCarrierContact, updateCarrierContact, deleteCarrierContact,
+  type CarrierListRow, type CarrierContact,
+} from '../../api/carriers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
+import { uploadPolicyDocument } from '../../api/policies'
+import { useRenewalQuote, emptyRenewalQuoteForm, type RenewalQuoteForm } from '../../composables/useRenewalQuote'
 import { ApiError } from '../../api/client'
 import { toCsv, downloadCsv } from '../../util/csvExport'
 import DateInput from '../../components/DateInput.vue'
-import PolicyDetailDrawer from './PolicyDetailDrawer.vue'
 import { fmtDate } from '../../util/dateFormat'
+import { renewalStageMeta, renewalNextAction, RENEWAL_PIPELINE, type RenewalNextAction } from '../../utils/renewalStage'
+import type { RenewalStage } from '../../api/reports'
 
 const router = useRouter()
 
+/** Open a policy's full-page edit in a NEW TAB (/policies/:id/edit) so the
+ *  operator keeps the renewal pipeline they're working in. Resolved through
+ *  the router so the /insurehub base path is applied. */
+function openPolicyInNewTab(policyId: string): void {
+  const href = router.resolve({ name: 'policy-edit', params: { id: policyId } }).href
+  window.open(href, '_blank', 'noopener')
+}
+
 const rows = ref<ExpiringPolicy[]>([])
 const meta = ref<ExpiringSoonMeta | null>(null)
-// ID of the row whose detail drawer is open. null when the drawer is closed.
-const detailId = ref<string | null>(null)
 const summary = ref<ExpiringSoonSummary>({ totalInWindow: 0, urgentCount: 0 })
 const loading = ref(false)
 const error = ref<string | null>(null)
+
+// ── View mode: table (default) or kanban board grouped by renewal stage ──
+const viewMode = ref<'table' | 'board'>('table')
+
+/** Rows grouped into the seven on-track pipeline columns. Off-track terminals
+ *  (declined/expired) fold into the nearest column: expired→not_started,
+ *  declined→renewed's column is wrong, so declined gets its own trailing note
+ *  — simplest is to show declined under whatever it reached; here we drop
+ *  declined/expired from the board's active columns and surface them via the
+ *  stage pill inside each card. We map every row to one of RENEWAL_PIPELINE. */
+const boardColumns = computed(() => {
+  const buckets: Record<RenewalStage, ExpiringPolicy[]> = {
+    not_started: [], contacted: [], quote_requested: [], quote_received: [],
+    quote_prepared: [], quote_sent: [], renewed: [], declined: [], expired: [],
+  }
+  for (const r of rows.value) {
+    const stage = (r.renewalStage ?? 'not_started') as RenewalStage
+    ;(buckets[stage] ?? buckets.not_started).push(r)
+  }
+  // Board shows the 7 on-track columns; declined + expired collapse into the
+  // first column so nothing is hidden (their pill still reads declined/expired).
+  buckets.not_started = [...buckets.not_started, ...buckets.expired, ...buckets.declined]
+  return RENEWAL_PIPELINE.map((stage) => ({
+    stage,
+    meta: renewalStageMeta(stage),
+    rows: buckets[stage],
+  }))
+})
 
 // ── Filters (server-side — every change triggers a debounced re-fetch) ──
 // Date range drives the SQL query directly; picking a future range returns
@@ -250,6 +292,13 @@ watch(() => [filters.fromDate, filters.toDate] as const, ([from, to]) => {
       .toISOString().slice(0, 10)
     if (from !== today || to !== expectedTo) preset.value = 'custom'
   }
+  // The two fields are independent now (no min/max caps), so a user can enter
+  // a reversed range. Auto-swap so the query stays valid instead of returning
+  // nothing. Guarded by the inequality check so this never re-triggers itself.
+  if (from && to && from > to) {
+    filters.fromDate = to
+    filters.toDate = from
+  }
 })
 
 async function load(): Promise<void> {
@@ -324,7 +373,16 @@ onMounted(() => {
   void loadCarriers()
   void loadProducts()
   void load()
+  document.addEventListener('click', closeMoreMenu)
 })
+onUnmounted(() => {
+  document.removeEventListener('click', closeMoreMenu)
+})
+// Close the row "⋯ more" popover on any outside click. The buttons that open
+// it stop propagation, so this only fires for genuine outside clicks.
+function closeMoreMenu(): void {
+  moreMenuFor.value = null
+}
 
 // ── Bulk selection ──────────────────────────────────────────────────────
 // A Set of selected policy IDs. Persists across pagination (the user can
@@ -416,6 +474,7 @@ async function bulkExportCsv(): Promise<void> {
     { header: 'Carrier', value: (r) => r.carrierCode },
     { header: 'Product', value: (r) => r.productCode },
     { header: 'Annual premium', value: (r) => r.annualPremium.toFixed(2) },
+    { header: 'Renewal stage', value: (r) => renewalStageMeta(r.renewalStage).label },
   ])
   downloadCsv(csv, `renewals-selected-${new Date().toISOString().slice(0, 10)}.csv`)
 }
@@ -435,6 +494,299 @@ function flash(id: string, ok: boolean, text: string): void {
 // state stays local and closes cleanly when the row action completes.
 const contactModal = ref<{ row: ExpiringPolicy; channel: string; note: string } | null>(null)
 const noticeModal = ref<{ row: ExpiringPolicy } | null>(null)
+// Renewal quotation pipeline — Phase B: "request quote" modal. Recipient
+// toggles between the insurer (carrier) and the writing agent; the message
+// is a preset the operator can edit before sending.
+// Quotes only ever come FROM the insurance company, so this popup is
+// carrier-only (the "ตัวแทน" recipient option was removed). The operator picks
+// the destination from the carrier's editable email list and can add / edit /
+// delete those emails inline.
+const quoteRequestModal = ref<{
+  row: ExpiringPolicy
+  subject: string
+  message: string
+  to: string
+} | null>(null)
+const quoteCopied = ref(false)
+// The carrier's contact list for the open modal, plus loading + inline-editor state.
+const quoteContacts = ref<CarrierContact[]>([])
+const quoteContactsLoading = ref(false)
+const quoteContactEdit = ref<{ id: string | null; email: string; name: string } | null>(null)
+
+/** Default subject, prefilled from the policy row. */
+function defaultQuoteSubject(r: ExpiringPolicy): string {
+  const ref = r.policyNo || r.applicationNo || '—'
+  return `ขอใบเสนอราคาต่ออายุกรมธรรม์ ${ref} — InsureHub`
+}
+
+/** Default preset body (always addressed to the insurer). */
+function defaultQuoteMessage(r: ExpiringPolicy): string {
+  const ref = r.policyNo || r.applicationNo || '—'
+  return `เรียน ${r.carrierName || 'บริษัทประกัน'}\n\n`
+    + `InsureHub ขอความอนุเคราะห์ใบเสนอราคาต่ออายุกรมธรรม์เลขที่ ${ref} `
+    + `ของลูกค้า ${r.customerName || '—'} สำหรับระยะเวลาความคุ้มครองปีถัดไป\n\n`
+    + `ขอบคุณครับ/ค่ะ`
+}
+
+// A `mailto:` link prefilled with the chosen destination, subject, and body —
+// for the "send it myself" path.
+const quoteMailtoHref = computed<string>(() => {
+  const m = quoteRequestModal.value
+  if (!m) return '#'
+  const params = new URLSearchParams({ subject: m.subject, body: m.message })
+  return `mailto:${encodeURIComponent(m.to)}?${params.toString()}`
+})
+
+/** Load the carrier's email list and default the destination to the primary
+ *  (or first) contact, falling back to the carrier's own email field. */
+async function loadQuoteContacts(r: ExpiringPolicy): Promise<void> {
+  quoteContacts.value = []
+  if (!r.carrierId) return
+  quoteContactsLoading.value = true
+  try {
+    const res = await fetchCarrierContacts(r.carrierId)
+    quoteContacts.value = res.data.filter((c) => c.email)
+    if (quoteRequestModal.value && !quoteRequestModal.value.to) {
+      const primary = quoteContacts.value.find((c) => c.isPrimary) ?? quoteContacts.value[0]
+      quoteRequestModal.value.to = primary?.email ?? r.carrierEmail ?? ''
+    }
+  } catch { /* list stays empty — operator can still type/add an email */ }
+  finally { quoteContactsLoading.value = false }
+}
+
+function openQuoteRequest(r: ExpiringPolicy): void {
+  quoteCopied.value = false
+  quoteContactEdit.value = null
+  quoteRequestModal.value = {
+    row: r,
+    subject: defaultQuoteSubject(r),
+    message: defaultQuoteMessage(r),
+    to: r.carrierEmail ?? '',
+  }
+  void loadQuoteContacts(r)
+}
+
+// ── Inline email-list management for the carrier ───────────────────────────
+function startAddContact(): void {
+  quoteContactEdit.value = { id: null, email: '', name: '' }
+}
+function startEditContact(c: CarrierContact): void {
+  quoteContactEdit.value = { id: c.id, email: c.email, name: [c.firstName, c.lastName].filter(Boolean).join(' ') }
+}
+async function saveContactEdit(): Promise<void> {
+  const m = quoteRequestModal.value
+  const e = quoteContactEdit.value
+  if (!m || !e || !m.row.carrierId) return
+  const email = e.email.trim()
+  if (!email) return
+  const [firstName, ...rest] = e.name.trim().split(/\s+/)
+  const payload = { email, firstName: firstName || '', lastName: rest.join(' ') }
+  try {
+    if (e.id) {
+      await updateCarrierContact(m.row.carrierId, e.id, payload)
+    } else {
+      await createCarrierContact(m.row.carrierId, payload)
+    }
+    quoteContactEdit.value = null
+    await loadQuoteContacts(m.row)
+    m.to = email // select the just-saved address
+  } catch (err: unknown) {
+    flash(m.row.policyId, false, err instanceof ApiError ? err.message : 'บันทึกอีเมลล้มเหลว')
+  }
+}
+async function removeContact(c: CarrierContact): Promise<void> {
+  const m = quoteRequestModal.value
+  if (!m || !m.row.carrierId) return
+  try {
+    await deleteCarrierContact(m.row.carrierId, c.id)
+    if (m.to === c.email) m.to = ''
+    await loadQuoteContacts(m.row)
+  } catch (err: unknown) {
+    flash(m.row.policyId, false, err instanceof ApiError ? err.message : 'ลบอีเมลล้มเหลว')
+  }
+}
+
+/** Copy the full email (to / subject / body) to the clipboard. */
+async function copyQuoteToClipboard(): Promise<void> {
+  const m = quoteRequestModal.value
+  if (!m) return
+  const text = `ถึง: ${m.to || '(ยังไม่เลือกอีเมล)'}\nหัวข้อ: ${m.subject}\n\n${m.message}`
+  try {
+    await navigator.clipboard.writeText(text)
+    quoteCopied.value = true
+    setTimeout(() => { quoteCopied.value = false }, 2000)
+  } catch { /* clipboard blocked — user can still select the text manually */ }
+}
+
+/** Submit — `mode` decides whether the APP sends the email ('system') or the
+ *  operator sent it themselves and we just log it ('manual'). */
+async function submitQuoteRequest(mode: 'system' | 'manual'): Promise<void> {
+  if (!quoteRequestModal.value) return
+  const { row: r, subject, message } = quoteRequestModal.value
+  actionSaving.value = r.policyId
+  try {
+    await requestRenewalQuote(r.policyId, {
+      recipient: 'carrier', mode,
+      subject: subject.trim() || undefined,
+      message: message.trim() || undefined,
+    })
+    r.quoteRequestedAt = new Date().toISOString()
+    r.renewalStage = 'quote_requested'
+    flash(r.policyId, true, mode === 'manual' ? 'บันทึกว่าส่งเองแล้ว' : 'ส่งคำขอแล้ว')
+    quoteRequestModal.value = null
+  } catch (e: unknown) {
+    flash(r.policyId, false, e instanceof ApiError ? e.message : 'ดำเนินการล้มเหลว')
+  } finally { actionSaving.value = null }
+}
+
+// ── Manual stage marker ────────────────────────────────────────────────────
+// Every popup has a "just mark this step done" escape hatch. This calls the
+// mark-stage endpoint (no email/upload side-effect), updates the row's stage +
+// the matching timestamp optimistically, and closes whatever modal is open.
+const STAGE_TS_FIELD: Record<ManualStage, keyof ExpiringPolicy> = {
+  contacted: 'lastContactedAt',
+  quote_requested: 'quoteRequestedAt',
+  quote_received: 'quoteReceivedAt',
+  quote_prepared: 'quotePreparedAt',
+  quote_sent: 'quoteSentAt',
+  renewed: 'renewalStartedAt',
+  declined: 'renewalDeclinedAt',
+}
+async function manualMark(r: ExpiringPolicy, stage: ManualStage, closeModal?: () => void): Promise<void> {
+  actionSaving.value = r.policyId
+  try {
+    await markRenewalStage(r.policyId, stage)
+    ;(r as unknown as Record<string, unknown>)[STAGE_TS_FIELD[stage]] = new Date().toISOString()
+    r.renewalStage = stage
+    flash(r.policyId, true, 'บันทึกสถานะแล้ว')
+    closeModal?.()
+  } catch (e: unknown) {
+    flash(r.policyId, false, e instanceof ApiError ? e.message : 'บันทึกสถานะล้มเหลว')
+  } finally { actionSaving.value = null }
+}
+
+// ── Phase C — upload the carrier's returned quotation ──────────────────────
+// A hidden <input type="file"> is triggered per row. We stash which row asked
+// so the change handler knows where to attach the file. On success the backend
+// logs `renewalQuoteReceived`, advancing the stage to `quote_received`.
+const quoteUploadInput = ref<HTMLInputElement | null>(null)
+const quoteUploadRow = ref<ExpiringPolicy | null>(null)
+
+function triggerQuoteUpload(r: ExpiringPolicy): void {
+  quoteUploadRow.value = r
+  quoteUploadInput.value?.click()
+}
+
+async function onQuoteFileSelected(e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  const file = input.files?.[0]
+  const r = quoteUploadRow.value
+  // Reset the input immediately so re-selecting the same file re-fires change.
+  input.value = ''
+  if (!file || !r) return
+  actionSaving.value = r.policyId
+  try {
+    await uploadPolicyDocument(r.policyId, 'renewal_quote_carrier', file)
+    r.quoteReceivedAt = new Date().toISOString()
+    r.renewalStage = 'quote_received'
+    flash(r.policyId, true, 'อัปโหลดใบเสนอราคาแล้ว')
+  } catch (err: unknown) {
+    flash(r.policyId, false, err instanceof ApiError ? err.message : 'อัปโหลดล้มเหลว')
+  } finally {
+    actionSaving.value = null
+    quoteUploadRow.value = null
+  }
+}
+
+// ── Phase D — generate the InsureHub-branded quotation ─────────────────────
+// A manual-entry form (prefilled from the policy) → renders a PDF via the
+// shared quotation renderer → uploads it as `renewal_quote_insurehub`, which
+// the backend turns into a `renewalQuotePrepared` event (stage quote_prepared).
+const renewalQuote = useRenewalQuote()
+const prepareModal = ref<{ row: ExpiringPolicy; form: RenewalQuoteForm } | null>(null)
+const preparing = ref(false)
+
+function openPrepareQuote(r: ExpiringPolicy): void {
+  prepareModal.value = { row: r, form: emptyRenewalQuoteForm(r) }
+}
+
+/** Generate the PDF, optionally download it, then upload + advance the stage. */
+async function submitPrepareQuote(alsoDownload: boolean): Promise<void> {
+  if (!prepareModal.value) return
+  const { row: r, form } = prepareModal.value
+  preparing.value = true
+  actionSaving.value = r.policyId
+  try {
+    const quotation = renewalQuote.buildQuotation(r, form)
+    const file = await renewalQuote.renderToFile(quotation)
+    if (alsoDownload) {
+      // Reuse the same blob the File wraps, no re-render.
+      const url = URL.createObjectURL(file)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = file.name
+      a.click()
+      URL.revokeObjectURL(url)
+    }
+    await uploadPolicyDocument(r.policyId, 'renewal_quote_insurehub', file)
+    r.quotePreparedAt = new Date().toISOString()
+    r.renewalStage = 'quote_prepared'
+    flash(r.policyId, true, 'สร้างใบเสนอราคา InsureHub แล้ว')
+    prepareModal.value = null
+  } catch (err: unknown) {
+    flash(r.policyId, false, err instanceof ApiError ? err.message : 'สร้างใบเสนอราคาล้มเหลว')
+  } finally {
+    preparing.value = false
+    actionSaving.value = null
+  }
+}
+
+// ── Phase E — send the generated quote to the customer + won/lost ──────────
+const sendQuoteModal = ref<{ row: ExpiringPolicy; message: string } | null>(null)
+const declineModal = ref<{ row: ExpiringPolicy; reason: string } | null>(null)
+
+function openSendQuote(r: ExpiringPolicy): void {
+  sendQuoteModal.value = {
+    row: r,
+    message: `เรียน คุณ${r.customerName || 'ลูกค้า'}\n\n`
+      + `InsureHub ได้จัดทำใบเสนอราคาสำหรับการต่ออายุกรมธรรม์ของท่านเรียบร้อยแล้ว รายละเอียดตามเอกสารแนบ\n\n`
+      + `หากมีข้อสงสัยหรือต้องการยืนยันการต่ออายุ กรุณาติดต่อกลับได้ที่อีเมลนี้`,
+  }
+}
+
+async function submitSendQuote(): Promise<void> {
+  if (!sendQuoteModal.value) return
+  const { row: r, message } = sendQuoteModal.value
+  actionSaving.value = r.policyId
+  try {
+    await sendRenewalQuote(r.policyId, message.trim() || undefined)
+    r.quoteSentAt = new Date().toISOString()
+    r.renewalStage = 'quote_sent'
+    flash(r.policyId, true, 'ส่งใบเสนอราคาถึงลูกค้าแล้ว')
+    sendQuoteModal.value = null
+  } catch (e: unknown) {
+    flash(r.policyId, false, e instanceof ApiError ? e.message : 'ส่งใบเสนอราคาล้มเหลว')
+  } finally { actionSaving.value = null }
+}
+
+function openDecline(r: ExpiringPolicy): void {
+  declineModal.value = { row: r, reason: '' }
+}
+
+async function submitDecline(): Promise<void> {
+  if (!declineModal.value) return
+  const { row: r, reason } = declineModal.value
+  actionSaving.value = r.policyId
+  try {
+    await declineRenewal(r.policyId, reason.trim() || undefined)
+    r.renewalDeclinedAt = new Date().toISOString()
+    r.renewalStage = 'declined'
+    flash(r.policyId, true, 'บันทึกว่าลูกค้าปฏิเสธแล้ว')
+    declineModal.value = null
+  } catch (e: unknown) {
+    flash(r.policyId, false, e instanceof ApiError ? e.message : 'บันทึกล้มเหลว')
+  } finally { actionSaving.value = null }
+}
 
 function openContact(r: ExpiringPolicy): void {
   contactModal.value = { row: r, channel: 'phone', note: '' }
@@ -500,6 +852,31 @@ async function doStartRenewal(r: ExpiringPolicy): Promise<void> {
   } finally { actionSaving.value = null }
 }
 
+// ── Stage-aware action dispatch ────────────────────────────────────────────
+// The table + board show ONE "next step" button per row, driven by the stage.
+// This dispatcher maps a next-action token to the handler, so the button label
+// (from renewalNextAction) and its behaviour never drift apart.
+function nextActionFor(r: ExpiringPolicy): RenewalNextAction | null {
+  return renewalNextAction(r.renewalStage)
+}
+function runAction(action: RenewalNextAction['action'], r: ExpiringPolicy): void {
+  moreMenuFor.value = null
+  switch (action) {
+    case 'contact': openContact(r); break
+    case 'request_quote': openQuoteRequest(r); break
+    case 'upload_quote': triggerQuoteUpload(r); break
+    case 'prepare_quote': openPrepareQuote(r); break
+    case 'send_quote': openSendQuote(r); break
+    case 'start_renewal': void doStartRenewal(r); break
+  }
+}
+
+// Which row's "⋯ more actions" menu is open (policyId), or null.
+const moreMenuFor = ref<string | null>(null)
+function toggleMoreMenu(policyId: string): void {
+  moreMenuFor.value = moreMenuFor.value === policyId ? null : policyId
+}
+
 /** "3 days ago" — compact display for last-contacted timestamps. */
 function relativeDays(iso: string | null | undefined): string {
   if (!iso) return ''
@@ -540,6 +917,9 @@ async function exportCsv(): Promise<void> {
       { header: 'Carrier', value: (r) => r.carrierCode },
       { header: 'Product', value: (r) => r.productCode },
       { header: 'Annual premium', value: (r) => r.annualPremium.toFixed(2) },
+      { header: 'Renewal stage', value: (r) => renewalStageMeta(r.renewalStage).label },
+      { header: 'Quote requested', value: (r) => r.quoteRequestedAt ?? '' },
+      { header: 'Quote received', value: (r) => r.quoteReceivedAt ?? '' },
       { header: 'Last contacted', value: (r) => r.lastContactedAt ?? '' },
       { header: 'Notice sent', value: (r) => r.lastNoticeSentAt ?? '' },
       { header: 'Renewal started', value: (r) => r.renewalStartedAt ?? '' },
@@ -613,14 +993,31 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
 
 <template>
   <div class="space-y-6">
+    <!-- Hidden file input for carrier-quote uploads (Phase C) — one shared
+         picker; the target row is tracked in quoteUploadRow. -->
+    <input ref="quoteUploadInput" type="file" class="hidden"
+      accept=".pdf,.jpg,.jpeg,.png,.webp" @change="onQuoteFileSelected" />
     <header class="flex items-center justify-between">
       <div>
-        <h1 class="text-2xl font-semibold text-slate-900">Renewal Pipeline</h1>
+        <h1 class="text-2xl font-semibold text-slate-900">งานต่ออายุกรมธรรม์</h1>
         <p class="text-slate-500 mt-1 text-sm">
           กรมธรรม์ที่ยังคุ้มครองอยู่และจะครบกำหนดในช่วงเวลาที่เลือก
         </p>
       </div>
       <div class="flex items-center gap-2">
+        <!-- Table / board view toggle -->
+        <div class="inline-flex rounded-lg border border-slate-200 overflow-hidden text-sm">
+          <button type="button"
+            :class="['px-3 py-1.5 flex items-center gap-1', viewMode === 'table' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50']"
+            @click="viewMode = 'table'">
+            <i class="pi pi-list text-xs" /> ตาราง
+          </button>
+          <button type="button"
+            :class="['px-3 py-1.5 flex items-center gap-1', viewMode === 'board' ? 'bg-brand-600 text-white' : 'text-slate-600 hover:bg-slate-50']"
+            @click="viewMode = 'board'">
+            <i class="pi pi-th-large text-xs" /> บอร์ด
+          </button>
+        </div>
         <button type="button" class="px-3 py-1.5 rounded-lg border border-slate-200 text-sm text-slate-600 hover:bg-slate-50 disabled:opacity-50 flex items-center gap-1"
           :disabled="!rows.length || exportingCsv" @click="exportCsv">
           <i :class="exportingCsv ? 'pi pi-spin pi-spinner' : 'pi pi-download'" class="text-xs" />
@@ -634,6 +1031,19 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
         </button>
       </div>
     </header>
+
+    <!-- Workflow legend — the renewal steps in order, so a new worker sees the
+         whole flow at a glance and knows what each status means. -->
+    <div class="flex items-center gap-1 flex-wrap text-xs text-slate-500 bg-slate-50 border border-slate-200 rounded-lg px-3 py-2">
+      <span class="text-slate-400 mr-1">ขั้นตอน:</span>
+      <template v-for="(stage, i) in RENEWAL_PIPELINE" :key="stage">
+        <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded', renewalStageMeta(stage).badgeClass]">
+          <i :class="['pi', renewalStageMeta(stage).icon, 'text-[9px]']" />
+          {{ renewalStageMeta(stage).label }}
+        </span>
+        <i v-if="i < RENEWAL_PIPELINE.length - 1" class="pi pi-angle-right text-[9px] text-slate-300" />
+      </template>
+    </div>
 
     <!-- Filter card -->
     <section class="card p-4 space-y-3">
@@ -680,11 +1090,12 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
           <label class="text-xs font-medium text-slate-500 mb-1 block">วันหมดอายุ (Expiry date)</label>
           <div class="flex items-center gap-2">
             <div class="flex-1">
-              <DateInput v-model="filters.fromDate" :max="filters.toDate || undefined" />
+              <!-- No max cap — this is a FUTURE window picker (what expires ahead). -->
+              <DateInput v-model="filters.fromDate" />
             </div>
             <span class="text-slate-400 text-xs">ถึง</span>
             <div class="flex-1">
-              <DateInput v-model="filters.toDate" :min="filters.fromDate || undefined" />
+              <DateInput v-model="filters.toDate" />
             </div>
           </div>
         </div>
@@ -788,7 +1199,7 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
       </span>
     </div>
 
-    <section class="card overflow-hidden">
+    <section v-if="viewMode === 'table'" class="card overflow-hidden">
       <div class="overflow-x-auto">
         <table class="min-w-full text-sm">
           <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
@@ -829,7 +1240,7 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
           <tbody class="divide-y divide-slate-100">
             <tr v-for="r in rows" :key="r.policyId"
               :class="['hover:bg-slate-50 cursor-pointer', isSelected(r.policyId) ? 'bg-brand-50/40' : '']"
-              @click="detailId = r.policyId">
+              @click="openPolicyInNewTab(r.policyId)">
               <td class="px-3 py-2 w-8" @click.stop>
                 <input type="checkbox" :checked="isSelected(r.policyId)"
                   @change="toggleRow(r.policyId)"
@@ -857,37 +1268,114 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
                 </span>
               </td>
               <td class="px-4 py-2 text-xs text-slate-500">
-                <div v-if="r.renewalStartedAt" class="text-brand-700">
-                  <i class="pi pi-arrow-right text-[10px] mr-0.5" /> เริ่มต่ออายุ · {{ relativeDays(r.renewalStartedAt) }}
+                <!-- Derived pipeline stage — the single source of "where is this
+                     renewal" for the operator. Detail timestamps sit below. -->
+                <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium', renewalStageMeta(r.renewalStage).badgeClass]">
+                  <i :class="['pi', renewalStageMeta(r.renewalStage).icon, 'text-[10px]']" />
+                  {{ renewalStageMeta(r.renewalStage).label }}
+                </span>
+                <div class="mt-1 space-y-0.5">
+                  <div v-if="r.renewalStartedAt" class="text-brand-700">
+                    <i class="pi pi-arrow-right text-[10px] mr-0.5" /> เริ่มต่ออายุ · {{ relativeDays(r.renewalStartedAt) }}
+                  </div>
+                  <div v-if="r.quoteSentAt" class="text-teal-700">
+                    <i class="pi pi-envelope text-[10px] mr-0.5" /> ส่งใบเสนอราคา · {{ relativeDays(r.quoteSentAt) }}
+                  </div>
+                  <div v-if="r.quotePreparedAt" class="text-amber-700">
+                    <i class="pi pi-file-edit text-[10px] mr-0.5" /> จัดทำใบเสนอราคา · {{ relativeDays(r.quotePreparedAt) }}
+                  </div>
+                  <div v-if="r.quoteReceivedAt" class="text-violet-700">
+                    <i class="pi pi-inbox text-[10px] mr-0.5" /> รับใบเสนอราคา · {{ relativeDays(r.quoteReceivedAt) }}
+                  </div>
+                  <div v-if="r.quoteRequestedAt" class="text-indigo-700">
+                    <i class="pi pi-send text-[10px] mr-0.5" /> ขอใบเสนอราคา · {{ relativeDays(r.quoteRequestedAt) }}
+                  </div>
+                  <div v-if="r.lastNoticeSentAt" class="text-emerald-700">
+                    <i class="pi pi-envelope text-[10px] mr-0.5" /> ส่งอีเมล · {{ relativeDays(r.lastNoticeSentAt) }}
+                  </div>
+                  <div v-if="r.lastContactedAt" class="text-slate-600">
+                    <i class="pi pi-phone text-[10px] mr-0.5" /> ติดต่อ · {{ relativeDays(r.lastContactedAt) }}
+                  </div>
                 </div>
-                <div v-if="r.lastNoticeSentAt" class="text-emerald-700">
-                  <i class="pi pi-envelope text-[10px] mr-0.5" /> ส่งอีเมล · {{ relativeDays(r.lastNoticeSentAt) }}
-                </div>
-                <div v-if="r.lastContactedAt" class="text-slate-600">
-                  <i class="pi pi-phone text-[10px] mr-0.5" /> ติดต่อ · {{ relativeDays(r.lastContactedAt) }}
-                </div>
-                <div v-if="!r.lastContactedAt && !r.lastNoticeSentAt && !r.renewalStartedAt" class="text-slate-300">—</div>
                 <div v-if="actionMsg?.id === r.policyId"
                   :class="actionMsg.ok ? 'text-emerald-700' : 'text-rose-700'"
                   class="text-[10px] mt-1">{{ actionMsg.text }}</div>
               </td>
               <td class="px-4 py-2 text-right" @click.stop>
-                <div class="inline-flex items-center gap-1">
-                  <button type="button" title="บันทึกการติดต่อ"
-                    class="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-brand-600 disabled:opacity-50"
-                    :disabled="actionSaving === r.policyId" @click="openContact(r)">
-                    <i class="pi pi-phone text-xs" />
+                <div class="inline-flex items-center gap-1.5">
+                  <!-- Primary "next step" — the ONE action this stage expects.
+                       New workers just follow this button down each row. -->
+                  <button v-if="nextActionFor(r)" type="button"
+                    class="px-2.5 py-1.5 rounded-lg bg-brand-600 text-white text-xs hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1 whitespace-nowrap"
+                    :disabled="actionSaving === r.policyId"
+                    @click="runAction(nextActionFor(r)!.action, r)">
+                    <i v-if="actionSaving !== r.policyId" :class="['pi', nextActionFor(r)!.icon, 'text-[10px]']" />
+                    <i v-else class="pi pi-spin pi-spinner text-[10px]" />
+                    {{ nextActionFor(r)!.label }}
                   </button>
-                  <button type="button" title="ส่งอีเมลแจ้งต่ออายุ"
-                    class="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-brand-600 disabled:opacity-50"
-                    :disabled="actionSaving === r.policyId" @click="openNotice(r)">
-                    <i class="pi pi-envelope text-xs" />
-                  </button>
-                  <button type="button"
-                    class="ml-1 px-2 py-1 rounded bg-brand-600 text-white text-xs hover:bg-brand-700 disabled:opacity-50"
-                    :disabled="actionSaving === r.policyId" @click="doStartRenewal(r)">
-                    <i class="pi pi-arrow-right text-[10px] mr-1" /> ต่ออายุ
-                  </button>
+                  <span v-else class="text-xs text-slate-400 px-2">
+                    {{ r.renewalStage === 'renewed' ? 'เสร็จสิ้น' : (r.renewalStage === 'declined' ? 'ปฏิเสธแล้ว' : '—') }}
+                  </span>
+
+                  <!-- Overflow: all other actions, so nothing is lost but the
+                       row stays readable. Toggles a small popover. -->
+                  <div class="relative">
+                    <button type="button" title="การดำเนินการอื่น"
+                      class="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-slate-700 disabled:opacity-50"
+                      :disabled="actionSaving === r.policyId" @click="toggleMoreMenu(r.policyId)">
+                      <i class="pi pi-ellipsis-v text-xs" />
+                    </button>
+                    <div v-if="moreMenuFor === r.policyId"
+                      class="absolute right-0 top-full mt-1 w-52 bg-white border border-slate-200 rounded-lg shadow-lg z-20 py-1 text-left"
+                      @click.stop>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; openContact(r)">
+                        <i class="pi pi-phone text-[10px] text-slate-400" /> บันทึกการติดต่อ
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; openNotice(r)">
+                        <i class="pi pi-envelope text-[10px] text-slate-400" /> ส่งอีเมลแจ้งต่ออายุ
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; openQuoteRequest(r)">
+                        <i class="pi pi-send text-[10px] text-slate-400" /> ขอใบเสนอราคา
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; triggerQuoteUpload(r)">
+                        <i class="pi pi-upload text-[10px] text-slate-400" /> อัปโหลดใบเสนอราคา
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; openPrepareQuote(r)">
+                        <i class="pi pi-file-edit text-[10px] text-slate-400" /> สร้างใบเสนอราคา InsureHub
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; openSendQuote(r)">
+                        <i class="pi pi-share-alt text-[10px] text-slate-400" /> ส่งใบเสนอราคาให้ลูกค้า
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-700 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; doStartRenewal(r)">
+                        <i class="pi pi-arrow-right text-[10px] text-slate-400" /> ต่ออายุ
+                      </button>
+
+                      <!-- Manual stage markers — jump to any stage without the real
+                           side-effect (email/upload). "I did this outside the system." -->
+                      <div class="border-t border-slate-100 my-1"></div>
+                      <div class="px-3 py-1 text-[10px] uppercase tracking-wide text-slate-400">บันทึกสถานะเอง (ไม่ส่ง/ไม่แนบไฟล์)</div>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; manualMark(r, 'contacted')">
+                        <i class="pi pi-phone text-[10px] text-slate-300" /> ติดต่อลูกค้าแล้ว
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; manualMark(r, 'quote_requested')">
+                        <i class="pi pi-send text-[10px] text-slate-300" /> ขอใบเสนอราคาแล้ว
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; manualMark(r, 'quote_received')">
+                        <i class="pi pi-inbox text-[10px] text-slate-300" /> ได้รับใบเสนอราคาแล้ว
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; manualMark(r, 'quote_prepared')">
+                        <i class="pi pi-file-edit text-[10px] text-slate-300" /> จัดทำใบเสนอราคาแล้ว
+                      </button>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 flex items-center gap-2" @click="moreMenuFor = null; manualMark(r, 'quote_sent')">
+                        <i class="pi pi-share-alt text-[10px] text-slate-300" /> ส่งให้ลูกค้าแล้ว
+                      </button>
+
+                      <div class="border-t border-slate-100 my-1"></div>
+                      <button type="button" class="w-full px-3 py-1.5 text-xs text-rose-600 hover:bg-rose-50 flex items-center gap-2" @click="moreMenuFor = null; openDecline(r)">
+                        <i class="pi pi-times-circle text-[10px]" /> ลูกค้าปฏิเสธ
+                      </button>
+                    </div>
+                  </div>
                 </div>
               </td>
             </tr>
@@ -940,8 +1428,52 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
       </div>
     </section>
 
-    <!-- Policy detail drawer — opens when a row is clicked -->
-    <PolicyDetailDrawer :policy-id="detailId" @close="detailId = null" />
+    <!-- Board view — pipeline columns grouped by renewal stage -->
+    <section v-else class="overflow-x-auto pb-2">
+      <div class="flex gap-3 min-w-max">
+        <div v-for="col in boardColumns" :key="col.stage" class="w-64 shrink-0">
+          <div class="flex items-center justify-between mb-2 px-1">
+            <span :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded-md text-xs font-medium', col.meta.badgeClass]">
+              <i :class="['pi', col.meta.icon, 'text-[10px]']" />
+              {{ col.meta.label }}
+            </span>
+            <span class="text-xs text-slate-400">{{ col.rows.length }}</span>
+          </div>
+          <div class="space-y-2">
+            <div v-for="r in col.rows" :key="r.policyId"
+              class="card p-3 text-sm cursor-pointer hover:ring-1 hover:ring-brand-200"
+              @click="openPolicyInNewTab(r.policyId)">
+              <div class="font-medium text-slate-900 truncate">{{ r.customerName || r.customerCode || '—' }}</div>
+              <div class="text-xs text-slate-500 font-mono mt-0.5 truncate">
+                {{ r.policyNo || r.applicationNo || '—' }}
+              </div>
+              <div class="text-xs text-slate-500 mt-1 truncate">{{ r.carrierName || r.carrierCode || '—' }}</div>
+              <div class="flex items-center justify-between mt-2">
+                <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium', badge(r.daysRemaining).cls]">
+                  {{ r.daysRemaining }} วัน
+                </span>
+                <span class="text-xs text-slate-600">{{ fmtBaht(r.annualPremium) }}</span>
+              </div>
+              <!-- Quick next-action button — same stage-aware logic as the table
+                   so labels + behaviour never diverge between the two views. -->
+              <div v-if="nextActionFor(r)" class="mt-2" @click.stop>
+                <button type="button"
+                  class="w-full px-2 py-1.5 rounded bg-brand-600 text-white text-[11px] hover:bg-brand-700 disabled:opacity-50 flex items-center justify-center gap-1"
+                  :disabled="actionSaving === r.policyId"
+                  @click="runAction(nextActionFor(r)!.action, r)">
+                  <i v-if="actionSaving !== r.policyId" :class="['pi', nextActionFor(r)!.icon, 'text-[9px]']" />
+                  <i v-else class="pi pi-spin pi-spinner text-[9px]" />
+                  {{ nextActionFor(r)!.label }}
+                </button>
+              </div>
+            </div>
+            <div v-if="!col.rows.length" class="text-center text-xs text-slate-300 py-4 border border-dashed border-slate-200 rounded-lg">
+              —
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
 
     <!-- Log-contact modal — replaces window.prompt for a proper form -->
     <div v-if="contactModal" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[60] p-4"
@@ -1043,6 +1575,352 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
             <i class="pi pi-send text-xs" v-if="actionSaving !== noticeModal.row.policyId" />
             <i class="pi pi-spin pi-spinner text-xs" v-else />
             ส่งอีเมล
+          </button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Request-quote modal (Phase B) — pick recipient (insurer / agent) + edit preset -->
+    <div v-if="quoteRequestModal" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[60] p-4"
+      @click.self="quoteRequestModal = null">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
+        <header class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+          <div class="text-lg font-semibold text-slate-900">ขอใบเสนอราคาต่ออายุ</div>
+          <button type="button" class="text-slate-400 hover:text-slate-700 p-1" @click="quoteRequestModal = null">
+            <i class="pi pi-times" />
+          </button>
+        </header>
+        <div class="p-5 space-y-4">
+          <div class="text-sm text-slate-700">
+            <div>{{ quoteRequestModal.row.customerName || quoteRequestModal.row.customerCode }}</div>
+            <div class="text-xs text-slate-500 font-mono mt-0.5">
+              {{ quoteRequestModal.row.policyNo || quoteRequestModal.row.applicationNo }}
+              · {{ quoteRequestModal.row.carrierName || '—' }}
+            </div>
+          </div>
+
+          <!-- Carrier email list — pick a destination + manage (add/edit/delete).
+               Edits persist to the carrier so they're reusable next time. -->
+          <div>
+            <div class="flex items-center justify-between mb-1">
+              <label class="text-xs font-medium text-slate-500">
+                อีเมลบริษัทประกัน — {{ quoteRequestModal.row.carrierName || quoteRequestModal.row.carrierCode || '—' }}
+              </label>
+              <button v-if="quoteRequestModal.row.carrierId && !quoteContactEdit" type="button"
+                class="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1"
+                @click="startAddContact">
+                <i class="pi pi-plus text-[10px]" /> เพิ่มอีเมล
+              </button>
+            </div>
+
+            <div v-if="!quoteRequestModal.row.carrierId" class="text-xs text-amber-600 px-1">
+              <i class="pi pi-info-circle text-[10px] mr-0.5" /> กรมธรรม์นี้ไม่มีบริษัทประกันในระบบ — พิมพ์อีเมลเองด้านล่างได้
+            </div>
+
+            <div v-else class="border border-slate-200 rounded-lg divide-y divide-slate-100 max-h-44 overflow-y-auto">
+              <div v-if="quoteContactsLoading" class="px-3 py-2 text-xs text-slate-400">กำลังโหลด…</div>
+              <div v-else-if="!quoteContacts.length && !quoteContactEdit" class="px-3 py-2 text-xs text-slate-400">
+                ยังไม่มีอีเมล — กด “เพิ่มอีเมล”
+              </div>
+              <!-- Each saved email: radio to select + edit/delete -->
+              <label v-for="c in quoteContacts" :key="c.id"
+                class="flex items-center gap-2 px-3 py-2 text-sm cursor-pointer hover:bg-slate-50">
+                <input type="radio" :value="c.email" v-model="quoteRequestModal.to" class="accent-brand-600" />
+                <div class="flex-1 min-w-0">
+                  <div class="font-mono text-slate-800 truncate">{{ c.email }}</div>
+                  <div v-if="c.firstName || c.lastName" class="text-[11px] text-slate-400 truncate">
+                    {{ [c.firstName, c.lastName].filter(Boolean).join(' ') }}
+                    <span v-if="c.isPrimary" class="text-emerald-600">· หลัก</span>
+                  </div>
+                </div>
+                <button type="button" class="p-1 text-slate-400 hover:text-brand-600" @click.prevent="startEditContact(c)">
+                  <i class="pi pi-pencil text-[11px]" />
+                </button>
+                <button type="button" class="p-1 text-slate-400 hover:text-rose-600" @click.prevent="removeContact(c)">
+                  <i class="pi pi-trash text-[11px]" />
+                </button>
+              </label>
+
+              <!-- Inline add/edit row -->
+              <div v-if="quoteContactEdit" class="px-3 py-2 space-y-2 bg-slate-50">
+                <input v-model="quoteContactEdit.email" type="email" placeholder="อีเมล"
+                  class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                <input v-model="quoteContactEdit.name" type="text" placeholder="ชื่อผู้ติดต่อ (ไม่บังคับ)"
+                  class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                <div class="flex justify-end gap-2">
+                  <button type="button" class="px-2 py-1 text-xs text-slate-500 hover:text-slate-700" @click="quoteContactEdit = null">ยกเลิก</button>
+                  <button type="button" class="px-2.5 py-1 text-xs rounded bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+                    :disabled="!quoteContactEdit.email.trim()" @click="saveContactEdit">บันทึก</button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Free-type override (also the only input when carrier is unknown) -->
+            <div class="mt-2">
+              <label class="text-[11px] text-slate-400 mb-0.5 block">อีเมลปลายทางที่จะส่ง</label>
+              <input v-model="quoteRequestModal.to" type="email" placeholder="เลือกจากรายการ หรือพิมพ์อีเมล"
+                class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-400" />
+            </div>
+          </div>
+
+          <!-- Subject -->
+          <div>
+            <label class="text-xs font-medium text-slate-500 mb-1 block">หัวข้อ (Subject)</label>
+            <input v-model="quoteRequestModal.subject" type="text"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-400" />
+          </div>
+
+          <!-- Editable preset message -->
+          <div>
+            <label class="text-xs font-medium text-slate-500 mb-1 block">ข้อความ (แก้ไขได้)</label>
+            <textarea v-model="quoteRequestModal.message" rows="6"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-400 resize-none" />
+          </div>
+        </div>
+
+        <!-- Two clear paths: let the app send it, OR send it yourself. -->
+        <footer class="px-5 py-4 border-t border-slate-200 space-y-3">
+          <!-- Path 1: app sends -->
+          <div class="flex items-center justify-between gap-3">
+            <div class="text-xs text-slate-500">
+              <div class="font-medium text-slate-700">ส่งอัตโนมัติจากระบบ</div>
+              ระบบส่งอีเมลให้ทันที (ต้องมีอีเมลปลายทาง)
+            </div>
+            <button type="button"
+              class="px-4 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5 whitespace-nowrap"
+              :disabled="actionSaving === quoteRequestModal.row.policyId || !quoteRequestModal.to.trim()"
+              @click="submitQuoteRequest('system')">
+              <i class="pi pi-send text-xs" v-if="actionSaving !== quoteRequestModal.row.policyId" />
+              <i class="pi pi-spin pi-spinner text-xs" v-else />
+              ส่งอีเมลเลย
+            </button>
+          </div>
+
+          <div class="border-t border-dashed border-slate-200"></div>
+
+          <!-- Path 2: operator sends via their own mail app -->
+          <div class="flex items-center justify-between gap-3">
+            <div class="text-xs text-slate-500">
+              <div class="font-medium text-slate-700">ส่งเองผ่านแอปอีเมล</div>
+              คัดลอกข้อความหรือเปิด Gmail/Outlook แล้วค่อยกดยืนยันว่าส่งแล้ว
+            </div>
+            <div class="flex items-center gap-1.5 whitespace-nowrap">
+              <button type="button"
+                class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs flex items-center gap-1"
+                @click="copyQuoteToClipboard">
+                <i :class="quoteCopied ? 'pi pi-check text-emerald-600' : 'pi pi-copy'" class="text-[11px]" />
+                {{ quoteCopied ? 'คัดลอกแล้ว' : 'คัดลอก' }}
+              </button>
+              <a :href="quoteMailtoHref" target="_blank" rel="noopener"
+                class="px-2.5 py-1.5 rounded-lg border border-slate-200 text-slate-600 hover:bg-slate-50 text-xs flex items-center gap-1">
+                <i class="pi pi-external-link text-[11px]" /> เปิดแอปอีเมล
+              </a>
+              <button type="button"
+                class="px-2.5 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-xs disabled:bg-slate-300 flex items-center gap-1"
+                :disabled="actionSaving === quoteRequestModal.row.policyId"
+                @click="submitQuoteRequest('manual')">
+                <i class="pi pi-check text-[11px]" /> ส่งแล้ว
+              </button>
+            </div>
+          </div>
+
+          <div class="text-right">
+            <button type="button"
+              class="px-3 py-1 text-slate-500 hover:text-slate-700 text-xs"
+              :disabled="actionSaving === quoteRequestModal.row.policyId" @click="quoteRequestModal = null">
+              ยกเลิก
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Prepare-quote modal (Phase D) — generate an InsureHub-branded quotation -->
+    <div v-if="prepareModal" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[60] p-4"
+      @click.self="!preparing && (prepareModal = null)">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-xl overflow-hidden max-h-[90vh] flex flex-col">
+        <header class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+          <div class="text-lg font-semibold text-slate-900">สร้างใบเสนอราคา InsureHub</div>
+          <button type="button" class="text-slate-400 hover:text-slate-700 p-1" :disabled="preparing" @click="prepareModal = null">
+            <i class="pi pi-times" />
+          </button>
+        </header>
+        <div class="p-5 space-y-4 overflow-y-auto">
+          <div class="text-sm text-slate-700">
+            <div class="font-medium">{{ prepareModal.row.customerName || prepareModal.row.customerCode }}</div>
+            <div class="text-xs text-slate-500 mt-0.5">
+              {{ prepareModal.row.productName || prepareModal.row.productCode }}
+              · {{ prepareModal.row.carrierName || '—' }}
+            </div>
+          </div>
+
+          <div class="grid grid-cols-2 gap-3">
+            <div>
+              <label class="text-xs font-medium text-slate-500 mb-1 block">ทุนประกัน (บาท)</label>
+              <input v-model.number="prepareModal.form.coverageAmount" type="number" min="0"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-500 mb-1 block">เบี้ยประกัน (บาท)</label>
+              <input v-model.number="prepareModal.form.annualPremium" type="number" min="0"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-500 mb-1 block">งวดชำระ</label>
+              <select v-model="prepareModal.form.premiumMode"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+                <option value="annual">รายปี</option>
+                <option value="semiannual">ราย 6 เดือน</option>
+                <option value="quarterly">รายไตรมาส</option>
+                <option value="monthly">รายเดือน</option>
+                <option value="single">จ่ายครั้งเดียว</option>
+              </select>
+            </div>
+            <div>
+              <label class="text-xs font-medium text-slate-500 mb-1 block">ระยะเวลาคุ้มครอง (ปี)</label>
+              <input v-model.number="prepareModal.form.coveragePeriodYears" type="number" min="0"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </div>
+          </div>
+
+          <div>
+            <label class="text-xs font-medium text-slate-500 mb-1 block">สรุปข้อเสนอ</label>
+            <textarea v-model="prepareModal.form.proposalSummary" rows="2"
+              placeholder="เช่น: ต่ออายุกรมธรรม์รถยนต์ชั้น 1 ทุนประกัน 500,000 บาท"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-400 resize-none" />
+          </div>
+          <div>
+            <label class="text-xs font-medium text-slate-500 mb-1 block">ขั้นตอนถัดไป</label>
+            <textarea v-model="prepareModal.form.nextSteps" rows="2"
+              placeholder="เช่น: ยืนยันการต่ออายุและชำระเบี้ยภายในวันที่ครบกำหนด"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-400 resize-none" />
+          </div>
+
+          <p class="text-xs text-slate-400">
+            <i class="pi pi-info-circle text-[10px] mr-0.5" />
+            ใบเสนอราคาจะถูกบันทึกแนบกับกรมธรรม์และเปลี่ยนสถานะเป็น “จัดทำใบเสนอราคาแล้ว”
+          </p>
+        </div>
+        <footer class="px-5 py-3 border-t border-slate-200 flex items-center justify-between gap-2 flex-wrap">
+          <button type="button"
+            class="text-xs text-slate-500 hover:text-slate-700 underline decoration-dotted disabled:opacity-50"
+            :disabled="preparing" @click="manualMark(prepareModal.row, 'quote_prepared', () => prepareModal = null)">
+            ข้ามขั้นตอนนี้ (บันทึกว่าจัดทำแล้ว)
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button"
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm disabled:opacity-50"
+              :disabled="preparing" @click="prepareModal = null">
+              ยกเลิก
+            </button>
+            <button type="button"
+              class="px-3 py-1.5 rounded-lg border border-brand-200 text-brand-700 hover:bg-brand-50 text-sm disabled:opacity-50 flex items-center gap-1.5"
+              :disabled="preparing" @click="submitPrepareQuote(true)">
+              <i class="pi pi-download text-xs" />
+              สร้าง + ดาวน์โหลด
+            </button>
+            <button type="button"
+              class="px-4 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+              :disabled="preparing" @click="submitPrepareQuote(false)">
+              <i class="pi pi-check text-xs" v-if="!preparing" />
+              <i class="pi pi-spin pi-spinner text-xs" v-else />
+              สร้างและบันทึก
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Send-quote-to-customer modal (Phase E) -->
+    <div v-if="sendQuoteModal" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[60] p-4"
+      @click.self="sendQuoteModal = null">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-lg overflow-hidden">
+        <header class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+          <div class="text-lg font-semibold text-slate-900">ส่งใบเสนอราคาให้ลูกค้า</div>
+          <button type="button" class="text-slate-400 hover:text-slate-700 p-1" @click="sendQuoteModal = null">
+            <i class="pi pi-times" />
+          </button>
+        </header>
+        <div class="p-5 space-y-4">
+          <div class="text-sm">
+            <div class="text-slate-700">{{ sendQuoteModal.row.customerName || sendQuoteModal.row.customerCode }}</div>
+            <div class="mt-1">
+              <span class="text-slate-500">ปลายทาง:</span>
+              <span class="ml-2 font-medium text-slate-900">{{ sendQuoteModal.row.customerEmail || 'ไม่พบอีเมล' }}</span>
+            </div>
+            <div v-if="!sendQuoteModal.row.customerEmail" class="text-xs text-amber-600 mt-1">
+              <i class="pi pi-info-circle text-[10px] mr-0.5" /> ลูกค้าไม่มีอีเมล — ไม่สามารถส่งได้
+            </div>
+          </div>
+          <div>
+            <label class="text-xs font-medium text-slate-500 mb-1 block">ข้อความ (แก้ไขได้)</label>
+            <textarea v-model="sendQuoteModal.message" rows="5"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-400 resize-none" />
+          </div>
+          <p class="text-xs text-slate-400">
+            <i class="pi pi-paperclip text-[10px] mr-0.5" /> ใบเสนอราคา InsureHub ล่าสุดจะถูกแนบไปกับอีเมลอัตโนมัติ
+          </p>
+        </div>
+        <footer class="px-5 py-3 border-t border-slate-200 flex items-center justify-between gap-2 flex-wrap">
+          <button type="button"
+            class="text-xs text-slate-500 hover:text-slate-700 underline decoration-dotted disabled:opacity-50"
+            :disabled="actionSaving === sendQuoteModal.row.policyId"
+            @click="manualMark(sendQuoteModal.row, 'quote_sent', () => sendQuoteModal = null)">
+            ส่งเองแล้ว (บันทึกไม่ส่งเมล)
+          </button>
+          <div class="flex items-center gap-2">
+            <button type="button"
+              class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm"
+              :disabled="actionSaving === sendQuoteModal.row.policyId" @click="sendQuoteModal = null">
+              ยกเลิก
+            </button>
+            <button type="button"
+              class="px-4 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+              :disabled="actionSaving === sendQuoteModal.row.policyId || !sendQuoteModal.row.customerEmail"
+              @click="submitSendQuote">
+              <i class="pi pi-send text-xs" v-if="actionSaving !== sendQuoteModal.row.policyId" />
+              <i class="pi pi-spin pi-spinner text-xs" v-else />
+              ส่งอีเมล
+            </button>
+          </div>
+        </footer>
+      </div>
+    </div>
+
+    <!-- Decline / lost modal (Phase E) -->
+    <div v-if="declineModal" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[60] p-4"
+      @click.self="declineModal = null">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+        <header class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+          <div class="text-lg font-semibold text-slate-900">ลูกค้าปฏิเสธการต่ออายุ</div>
+          <button type="button" class="text-slate-400 hover:text-slate-700 p-1" @click="declineModal = null">
+            <i class="pi pi-times" />
+          </button>
+        </header>
+        <div class="p-5 space-y-3">
+          <div class="text-sm text-slate-700">
+            {{ declineModal.row.customerName || declineModal.row.customerCode }}
+            <span class="text-xs text-slate-500 font-mono ml-1">{{ declineModal.row.policyNo || declineModal.row.applicationNo }}</span>
+          </div>
+          <div>
+            <label class="text-xs font-medium text-slate-500 mb-1 block">เหตุผล (ไม่จำเป็น)</label>
+            <textarea v-model="declineModal.reason" rows="3"
+              placeholder="เช่น: เบี้ยสูงเกินไป / เปลี่ยนบริษัทประกัน / ขายรถแล้ว"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-brand-400 resize-none" />
+          </div>
+        </div>
+        <footer class="px-5 py-3 border-t border-slate-200 flex items-center justify-end gap-2">
+          <button type="button"
+            class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm"
+            :disabled="actionSaving === declineModal.row.policyId" @click="declineModal = null">
+            ยกเลิก
+          </button>
+          <button type="button"
+            class="px-4 py-1.5 rounded-lg bg-rose-600 text-white hover:bg-rose-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
+            :disabled="actionSaving === declineModal.row.policyId" @click="submitDecline">
+            <i class="pi pi-times-circle text-xs" v-if="actionSaving !== declineModal.row.policyId" />
+            <i class="pi pi-spin pi-spinner text-xs" v-else />
+            บันทึกการปฏิเสธ
           </button>
         </footer>
       </div>

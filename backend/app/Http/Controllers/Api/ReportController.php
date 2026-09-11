@@ -94,6 +94,7 @@ class ReportController extends ApiController
             'carrierId' => $r->carrier_id_out !== null ? (string) $r->carrier_id_out : null,
             'carrierCode' => $r->carrier_code,
             'carrierName' => $r->carrier_name,
+            'carrierEmail' => $r->carrier_email,
             'carrierInsureType' => $r->carrier_insure_type,
             'productId' => $r->product_id_out !== null ? (string) $r->product_id_out : null,
             'productCode' => $r->product_code,
@@ -104,6 +105,12 @@ class ReportController extends ApiController
             'lastContactedAt' => $r->last_contacted_at,
             'lastNoticeSentAt' => $r->last_notice_sent_at,
             'renewalStartedAt' => $r->renewal_started_at,
+            'quoteRequestedAt' => $r->quote_requested_at,
+            'quoteReceivedAt' => $r->quote_received_at,
+            'quotePreparedAt' => $r->quote_prepared_at,
+            'quoteSentAt' => $r->quote_sent_at,
+            'renewalDeclinedAt' => $r->renewal_declined_at,
+            'renewalStage' => $this->renewalStage($r),
         ]);
 
         return response()->json([
@@ -142,6 +149,29 @@ class ReportController extends ApiController
             ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
             ->where('type', 'renewalStarted')
             ->groupBy('policy_id');
+        // Quotation-workflow events (Phase A of the renewal quotation pipeline).
+        // Each is a MAX(occurred_at) so the renewalStage is derived from the
+        // latest touchpoint of each kind without a mutable status column.
+        $latestQuoteRequested = DB::table('policy_events')
+            ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
+            ->where('type', 'renewalQuoteRequested')
+            ->groupBy('policy_id');
+        $latestQuoteReceived = DB::table('policy_events')
+            ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
+            ->where('type', 'renewalQuoteReceived')
+            ->groupBy('policy_id');
+        $latestQuotePrepared = DB::table('policy_events')
+            ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
+            ->where('type', 'renewalQuotePrepared')
+            ->groupBy('policy_id');
+        $latestQuoteSent = DB::table('policy_events')
+            ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
+            ->where('type', 'renewalQuoteSent')
+            ->groupBy('policy_id');
+        $latestDeclined = DB::table('policy_events')
+            ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
+            ->where('type', 'renewalDeclined')
+            ->groupBy('policy_id');
 
         return DB::table('policies as p')
             ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
@@ -151,6 +181,11 @@ class ReportController extends ApiController
             ->leftJoinSub($latestContacted, 'ev_c', fn ($j) => $j->on('ev_c.policy_id', '=', 'p.id'))
             ->leftJoinSub($latestNoticeSent, 'ev_n', fn ($j) => $j->on('ev_n.policy_id', '=', 'p.id'))
             ->leftJoinSub($latestRenewStarted, 'ev_r', fn ($j) => $j->on('ev_r.policy_id', '=', 'p.id'))
+            ->leftJoinSub($latestQuoteRequested, 'ev_qr', fn ($j) => $j->on('ev_qr.policy_id', '=', 'p.id'))
+            ->leftJoinSub($latestQuoteReceived, 'ev_qrc', fn ($j) => $j->on('ev_qrc.policy_id', '=', 'p.id'))
+            ->leftJoinSub($latestQuotePrepared, 'ev_qp', fn ($j) => $j->on('ev_qp.policy_id', '=', 'p.id'))
+            ->leftJoinSub($latestQuoteSent, 'ev_qs', fn ($j) => $j->on('ev_qs.policy_id', '=', 'p.id'))
+            ->leftJoinSub($latestDeclined, 'ev_dc', fn ($j) => $j->on('ev_dc.policy_id', '=', 'p.id'))
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->where('p.status', 'active')
@@ -167,13 +202,69 @@ class ReportController extends ApiController
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
                 'ca.id as carrier_id_out', 'ca.code as carrier_code',
                 'ca.name as carrier_name', 'ca.insure_type as carrier_insure_type',
+                'ca.email as carrier_email',
                 'pr.id as product_id_out', 'pr.code as product_code',
                 'pr.name as product_name', 'pr.type as product_type',
                 'pr.main_rider as product_main_rider',
                 'ev_c.latest as last_contacted_at',
                 'ev_n.latest as last_notice_sent_at',
                 'ev_r.latest as renewal_started_at',
+                'ev_qr.latest as quote_requested_at',
+                'ev_qrc.latest as quote_received_at',
+                'ev_qp.latest as quote_prepared_at',
+                'ev_qs.latest as quote_sent_at',
+                'ev_dc.latest as renewal_declined_at',
             ]);
+    }
+
+    /**
+     * Derive the single renewal-pipeline stage for a policy row from its
+     * event timestamps. Stages are ordered; the furthest-reached event wins,
+     * so a policy that has a carrier quote uploaded reads `quote_received`
+     * even if it was also "contacted" earlier. `declined` is terminal and
+     * overrides everything except an actual renewal ("renewed"). A policy
+     * past its expiry date with no resolution reads `expired`.
+     *
+     * Stages (in order):
+     *   not_started → contacted → quote_requested → quote_received
+     *   → quote_prepared → quote_sent → renewed
+     * Off-track terminals: declined, expired.
+     *
+     * @param  object  $r  a row from expiringSoonBaseQuery()
+     */
+    private function renewalStage(object $r): string
+    {
+        // Renewed is the happy terminal — a new-term draft/policy was started.
+        if ($r->renewal_started_at !== null) {
+            return 'renewed';
+        }
+        // Declined is terminal unless renewed (handled above).
+        if ($r->renewal_declined_at !== null) {
+            return 'declined';
+        }
+        // Walk the quotation ladder from furthest-reached back to earliest.
+        if ($r->quote_sent_at !== null) {
+            return 'quote_sent';
+        }
+        if ($r->quote_prepared_at !== null) {
+            return 'quote_prepared';
+        }
+        if ($r->quote_received_at !== null) {
+            return 'quote_received';
+        }
+        if ($r->quote_requested_at !== null) {
+            return 'quote_requested';
+        }
+        // A sent notice or a logged contact both count as "contacted".
+        if ($r->last_notice_sent_at !== null || $r->last_contacted_at !== null) {
+            return 'contacted';
+        }
+        // Nothing done yet — flag as expired once the window has passed.
+        if ((int) $r->days_remaining < 0) {
+            return 'expired';
+        }
+
+        return 'not_started';
     }
 
     /**

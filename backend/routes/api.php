@@ -197,6 +197,13 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('policies/{policy}/renewal/contacted', [PolicyController::class, 'markRenewalContacted']);
     Route::post('policies/{policy}/renewal/started', [PolicyController::class, 'markRenewalStarted']);
     Route::post('policies/{policy}/renewal/send-notice', [PolicyController::class, 'sendRenewalNotice']);
+    // Renewal quotation pipeline — Phase B: request a next-term quote.
+    Route::post('policies/{policy}/renewal/request-quote', [PolicyController::class, 'requestRenewalQuote']);
+    // Renewal quotation pipeline — Phase E: send generated quote to customer + decline.
+    Route::post('policies/{policy}/renewal/send-quote', [PolicyController::class, 'sendRenewalQuote']);
+    Route::post('policies/{policy}/renewal/decline', [PolicyController::class, 'declineRenewal']);
+    // Manual stage marker — log a stage without performing its real side-effect.
+    Route::post('policies/{policy}/renewal/mark-stage', [PolicyController::class, 'markRenewalStage']);
     // Phase 9 — endorsements (event log per policy).
     Route::get('policies/{policy}/endorsements', [EndorsementController::class, 'index']);
     Route::post('policies/{policy}/endorsements', [EndorsementController::class, 'store']);
