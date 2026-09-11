@@ -16,7 +16,9 @@ import {
 
 export type { CustomerListRow, CustomerListFilters }
 
-export type Gender = 'male' | 'female' | 'other'
+// Stored as single-letter codes after the 2027_02_11 normalization migration.
+// '' covers rows where gender was never captured.
+export type Gender = 'M' | 'F' | ''
 export type MaritalStatus = 'single' | 'married' | 'divorced' | 'widowed'
 export type KycDocType =
   | 'idCard'
@@ -46,7 +48,7 @@ export interface AssignmentHistoryEntry {
   at: string
 }
 
-export type CustomerType = 'individual' | 'corporate'
+export type CustomerType = 'individual' | 'foreign_individual' | 'corporate'
 
 export interface MailingAddress {
   address: string

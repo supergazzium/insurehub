@@ -100,6 +100,20 @@ function cancel(): void {
   error.value = null
 }
 
+/** Build the PATCH body, expanding a dotted `field` into a nested object. */
+function buildBody(field: string, value: string | number | null): Record<string, unknown> {
+  const parts = field.split('.')
+  const root: Record<string, unknown> = {}
+  let cursor = root
+  for (let i = 0; i < parts.length - 1; i++) {
+    const child: Record<string, unknown> = {}
+    cursor[parts[i]] = child
+    cursor = child
+  }
+  cursor[parts[parts.length - 1]] = value
+  return root
+}
+
 function parseDraft(): string | number | null {
   const raw = draft.value.trim()
   if (raw === '') return null
@@ -132,7 +146,11 @@ async function save(): Promise<void> {
   saving.value = true
   error.value = null
   try {
-    await api.patch(`${props.entity}/${props.id}`, { [props.field]: next })
+    // A dotted `field` (e.g. "mailing.address") PATCHes a nested object —
+    // Laravel validates "mailing.address" against a nested array, so the body
+    // must be { mailing: { address: next } }, not a flat "mailing.address" key.
+    const body = buildBody(props.field, next)
+    await api.patch(`${props.entity}/${props.id}`, body)
     emit('update', next)
     editing.value = false
     savedFlash.value = true
