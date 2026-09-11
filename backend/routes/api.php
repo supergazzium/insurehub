@@ -220,6 +220,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::put('policies/{policy}/riders', [PolicyController::class, 'syncRiders']);
     Route::put('policies/{policy}/beneficiaries', [PolicyController::class, 'syncBeneficiaries']);
     // Phase 6b — multipart doc upload (in addition to the existing JSON store).
+    Route::get('policies/{policy}/documents', [PolicyDocumentController::class, 'index']);
     Route::post('policies/{policy}/documents/upload', [PolicyDocumentController::class, 'upload']);
     Route::get('policies/{policy}/documents/{document}/download', [PolicyDocumentController::class, 'download']);
 

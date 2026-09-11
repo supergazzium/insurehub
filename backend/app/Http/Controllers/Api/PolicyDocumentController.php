@@ -10,6 +10,7 @@ use App\Models\PolicyDocument;
 use App\Models\PolicyEvent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
@@ -23,6 +24,22 @@ class PolicyDocumentController extends ApiController
      * one advances the policy's renewal stage (see recordRenewalStageEvent).
      */
     private const DOC_TYPES = 'application,policy,receipt,medical,endorsement,cancellation,renewal_quote_carrier,renewal_quote_insurehub,other';
+
+    /**
+     * List a policy's documents, newest first. Optional `?type=` filter (e.g.
+     * renewal_quote_carrier) so callers can pull just one kind — used by the
+     * renewal pipeline to show/download the uploaded carrier quotation later.
+     */
+    public function index(Request $request, Policy $policy): AnonymousResourceCollection
+    {
+        $this->authorizeTenant($request, $policy);
+        $q = $policy->documents()->orderByDesc('uploaded_at');
+        if ($type = $request->string('type')->toString()) {
+            $q->where('type', $type);
+        }
+
+        return PolicyDocumentResource::collection($q->get());
+    }
 
     public function store(Request $request, Policy $policy): JsonResponse
     {

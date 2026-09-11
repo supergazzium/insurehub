@@ -1,7 +1,7 @@
 // Typed clients for /api/v1/policies list endpoint.
 // Detail view (show / store / update) still uses the Policy type from stores/policies.ts.
 
-import { api, buildQuery, type Paginated, type Single } from './client'
+import { api, buildQuery, getToken, type Paginated, type Single } from './client'
 import type { Policy, PolicyStatus, NewOrRenew } from '../stores/policies'
 
 /** Lean row returned by PolicyController::index — matches PolicyListResource. */
@@ -145,6 +145,22 @@ export function syncPolicyBeneficiaries(id: string, beneficiaries: BeneficiaryIn
   return api.put<Single<Policy>>(`policies/${id}/beneficiaries`, { beneficiaries })
 }
 
+/** One stored policy document — matches PolicyDocumentResource. */
+export interface PolicyDocumentRow {
+  id: string
+  policyId: string
+  type: string
+  fileName: string
+  uploadedAt: string | null
+  uploadedByUserId: string | null
+}
+
+/** List a policy's documents (newest first), optionally filtered by type. */
+export function fetchPolicyDocuments(policyId: string, type?: string) {
+  const qs = type ? `?type=${encodeURIComponent(type)}` : ''
+  return api.get<{ data: PolicyDocumentRow[] }>(`policies/${policyId}/documents${qs}`)
+}
+
 export async function uploadPolicyDocument(id: string, type: string, file: File) {
   const form = new FormData()
   form.append('type', type)
@@ -162,6 +178,39 @@ export function policyDocumentDownloadUrl(policyId: string, docId: string): stri
   const base = (import.meta.env.VITE_API_BASE_URL as string | undefined)
     ?? 'http://127.0.0.1:8000/api/v1'
   return `${base.replace(/\/+$/, '')}/policies/${policyId}/documents/${docId}/download`
+}
+
+/** Download (or open) a stored policy document. The API authenticates with a
+ *  Sanctum Bearer token in the Authorization header — a plain <a href> link
+ *  can't send that, so we fetch the file with the token, then trigger a real
+ *  download from the resulting blob. `mode` picks save-to-disk vs open-in-tab. */
+export async function downloadPolicyDocument(
+  policyId: string,
+  docId: string,
+  fileName?: string,
+  mode: 'download' | 'open' = 'download',
+): Promise<void> {
+  const res = await fetch(policyDocumentDownloadUrl(policyId, docId), {
+    headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: '*/*' },
+  })
+  if (!res.ok) {
+    throw new Error(`ดาวน์โหลดไม่สำเร็จ (HTTP ${res.status})`)
+  }
+  const blob = await res.blob()
+  const url = URL.createObjectURL(blob)
+  if (mode === 'open') {
+    window.open(url, '_blank', 'noopener')
+  } else {
+    const a = document.createElement('a')
+    a.href = url
+    a.download = fileName || `document-${docId}.pdf`
+    a.rel = 'noopener'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+  }
+  // Defer revoke so the browser can start the download / render the tab.
+  setTimeout(() => URL.revokeObjectURL(url), 60_000)
 }
 
 /** Phase 9c — recompute all commission accrual for a policy at current rates. */

@@ -14,11 +14,12 @@ import type { ExpiringPolicy } from '../api/reports'
 import { useQuotation, type Quotation, type QuotationExtraction } from './useQuotation'
 import { useQuotationPdf } from './useQuotationPdf'
 
-// Agency identity stamped on generated quotations. Mirrors the constants in
-// AgentSupport.vue; centralize both here in a later cleanup.
-const AGENCY_NAME = 'บริษัท เอบีซี อินชัวรันส์ จำกัด'
-const AGENCY_PHONE = '02-555-0100'
-const AGENCY_EMAIL = 'support@abc-insure.co.th'
+// Agency identity stamped on generated quotations.
+// TODO: move to a tenant/settings source once InsureHub's registered details
+// are stored server-side; hardcoded here for the branded quotation PDF.
+const AGENCY_NAME = 'InsureHub'
+const AGENCY_PHONE = '02-000-0000'
+const AGENCY_EMAIL = 'ops@insurehub.co.th'
 
 /** The operator-editable fields of a renewal quotation. Prefilled from the
  *  policy, then adjusted against the carrier's returned figures. */

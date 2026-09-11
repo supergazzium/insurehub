@@ -12,7 +12,10 @@ import {
   type CarrierListRow, type CarrierContact,
 } from '../../api/carriers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
-import { uploadPolicyDocument } from '../../api/policies'
+import {
+  uploadPolicyDocument, fetchPolicyDocuments, downloadPolicyDocument, deletePolicyDocument,
+  type PolicyDocumentRow,
+} from '../../api/policies'
 import { useRenewalQuote, emptyRenewalQuoteForm, type RenewalQuoteForm } from '../../composables/useRenewalQuote'
 import { ApiError } from '../../api/client'
 import { toCsv, downloadCsv } from '../../util/csvExport'
@@ -698,6 +701,78 @@ async function onQuoteFileSelected(e: Event): Promise<void> {
   }
 }
 
+// ── View uploaded quotation files ──────────────────────────────────────────
+// Lists the stored quote documents for a policy (carrier + InsureHub) so the
+// operator can open/download them when revisiting the case later.
+const filesModal = ref<{ row: ExpiringPolicy; docs: PolicyDocumentRow[] } | null>(null)
+const filesLoading = ref(false)
+
+async function openFiles(r: ExpiringPolicy): Promise<void> {
+  filesModal.value = { row: r, docs: [] }
+  filesLoading.value = true
+  try {
+    // Pull both quote kinds; sorted newest-first by the backend.
+    const [carrier, insurehub] = await Promise.all([
+      fetchPolicyDocuments(r.policyId, 'renewal_quote_carrier'),
+      fetchPolicyDocuments(r.policyId, 'renewal_quote_insurehub'),
+    ])
+    if (filesModal.value) filesModal.value.docs = [...carrier.data, ...insurehub.data]
+  } catch (e: unknown) {
+    flash(r.policyId, false, e instanceof ApiError ? e.message : 'โหลดเอกสารล้มเหลว')
+  } finally { filesLoading.value = false }
+}
+
+// Authenticated open / download — the API needs the Bearer token, which a plain
+// link can't send, so route through downloadPolicyDocument.
+const docBusy = ref<string | null>(null)  // docId currently opening/downloading
+async function openDoc(policyId: string, d: PolicyDocumentRow, mode: 'open' | 'download'): Promise<void> {
+  docBusy.value = d.id
+  try {
+    await downloadPolicyDocument(policyId, d.id, d.fileName, mode)
+  } catch (e: unknown) {
+    flash(policyId, false, e instanceof Error ? e.message : 'ดาวน์โหลดไม่สำเร็จ')
+  } finally { docBusy.value = null }
+}
+function docTypeLabel(type: string): string {
+  if (type === 'renewal_quote_carrier') return 'ใบเสนอราคาจากบริษัทประกัน'
+  if (type === 'renewal_quote_insurehub') return 'ใบเสนอราคา InsureHub'
+  return type
+}
+/** True when a row has any quote file worth showing (received or later). */
+function hasQuoteFiles(r: ExpiringPolicy): boolean {
+  return !!(r.quoteReceivedAt || r.quotePreparedAt || r.quoteSentAt)
+}
+
+// Delete a stored document (with confirm) and refresh the files list. Removing
+// the file doesn't rewind the stage — the milestone still happened; regenerate
+// to attach a fresh one.
+async function deleteDoc(policyId: string, d: PolicyDocumentRow): Promise<void> {
+  if (!window.confirm(`ลบไฟล์ "${d.fileName}"?`)) return
+  docBusy.value = d.id
+  try {
+    await deletePolicyDocument(policyId, d.id)
+    if (filesModal.value) filesModal.value.docs = filesModal.value.docs.filter((x) => x.id !== d.id)
+    flash(policyId, true, 'ลบไฟล์แล้ว')
+  } catch (e: unknown) {
+    flash(policyId, false, e instanceof ApiError ? e.message : 'ลบไฟล์ล้มเหลว')
+  } finally { docBusy.value = null }
+}
+
+// "Edit" an InsureHub quote = delete the old file then open the generator to
+// make a new one. Closes the files modal and opens the prepare modal.
+async function regenerateInsurehubQuote(r: ExpiringPolicy, d: PolicyDocumentRow): Promise<void> {
+  if (!window.confirm('สร้างใบเสนอราคา InsureHub ใหม่ และลบฉบับเดิม?')) return
+  docBusy.value = d.id
+  try {
+    await deletePolicyDocument(r.policyId, d.id)
+    flash(r.policyId, true, 'ลบฉบับเดิมแล้ว — กรอกข้อมูลเพื่อสร้างใหม่')
+    filesModal.value = null
+    openPrepareQuote(r)
+  } catch (e: unknown) {
+    flash(r.policyId, false, e instanceof ApiError ? e.message : 'ดำเนินการล้มเหลว')
+  } finally { docBusy.value = null }
+}
+
 // ── Phase D — generate the InsureHub-branded quotation ─────────────────────
 // A manual-entry form (prefilled from the policy) → renders a PDF via the
 // shared quotation renderer → uploads it as `renewal_quote_insurehub`, which
@@ -720,13 +795,19 @@ async function submitPrepareQuote(alsoDownload: boolean): Promise<void> {
     const quotation = renewalQuote.buildQuotation(r, form)
     const file = await renewalQuote.renderToFile(quotation)
     if (alsoDownload) {
-      // Reuse the same blob the File wraps, no re-render.
+      // Reuse the same blob the File wraps, no re-render. Append the anchor to
+      // the DOM and defer the revoke so the browser has time to start the
+      // download — revoking synchronously right after click() cancels it in
+      // several browsers.
       const url = URL.createObjectURL(file)
       const a = document.createElement('a')
       a.href = url
       a.download = file.name
+      a.rel = 'noopener'
+      document.body.appendChild(a)
       a.click()
-      URL.revokeObjectURL(url)
+      a.remove()
+      setTimeout(() => URL.revokeObjectURL(url), 10_000)
     }
     await uploadPolicyDocument(r.policyId, 'renewal_quote_insurehub', file)
     r.quotePreparedAt = new Date().toISOString()
@@ -734,7 +815,11 @@ async function submitPrepareQuote(alsoDownload: boolean): Promise<void> {
     flash(r.policyId, true, 'สร้างใบเสนอราคา InsureHub แล้ว')
     prepareModal.value = null
   } catch (err: unknown) {
-    flash(r.policyId, false, err instanceof ApiError ? err.message : 'สร้างใบเสนอราคาล้มเหลว')
+    // Surface the real reason (jsPDF render error, upload error, etc.) instead
+    // of a generic message so failures are diagnosable.
+    console.error('[renewal] prepare-quote failed', err)
+    const msg = err instanceof ApiError ? err.message : (err instanceof Error ? err.message : 'สร้างใบเสนอราคาล้มเหลว')
+    flash(r.policyId, false, msg)
   } finally {
     preparing.value = false
     actionSaving.value = null
@@ -885,6 +970,26 @@ function relativeDays(iso: string | null | undefined): string {
   if (days < 1) return 'วันนี้'
   if (days === 1) return 'เมื่อวาน'
   return days + ' วันก่อน'
+}
+
+// Only the MOST RECENT step for the status cell — keeps the column clean
+// instead of stacking every historical timestamp. Picks the furthest-reached
+// action that has a timestamp (matching the stage order), returns its label +
+// "how long ago", or null when nothing has happened yet.
+function latestStatusLine(r: ExpiringPolicy): { label: string; when: string } | null {
+  const steps: Array<[string | null | undefined, string]> = [
+    [r.renewalStartedAt, 'เริ่มต่ออายุ'],
+    [r.quoteSentAt, 'ส่งใบเสนอราคา'],
+    [r.quotePreparedAt, 'จัดทำใบเสนอราคา'],
+    [r.quoteReceivedAt, 'รับใบเสนอราคา'],
+    [r.quoteRequestedAt, 'ขอใบเสนอราคา'],
+    [r.lastNoticeSentAt, 'ส่งอีเมล'],
+    [r.lastContactedAt, 'ติดต่อ'],
+  ]
+  for (const [ts, label] of steps) {
+    if (ts) return { label, when: relativeDays(ts) }
+  }
+  return null
 }
 
 // CSV export — fetch the entire filtered set (up to the server cap) with
@@ -1274,28 +1379,9 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
                   <i :class="['pi', renewalStageMeta(r.renewalStage).icon, 'text-[10px]']" />
                   {{ renewalStageMeta(r.renewalStage).label }}
                 </span>
-                <div class="mt-1 space-y-0.5">
-                  <div v-if="r.renewalStartedAt" class="text-brand-700">
-                    <i class="pi pi-arrow-right text-[10px] mr-0.5" /> เริ่มต่ออายุ · {{ relativeDays(r.renewalStartedAt) }}
-                  </div>
-                  <div v-if="r.quoteSentAt" class="text-teal-700">
-                    <i class="pi pi-envelope text-[10px] mr-0.5" /> ส่งใบเสนอราคา · {{ relativeDays(r.quoteSentAt) }}
-                  </div>
-                  <div v-if="r.quotePreparedAt" class="text-amber-700">
-                    <i class="pi pi-file-edit text-[10px] mr-0.5" /> จัดทำใบเสนอราคา · {{ relativeDays(r.quotePreparedAt) }}
-                  </div>
-                  <div v-if="r.quoteReceivedAt" class="text-violet-700">
-                    <i class="pi pi-inbox text-[10px] mr-0.5" /> รับใบเสนอราคา · {{ relativeDays(r.quoteReceivedAt) }}
-                  </div>
-                  <div v-if="r.quoteRequestedAt" class="text-indigo-700">
-                    <i class="pi pi-send text-[10px] mr-0.5" /> ขอใบเสนอราคา · {{ relativeDays(r.quoteRequestedAt) }}
-                  </div>
-                  <div v-if="r.lastNoticeSentAt" class="text-emerald-700">
-                    <i class="pi pi-envelope text-[10px] mr-0.5" /> ส่งอีเมล · {{ relativeDays(r.lastNoticeSentAt) }}
-                  </div>
-                  <div v-if="r.lastContactedAt" class="text-slate-600">
-                    <i class="pi pi-phone text-[10px] mr-0.5" /> ติดต่อ · {{ relativeDays(r.lastContactedAt) }}
-                  </div>
+                <!-- Only the latest step, so the column stays clean -->
+                <div v-if="latestStatusLine(r)" class="mt-1 text-slate-500">
+                  {{ latestStatusLine(r)!.label }} · {{ latestStatusLine(r)!.when }}
                 </div>
                 <div v-if="actionMsg?.id === r.policyId"
                   :class="actionMsg.ok ? 'text-emerald-700' : 'text-rose-700'"
@@ -1316,6 +1402,13 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
                   <span v-else class="text-xs text-slate-400 px-2">
                     {{ r.renewalStage === 'renewed' ? 'เสร็จสิ้น' : (r.renewalStage === 'declined' ? 'ปฏิเสธแล้ว' : '—') }}
                   </span>
+
+                  <!-- View uploaded quote files — appears once a quote exists. -->
+                  <button v-if="hasQuoteFiles(r)" type="button" title="ดูใบเสนอราคาที่อัปโหลด"
+                    class="p-1.5 rounded hover:bg-slate-100 text-slate-500 hover:text-brand-600 disabled:opacity-50"
+                    :disabled="actionSaving === r.policyId" @click="openFiles(r)">
+                    <i class="pi pi-paperclip text-xs" />
+                  </button>
 
                   <!-- Overflow: all other actions, so nothing is lost but the
                        row stays readable. Toggles a small popover. -->
@@ -1466,6 +1559,12 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
                   {{ nextActionFor(r)!.label }}
                 </button>
               </div>
+              <!-- View uploaded quote files (board) -->
+              <button v-if="hasQuoteFiles(r)" type="button"
+                class="mt-1.5 w-full text-[10px] text-slate-500 hover:text-brand-600 flex items-center justify-center gap-1"
+                @click.stop="openFiles(r)">
+                <i class="pi pi-paperclip text-[9px]" /> ดูใบเสนอราคา
+              </button>
             </div>
             <div v-if="!col.rows.length" class="text-center text-xs text-slate-300 py-4 border border-dashed border-slate-200 rounded-lg">
               —
@@ -1921,6 +2020,71 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
             <i class="pi pi-times-circle text-xs" v-if="actionSaving !== declineModal.row.policyId" />
             <i class="pi pi-spin pi-spinner text-xs" v-else />
             บันทึกการปฏิเสธ
+          </button>
+        </footer>
+      </div>
+    </div>
+
+    <!-- View uploaded quote files — open/download stored quotations later -->
+    <div v-if="filesModal" class="fixed inset-0 bg-slate-900/50 flex items-center justify-center z-[60] p-4"
+      @click.self="filesModal = null">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md overflow-hidden">
+        <header class="px-5 py-3 border-b border-slate-200 flex items-center justify-between">
+          <div class="text-lg font-semibold text-slate-900">ใบเสนอราคาที่อัปโหลด</div>
+          <button type="button" class="text-slate-400 hover:text-slate-700 p-1" @click="filesModal = null">
+            <i class="pi pi-times" />
+          </button>
+        </header>
+        <div class="p-5">
+          <div class="text-sm text-slate-700 mb-3">
+            {{ filesModal.row.customerName || filesModal.row.customerCode }}
+            <span class="text-xs text-slate-500 font-mono ml-1">{{ filesModal.row.policyNo || filesModal.row.applicationNo }}</span>
+          </div>
+
+          <div v-if="filesLoading" class="text-sm text-slate-500 py-4 text-center">กำลังโหลด…</div>
+          <div v-else-if="!filesModal.docs.length" class="text-sm text-slate-500 py-4 text-center">
+            ยังไม่มีไฟล์ใบเสนอราคา
+          </div>
+          <ul v-else class="divide-y divide-slate-100 border border-slate-200 rounded-lg overflow-hidden">
+            <li v-for="d in filesModal.docs" :key="d.id" class="flex items-start gap-3 px-3 py-2.5">
+              <i class="pi pi-file-pdf text-rose-500 mt-0.5" />
+              <div class="flex-1 min-w-0">
+                <div class="text-sm text-slate-800 truncate">{{ d.fileName }}</div>
+                <div class="text-[11px] text-slate-400">
+                  {{ docTypeLabel(d.type) }}<span v-if="d.uploadedAt"> · {{ relativeDays(d.uploadedAt) }}</span>
+                </div>
+                <div class="flex items-center gap-1.5 flex-wrap mt-1.5">
+                  <button type="button"
+                    class="px-2 py-0.5 rounded border border-slate-200 text-slate-600 hover:bg-slate-50 text-[11px] flex items-center gap-1 disabled:opacity-50"
+                    :disabled="docBusy === d.id" @click="openDoc(filesModal.row.policyId, d, 'open')">
+                    <i class="pi pi-eye text-[10px]" /> เปิด
+                  </button>
+                  <button type="button"
+                    class="px-2 py-0.5 rounded bg-brand-600 text-white hover:bg-brand-700 text-[11px] flex items-center gap-1 disabled:opacity-50"
+                    :disabled="docBusy === d.id" @click="openDoc(filesModal.row.policyId, d, 'download')">
+                    <i :class="docBusy === d.id ? 'pi pi-spin pi-spinner' : 'pi pi-download'" class="text-[10px]" /> ดาวน์โหลด
+                  </button>
+                  <!-- InsureHub quote: edit = regenerate (delete + recreate) -->
+                  <button v-if="d.type === 'renewal_quote_insurehub'" type="button"
+                    class="px-2 py-0.5 rounded border border-brand-200 text-brand-700 hover:bg-brand-50 text-[11px] flex items-center gap-1 disabled:opacity-50"
+                    :disabled="docBusy === d.id" @click="regenerateInsurehubQuote(filesModal.row, d)">
+                    <i class="pi pi-refresh text-[10px]" /> สร้างใหม่
+                  </button>
+                  <button type="button"
+                    class="px-2 py-0.5 rounded border border-rose-200 text-rose-600 hover:bg-rose-50 text-[11px] flex items-center gap-1 disabled:opacity-50"
+                    :disabled="docBusy === d.id" @click="deleteDoc(filesModal.row.policyId, d)">
+                    <i class="pi pi-trash text-[10px]" /> ลบ
+                  </button>
+                </div>
+              </div>
+            </li>
+          </ul>
+        </div>
+        <footer class="px-5 py-3 border-t border-slate-200 flex justify-end">
+          <button type="button"
+            class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm"
+            @click="filesModal = null">
+            ปิด
           </button>
         </footer>
       </div>
