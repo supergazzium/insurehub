@@ -133,9 +133,9 @@ export function requestRenewalQuote(policyId: string, payload: RequestRenewalQuo
 }
 
 // Phase E — send the generated InsureHub quote to the customer.
-export function sendRenewalQuote(policyId: string, message?: string) {
+export function sendRenewalQuote(policyId: string, message?: string, to?: string) {
   return api.post<{ message: string; sentTo: string }>(
-    `policies/${policyId}/renewal/send-quote`, { message },
+    `policies/${policyId}/renewal/send-quote`, { message, to },
   )
 }
 

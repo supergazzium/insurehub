@@ -827,12 +827,13 @@ async function submitPrepareQuote(alsoDownload: boolean): Promise<void> {
 }
 
 // ── Phase E — send the generated quote to the customer + won/lost ──────────
-const sendQuoteModal = ref<{ row: ExpiringPolicy; message: string } | null>(null)
+const sendQuoteModal = ref<{ row: ExpiringPolicy; to: string; message: string } | null>(null)
 const declineModal = ref<{ row: ExpiringPolicy; reason: string } | null>(null)
 
 function openSendQuote(r: ExpiringPolicy): void {
   sendQuoteModal.value = {
     row: r,
+    to: r.customerEmail ?? '',
     message: `เรียน คุณ${r.customerName || 'ลูกค้า'}\n\n`
       + `InsureHub ได้จัดทำใบเสนอราคาสำหรับการต่ออายุกรมธรรม์ของท่านเรียบร้อยแล้ว รายละเอียดตามเอกสารแนบ\n\n`
       + `หากมีข้อสงสัยหรือต้องการยืนยันการต่ออายุ กรุณาติดต่อกลับได้ที่อีเมลนี้`,
@@ -841,10 +842,10 @@ function openSendQuote(r: ExpiringPolicy): void {
 
 async function submitSendQuote(): Promise<void> {
   if (!sendQuoteModal.value) return
-  const { row: r, message } = sendQuoteModal.value
+  const { row: r, to, message } = sendQuoteModal.value
   actionSaving.value = r.policyId
   try {
-    await sendRenewalQuote(r.policyId, message.trim() || undefined)
+    await sendRenewalQuote(r.policyId, message.trim() || undefined, to.trim() || undefined)
     r.quoteSentAt = new Date().toISOString()
     r.renewalStage = 'quote_sent'
     flash(r.policyId, true, 'ส่งใบเสนอราคาถึงลูกค้าแล้ว')
@@ -1900,18 +1901,8 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
             ใบเสนอราคาจะถูกบันทึกแนบกับกรมธรรม์และเปลี่ยนสถานะเป็น “จัดทำใบเสนอราคาแล้ว”
           </p>
         </div>
-        <footer class="px-5 py-3 border-t border-slate-200 flex items-center justify-between gap-2 flex-wrap">
-          <button type="button"
-            class="text-xs text-slate-500 hover:text-slate-700 underline decoration-dotted disabled:opacity-50"
-            :disabled="preparing" @click="manualMark(prepareModal.row, 'quote_prepared', () => prepareModal = null)">
-            ข้ามขั้นตอนนี้ (บันทึกว่าจัดทำแล้ว)
-          </button>
-          <div class="flex items-center gap-2">
-            <button type="button"
-              class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm disabled:opacity-50"
-              :disabled="preparing" @click="prepareModal = null">
-              ยกเลิก
-            </button>
+        <footer class="px-5 py-4 border-t border-slate-200 space-y-3">
+          <div class="flex items-center justify-end gap-2 flex-wrap">
             <button type="button"
               class="px-3 py-1.5 rounded-lg border border-brand-200 text-brand-700 hover:bg-brand-50 text-sm disabled:opacity-50 flex items-center gap-1.5"
               :disabled="preparing" @click="submitPrepareQuote(true)">
@@ -1925,6 +1916,19 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
               <i class="pi pi-spin pi-spinner text-xs" v-else />
               สร้างและบันทึก
             </button>
+          </div>
+          <div class="border-t border-dashed border-slate-200"></div>
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs text-slate-500">จัดทำผ่านช่องทางอื่นแล้ว? ทำเครื่องหมายว่าเสร็จ</div>
+            <button type="button"
+              class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-sm disabled:opacity-50 flex items-center gap-1"
+              :disabled="preparing" @click="manualMark(prepareModal.row, 'quote_prepared', () => prepareModal = null)">
+              <i class="pi pi-check text-xs" /> ทำเองแล้ว → สถานะถัดไป
+            </button>
+          </div>
+          <div class="text-right">
+            <button type="button" class="px-3 py-1 text-slate-500 hover:text-slate-700 text-xs"
+              :disabled="preparing" @click="prepareModal = null">ยกเลิก</button>
           </div>
         </footer>
       </div>
@@ -1941,15 +1945,17 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
           </button>
         </header>
         <div class="p-5 space-y-4">
-          <div class="text-sm">
-            <div class="text-slate-700">{{ sendQuoteModal.row.customerName || sendQuoteModal.row.customerCode }}</div>
-            <div class="mt-1">
-              <span class="text-slate-500">ปลายทาง:</span>
-              <span class="ml-2 font-medium text-slate-900">{{ sendQuoteModal.row.customerEmail || 'ไม่พบอีเมล' }}</span>
-            </div>
-            <div v-if="!sendQuoteModal.row.customerEmail" class="text-xs text-amber-600 mt-1">
-              <i class="pi pi-info-circle text-[10px] mr-0.5" /> ลูกค้าไม่มีอีเมล — ไม่สามารถส่งได้
-            </div>
+          <div class="text-sm text-slate-700">
+            {{ sendQuoteModal.row.customerName || sendQuoteModal.row.customerCode }}
+          </div>
+          <!-- Editable destination email -->
+          <div>
+            <label class="text-xs font-medium text-slate-500 mb-1 block">อีเมลปลายทาง (แก้ไขได้)</label>
+            <input v-model="sendQuoteModal.to" type="email" placeholder="อีเมลลูกค้า"
+              class="w-full border border-slate-200 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:border-brand-400" />
+            <p v-if="!sendQuoteModal.to.trim()" class="text-xs text-amber-600 mt-1">
+              <i class="pi pi-info-circle text-[10px] mr-0.5" /> ยังไม่มีอีเมล — พิมพ์อีเมล หรือใช้ปุ่ม “ทำเองแล้ว”
+            </p>
           </div>
           <div>
             <label class="text-xs font-medium text-slate-500 mb-1 block">ข้อความ (แก้ไขได้)</label>
@@ -1960,27 +1966,31 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
             <i class="pi pi-paperclip text-[10px] mr-0.5" /> ใบเสนอราคา InsureHub ล่าสุดจะถูกแนบไปกับอีเมลอัตโนมัติ
           </p>
         </div>
-        <footer class="px-5 py-3 border-t border-slate-200 flex items-center justify-between gap-2 flex-wrap">
-          <button type="button"
-            class="text-xs text-slate-500 hover:text-slate-700 underline decoration-dotted disabled:opacity-50"
-            :disabled="actionSaving === sendQuoteModal.row.policyId"
-            @click="manualMark(sendQuoteModal.row, 'quote_sent', () => sendQuoteModal = null)">
-            ส่งเองแล้ว (บันทึกไม่ส่งเมล)
-          </button>
-          <div class="flex items-center gap-2">
-            <button type="button"
-              class="px-3 py-1.5 rounded-lg border border-slate-200 text-slate-700 hover:bg-slate-50 text-sm"
-              :disabled="actionSaving === sendQuoteModal.row.policyId" @click="sendQuoteModal = null">
-              ยกเลิก
-            </button>
+        <footer class="px-5 py-4 border-t border-slate-200 space-y-3">
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs text-slate-500">ให้ระบบส่งอีเมลพร้อมไฟล์แนบ</div>
             <button type="button"
               class="px-4 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
-              :disabled="actionSaving === sendQuoteModal.row.policyId || !sendQuoteModal.row.customerEmail"
+              :disabled="actionSaving === sendQuoteModal.row.policyId || !sendQuoteModal.to.trim()"
               @click="submitSendQuote">
               <i class="pi pi-send text-xs" v-if="actionSaving !== sendQuoteModal.row.policyId" />
               <i class="pi pi-spin pi-spinner text-xs" v-else />
-              ส่งอีเมล
+              ส่งอีเมลเลย
             </button>
+          </div>
+          <div class="border-t border-dashed border-slate-200"></div>
+          <div class="flex items-center justify-between gap-2">
+            <div class="text-xs text-slate-500">ส่งผ่านช่องทางอื่นแล้ว? ทำเครื่องหมายว่าเสร็จ</div>
+            <button type="button"
+              class="px-3 py-1.5 rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 text-sm disabled:opacity-50 flex items-center gap-1"
+              :disabled="actionSaving === sendQuoteModal.row.policyId"
+              @click="manualMark(sendQuoteModal.row, 'quote_sent', () => sendQuoteModal = null)">
+              <i class="pi pi-check text-xs" /> ทำเองแล้ว → สถานะถัดไป
+            </button>
+          </div>
+          <div class="text-right">
+            <button type="button" class="px-3 py-1 text-slate-500 hover:text-slate-700 text-xs"
+              :disabled="actionSaving === sendQuoteModal.row.policyId" @click="sendQuoteModal = null">ยกเลิก</button>
           </div>
         </footer>
       </div>

@@ -18,6 +18,7 @@
  */
 
 import { jsPDF } from 'jspdf'
+import html2canvas from 'html2canvas'
 import type { Quotation } from './useQuotation'
 
 // ── Brand palette (matches the InsureHub logo + tailwind brand scale) ──────
@@ -233,22 +234,43 @@ export function useQuotationPdf() {
   async function renderToBlob(q: Quotation): Promise<Blob> {
     const logo = await loadLogo()
     const node = buildQuotationHtml(q, logo)
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+    // Give data-URL images (the logo) a tick to be layout-ready before capture.
+    await new Promise((r) => setTimeout(r, 50))
 
-    await pdf.html(node, {
-      x: 0,
-      y: 0,
-      width: 595, // A4 width in pt
+    // Rasterize the node ourselves with html2canvas, then place the image into
+    // the PDF sized to the page width and paginate manually. This is far more
+    // reliable than jsPDF.html()'s internal scaling, which produced blank pages.
+    const canvas = await html2canvas(node, {
+      scale: 2, // crisp text
+      useCORS: true,
+      allowTaint: true,
+      backgroundColor: '#ffffff',
       windowWidth: 794,
-      html2canvas: {
-        scale: 595 / 794,
-        useCORS: true,
-        allowTaint: true,
-        backgroundColor: '#ffffff',
-      },
     })
-
     document.body.removeChild(node)
+
+    const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+    const pageW = pdf.internal.pageSize.getWidth()   // 595pt
+    const pageH = pdf.internal.pageSize.getHeight()  // 842pt
+    // Scale the full-width canvas to the page width; height follows aspect.
+    const imgH = (canvas.height * pageW) / canvas.width
+    const imgData = canvas.toDataURL('image/jpeg', 0.92)
+
+    if (imgH <= pageH) {
+      pdf.addImage(imgData, 'JPEG', 0, 0, pageW, imgH)
+    } else {
+      // Taller than one page → slice across pages by shifting the image up.
+      let remaining = imgH
+      let offset = 0
+      while (remaining > 0) {
+        pdf.addImage(imgData, 'JPEG', 0, offset, pageW, imgH)
+        remaining -= pageH
+        if (remaining > 0) {
+          pdf.addPage()
+          offset -= pageH
+        }
+      }
+    }
     return pdf.output('blob')
   }
 

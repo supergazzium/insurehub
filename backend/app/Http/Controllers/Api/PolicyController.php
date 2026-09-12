@@ -952,13 +952,16 @@ class PolicyController extends ApiController
         $this->authorizeTenant($request, $policy);
         $data = $request->validate([
             'message' => ['sometimes', 'nullable', 'string', 'max:2000'],
+            // Operator can override the destination (e.g. an alternate customer
+            // email); falls back to the customer's email on file.
+            'to' => ['sometimes', 'nullable', 'email', 'max:255'],
         ]);
         $policy->loadMissing(['customer', 'product']);
 
-        $to = $policy->customer?->email;
+        $to = ! empty($data['to']) ? $data['to'] : $policy->customer?->email;
         if (empty($to)) {
             throw ValidationException::withMessages([
-                'email' => ['ลูกค้ายังไม่มีอีเมลในระบบ'],
+                'email' => ['ลูกค้ายังไม่มีอีเมลในระบบ — กรุณาระบุอีเมลปลายทาง'],
             ]);
         }
 
