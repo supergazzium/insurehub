@@ -85,8 +85,10 @@ return new class extends Migration
 
             // Reporting indexes — the two hot queries are "everything for a
             // policy" and "everything for a beneficiary within a period".
-            $table->index(['tenant_id', 'beneficiary_agent_id', 'created_at']);
-            $table->index(['policy_id', 'payout_type']);
+            // Explicit short names: the auto-generated name for the first index
+            // is 66 chars, over MySQL's 64-char identifier limit (error 1059).
+            $table->index(['tenant_id', 'beneficiary_agent_id', 'created_at'], 'cl_tenant_beneficiary_created_idx');
+            $table->index(['policy_id', 'payout_type'], 'cl_policy_payout_idx');
         });
     }
 
