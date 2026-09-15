@@ -220,6 +220,38 @@ export function recomputeCommission(policyId: string) {
   )
 }
 
+// ── Policy payments ────────────────────────────────────────────────────────
+export interface PolicyPaymentRow {
+  id: string
+  policyId: string
+  paymentDate: string
+  amount: number
+  method: string
+  reference: string
+  recordedByUserId: string | null
+}
+/** One งวด row in a payment batch. `method` uses the modal values. */
+export interface PaymentRowInput {
+  paymentDate: string
+  amount: number
+  method: 'transfer' | 'credit_card' | 'cash'
+  note?: string
+}
+export interface CreatePaymentsPayload {
+  payMode: string
+  payee: 'insurehub' | 'carrier'
+  payments: PaymentRowInput[]
+}
+export function fetchPolicyPayments(policyId: string) {
+  return api.get<{ data: PolicyPaymentRow[] }>(`policies/${policyId}/payments`)
+}
+export function createPolicyPayments(policyId: string, payload: CreatePaymentsPayload) {
+  return api.post<{ data: PolicyPaymentRow[] }>(`policies/${policyId}/payments`, payload)
+}
+export function deletePolicyPayment(policyId: string, paymentId: string) {
+  return api.delete<{ message: string }>(`policies/${policyId}/payments/${paymentId}`)
+}
+
 /** C-8 — Issue Policy modal payload. All strings ISO. `force=true`
  *  bypasses the soft-duplicate policyNo check. */
 export interface IssuePolicyPayload {

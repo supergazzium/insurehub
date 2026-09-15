@@ -6,9 +6,13 @@ namespace App\Http\Resources;
 
 use App\Models\Policy;
 use App\Models\PolicyEvent;
+use App\Models\ProductCommissionRate;
+use App\Services\Commission\CommissionSnapshot;
 use App\Support\PolicyRiskShim;
+use App\Support\ProductKind;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
+use Illuminate\Support\Carbon;
 
 /**
  * @mixin Policy
@@ -33,6 +37,22 @@ class PolicyResource extends JsonResource
             'coverage' => (float) $this->coverage,
             'annualPremium' => (float) $this->annual_premium,
             'premiumMode' => $this->premium_mode,
+            // Flat payment fields — the sectioned PolicyEdit form hydrates from
+            // these exact top-level keys (see PolicyEdit hydrate()). The nested
+            // `installment` block below is kept for other consumers; without
+            // these flats the edit form re-hydrates to blanks after a save and
+            // the payment section looks like it didn't persist.
+            'paymentMethodId' => $this->payment_method_id !== null ? (int) $this->payment_method_id : null,
+            'typeOfPaid' => $this->type_of_paid ?? '',
+            'typeOfPaidNote' => $this->type_of_paid_note ?? '',
+            'financeCompany' => $this->finance_company ?? '',
+            'installmentTerm' => $this->installment_term !== null ? (int) $this->installment_term : 0,
+            'firstDueInst' => $this->first_due_inst !== null ? (float) $this->first_due_inst : 0,
+            'nextDueInst' => $this->next_due_inst !== null ? (float) $this->next_due_inst : 0,
+            'firstDueInstDate' => $this->first_due_inst_date?->toDateString(),
+            'lastDueInstDate' => $this->last_due_inst_date?->toDateString(),
+            'subsidiseFromAgent' => $this->subsidise_from_agent !== null ? (float) $this->subsidise_from_agent : 0,
+            'subsidiseToFinance' => $this->subsidise_to_finance !== null ? (float) $this->subsidise_to_finance : 0,
             'quoteDate' => $this->quote_date?->toDateString() ?? '',
             'appDate' => $this->app_date?->toDateString(),
             'createDate' => $this->create_date?->toDateString(),
@@ -260,7 +280,7 @@ class PolicyResource extends JsonResource
             ->whereNotNull('effective_date')
             ->min('effective_date');
 
-        return $min ? \Illuminate\Support\Carbon::parse($min)->toDateString() : null;
+        return $min ? Carbon::parse($min)->toDateString() : null;
     }
 
     /**
@@ -314,7 +334,7 @@ class PolicyResource extends JsonResource
         }
         $product = $this->product;
         if ($product !== null) {
-            $derived = \App\Support\ProductKind::derive(
+            $derived = ProductKind::derive(
                 $product->type ?? '',
                 $product->category ?? '',
                 $product->sub_category_2 ?? '',
@@ -337,13 +357,13 @@ class PolicyResource extends JsonResource
      */
     private function commissionSnapshotPayload(): array
     {
-        $snap = \App\Services\Commission\CommissionSnapshot::fromPolicy($this->resource);
+        $snap = CommissionSnapshot::fromPolicy($this->resource);
         if ($snap === null) {
             return ['frozen' => false, 'hubToAgentRate' => null, 'carrierToHubRate' => null, 'capturedAt' => null];
         }
 
-        $hub = $snap->rateRow(\App\Models\ProductCommissionRate::DIRECTION_HUB_TO_AGENT);
-        $carrier = $snap->rateRow(\App\Models\ProductCommissionRate::DIRECTION_CARRIER_TO_HUB);
+        $hub = $snap->rateRow(ProductCommissionRate::DIRECTION_HUB_TO_AGENT);
+        $carrier = $snap->rateRow(ProductCommissionRate::DIRECTION_CARRIER_TO_HUB);
 
         return [
             'frozen' => true,
@@ -361,12 +381,12 @@ class PolicyResource extends JsonResource
      * rate under scheme=flat, or the year-1 rate under scheme=life_years. This
      * is what the wizard's premium section shows as the policy's commission.
      */
-    private function headlineRate(?\App\Models\ProductCommissionRate $row): ?float
+    private function headlineRate(?ProductCommissionRate $row): ?float
     {
         if ($row === null) {
             return null;
         }
-        if ($row->scheme === \App\Models\ProductCommissionRate::SCHEME_LIFE_YEARS) {
+        if ($row->scheme === ProductCommissionRate::SCHEME_LIFE_YEARS) {
             return $row->yr_1 !== null ? (float) $row->yr_1 : null;
         }
 

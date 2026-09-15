@@ -13,6 +13,7 @@ import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import IssuePolicyModal from './IssuePolicyModal.vue'
 import { api, ApiError } from '../../api/client'
 import { CURRENT_STATUSES, statusBadgeClass } from '../../utils/policyStatus'
+import { paymentTypeLabel } from '../../utils/paymentTypes'
 
 const { t } = useI18n()
 
@@ -259,7 +260,7 @@ function statusBadge(s: string): string {
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Installment</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
             <div><div class="text-xs text-slate-400">Term</div><div class="text-slate-900">{{ policy.installment.term || '—' }}</div></div>
-            <div><div class="text-xs text-slate-400">Type of paid</div><div class="text-slate-900">{{ policy.installment.typeOfPaid || '—' }}</div></div>
+            <div><div class="text-xs text-slate-400">Type of paid</div><div class="text-slate-900">{{ paymentTypeLabel(policy.installment.typeOfPaid) || '—' }}</div></div>
             <div><div class="text-xs text-slate-400">Type note</div><div class="text-slate-900">{{ policy.installment.typeOfPaidNote || '—' }}</div></div>
             <div><div class="text-xs text-slate-400">Finance company</div><div class="text-slate-900">{{ policy.installment.financeCompany || '—' }}</div></div>
             <div><div class="text-xs text-slate-400">First due</div><div class="text-slate-900">{{ fmtBaht(policy.installment.firstDueAmount) }} — {{ fmtDate(policy.installment.firstDueDate) }}</div></div>

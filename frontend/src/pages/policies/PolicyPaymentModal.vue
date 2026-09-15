@@ -13,6 +13,8 @@
 //           computes as expected − Σ paid.
 
 import { computed, reactive, ref, watch } from 'vue'
+import { createPolicyPayments } from '../../api/policies'
+import { ApiError } from '../../api/client'
 
 /** Expected (computed) premium numbers passed in from the wizard. */
 export interface ExpectedPremium {
@@ -28,6 +30,9 @@ const props = defineProps<{
   open: boolean
   expected: ExpectedPremium
   carrierLabel: string
+  /** Policy id — when set the modal SAVES to the backend; when absent (e.g. the
+   *  create wizard, before the policy exists) it stays preview-only. */
+  policyId?: string | null
   /** Number of installment งวด, from the wizard's แผนการผ่อนชำระ. When > 1
    *  the modal opens in ผ่อน mode with this many prefilled rows. */
   installmentCount?: number
@@ -35,10 +40,46 @@ const props = defineProps<{
   frequencyLabel?: string
 }>()
 
-const emit = defineEmits<{ (e: 'close'): void }>()
+// `saved` fires after a successful POST so the parent can refresh.
+const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
+
+const saving = ref(false)
+const saveError = ref<string | null>(null)
+
+/** Persist the entered rows (those with a real amount) as a payment batch. */
+async function submitPayments(): Promise<void> {
+  if (!props.policyId) { emit('close'); return } // preview-only
+  const payload = {
+    payMode: payMode.value,
+    payee: payee.value,
+    payments: rows
+      .filter((r) => r.amount !== null && r.amount !== undefined && r.date)
+      .map((r) => ({
+        paymentDate: r.date,
+        amount: Number(r.amount),
+        method: r.method,
+        note: r.note || undefined,
+      })),
+  }
+  if (!payload.payments.length) {
+    saveError.value = 'กรุณากรอกจำนวนเงินและวันที่อย่างน้อย 1 งวด'
+    return
+  }
+  saving.value = true
+  saveError.value = null
+  try {
+    await createPolicyPayments(props.policyId, payload)
+    emit('saved')
+    emit('close')
+  } catch (e: unknown) {
+    saveError.value = e instanceof ApiError ? e.message : 'บันทึกการชำระล้มเหลว'
+  } finally { saving.value = false }
+}
 
 type Payee = 'insurehub' | 'carrier'
-type PayMode = 'full' | 'less_commission' | 'with_discount' | 'installment'
+// split       = แบ่งชำระ (customer pays the carrier in งวด directly)
+// installment = ผ่อน (InsureHub fronts the premium; customer repays InsureHub)
+type PayMode = 'full' | 'less_commission' | 'with_discount' | 'split' | 'installment'
 
 const payee = ref<Payee>('insurehub')
 const payMode = ref<PayMode>('full')
@@ -136,14 +177,19 @@ function buildInstallmentRows(n: number): PayRow[] {
   return out
 }
 
-// Reset rows when the pay mode changes. Switching TO installment prefills the
-// planned งวด (count + split from the wizard); other modes get one blank row.
+// Reset rows when the pay mode changes. Switching TO a multi-งวด mode
+// (แบ่งชำระ / ผ่อน) prefills the planned งวด (count + split from the wizard);
+// other modes get one blank row.
 watch(payMode, (mode) => {
-  if (mode === 'installment') {
+  if (mode === 'installment' || mode === 'split') {
     rows.splice(0, rows.length, ...buildInstallmentRows(props.installmentCount ?? 1))
   } else {
     rows.splice(0, rows.length, blankRow())
   }
+  // Sensible payee default: แบ่งชำระ is paid to the carrier directly; ผ่อน is
+  // repaid to InsureHub (which fronted the premium). Operator can still change it.
+  if (mode === 'split') payee.value = 'carrier'
+  else if (mode === 'installment') payee.value = 'insurehub'
 })
 
 // Reset everything each time the modal opens. If the wizard's plan has more
@@ -162,12 +208,14 @@ watch(() => props.open, (v) => {
   }
 })
 
-const isInstallment = computed(() => payMode.value === 'installment')
+// Both แบ่งชำระ (split) and ผ่อน (installment) use the multi-งวด entry table.
+const isInstallment = computed(() => payMode.value === 'installment' || payMode.value === 'split')
 
 const PAY_MODES: { value: PayMode; label: string }[] = [
   { value: 'full', label: 'จ่ายเต็ม' },
   { value: 'less_commission', label: 'จ่ายหักคอมมิสชั่น' },
   { value: 'with_discount', label: 'จ่ายมีส่วนลด' },
+  { value: 'split', label: 'แบ่งชำระ' },
   { value: 'installment', label: 'ผ่อน' },
 ]
 </script>
@@ -373,12 +421,15 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
       </div>
 
       <!-- Footer -->
-      <div class="px-5 py-4 border-t border-slate-200 flex items-center justify-between sticky bottom-0 bg-white">
-        <p class="text-[10px] text-slate-400"><i class="pi pi-info-circle mr-1" />ตัวอย่างหน้าจอ (ยังไม่บันทึกเข้าระบบ)</p>
-        <div class="flex gap-2">
-          <button type="button" @click="emit('close')" class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">ปิด</button>
-          <button type="button" @click="emit('close')" class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700">
-            <i class="pi pi-check text-xs mr-1" />บันทึก
+      <div class="px-5 py-4 border-t border-slate-200 flex items-center justify-between sticky bottom-0 bg-white gap-3">
+        <p v-if="saveError" class="text-xs text-rose-600 flex-1"><i class="pi pi-exclamation-circle mr-1" />{{ saveError }}</p>
+        <p v-else-if="!policyId" class="text-[10px] text-slate-400 flex-1"><i class="pi pi-info-circle mr-1" />ตัวอย่างหน้าจอ — บันทึกได้จากหน้าแก้ไขกรมธรรม์</p>
+        <p v-else class="text-[10px] text-slate-400 flex-1"><i class="pi pi-info-circle mr-1" />บันทึกแล้วจะคำนวณคอมมิชชั่นให้อัตโนมัติ</p>
+        <div class="flex gap-2 shrink-0">
+          <button type="button" @click="emit('close')" :disabled="saving" class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">ปิด</button>
+          <button type="button" @click="submitPayments" :disabled="saving || !policyId"
+            class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:bg-slate-300 disabled:cursor-not-allowed">
+            <i :class="saving ? 'pi pi-spin pi-spinner' : 'pi pi-check'" class="text-xs mr-1" />บันทึก
           </button>
         </div>
       </div>

@@ -6,6 +6,9 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
+import { fetchPolicyPayments, deletePolicyPayment, type PolicyPaymentRow } from '../../api/policies'
+import PolicyPaymentModal, { type ExpectedPremium } from './PolicyPaymentModal.vue'
+import { fmtDate } from '../../util/dateFormat'
 import { fetchPolicy, patchPolicySection, syncPolicyRiders, syncPolicyBeneficiaries,
   uploadPolicyDocument, deletePolicyDocument, recomputeCommission,
   type PolicySection, type RiderInput, type BeneficiaryInput } from '../../api/policies'
@@ -13,6 +16,7 @@ import { fetchEndorsements, createEndorsement, type Endorsement } from '../../ap
 import { ApiError } from '../../api/client'
 import DateInput from '../../components/DateInput.vue'
 import { statusBadgeClass, type PolicyStatus } from '../../utils/policyStatus'
+import { PAYMENT_TYPE_OPTIONS } from '../../utils/paymentTypes'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -52,6 +56,53 @@ const payment = reactive({
   firstDueInstDate: '' as string | null, lastDueInstDate: '' as string | null,
   premiumMode: 'annual', subsidiseFromAgent: 0, subsidiseToFinance: 0,
 })
+
+// typeOfPaid dropdown — the known options plus the current stored value when it
+// isn't one of them (legacy Access codes like "4"), so old data still shows and
+// re-saves without loss until the operator picks a proper type.
+const typeOfPaidOptions = computed(() => {
+  const opts = [...PAYMENT_TYPE_OPTIONS]
+  const cur = payment.typeOfPaid
+  if (cur && !opts.some((o) => o.value === cur)) {
+    opts.unshift({ value: cur, label: `${cur} (ค่าเดิม)` })
+  }
+  return opts
+})
+
+// ── Recorded payments (wired to the payments API) ─────────────────────────
+const showPaymentModal = ref(false)
+const payments = ref<PolicyPaymentRow[]>([])
+const deletingPayment = ref<string | null>(null)
+
+async function loadPayments(): Promise<void> {
+  if (!policy.value) return
+  try {
+    const res = await fetchPolicyPayments(String(policy.value.id))
+    payments.value = res.data
+  } catch { /* leave empty on error */ }
+}
+async function removePayment(id: string): Promise<void> {
+  if (!policy.value) return
+  if (!window.confirm('ลบรายการชำระนี้?')) return
+  deletingPayment.value = id
+  try {
+    await deletePolicyPayment(String(policy.value.id), id)
+    payments.value = payments.value.filter((p) => p.id !== id)
+  } finally { deletingPayment.value = null }
+}
+function payMethodLabel(m: string): string {
+  return { bankTransfer: 'โอนเงิน', creditCard: 'บัตรเครดิต', cash: 'เงินสด', cheque: 'เช็ค', directDebit: 'หักบัญชี' }[m] ?? m
+}
+
+// Expected-premium block the payment modal reads (from the current premium form).
+const expectedPremium = computed<ExpectedPremium>(() => ({
+  netPremium: premium.netPremium || 0,
+  dutyStamp: premium.dutyStamp || 0,
+  vat: premium.vat || 0,
+  totalPremiumPaid: premium.totalPremiumPaid || premium.annualPremium || 0,
+  discountAmount: premium.discountAmount || 0,
+  commissionAmount: commission.mainComAmtAg || 0,
+}))
 
 // ── Section 5: Notes ──────────────
 const notes = reactive({ internalNote: '', mailingNote: '', statusNote: '' })
@@ -212,6 +263,7 @@ async function load(): Promise<void> {
     policy.value = p
     hydrate(p)
     await loadEndorsements(String(route.params.id))
+    await loadPayments()
   } finally {
     loading.value = false
   }
@@ -614,12 +666,19 @@ async function removeDoc(id: string): Promise<void> {
       <section class="card p-5">
         <div class="flex items-center justify-between mb-4">
           <h2 class="font-semibold text-slate-900">{{ t('policyEdit.section.payment') }}</h2>
-          <button type="button" class="text-sm text-brand-600 hover:text-brand-700 disabled:opacity-50"
-            :disabled="savingSection === 'payment'"
-            @click="save('payment', { ...payment })">
-            <i v-if="savingSection === 'payment'" class="pi pi-spin pi-spinner mr-1" />
-            {{ t('policyEdit.save') }}
-          </button>
+          <div class="flex items-center gap-3">
+            <button type="button"
+              class="text-sm px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1"
+              @click="showPaymentModal = true">
+              <i class="pi pi-wallet text-xs" /> บันทึกการชำระเงิน
+            </button>
+            <button type="button" class="text-sm text-brand-600 hover:text-brand-700 disabled:opacity-50"
+              :disabled="savingSection === 'payment'"
+              @click="save('payment', { ...payment })">
+              <i v-if="savingSection === 'payment'" class="pi pi-spin pi-spinner mr-1" />
+              {{ t('policyEdit.save') }}
+            </button>
+          </div>
         </div>
         <div v-if="sectionMsg.payment"
           :class="sectionMsg.payment.ok ? 'text-emerald-700' : 'text-rose-700'"
@@ -641,7 +700,10 @@ async function removeDoc(id: string): Promise<void> {
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.typeOfPaid') }}</label>
-            <input v-model.trim="payment.typeOfPaid" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+            <select v-model="payment.typeOfPaid" class="w-full border border-slate-200 rounded-lg px-3 py-2 bg-white">
+              <option value="">— เลือก —</option>
+              <option v-for="o in typeOfPaidOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+            </select>
           </div>
           <div>
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.financeCompany') }}</label>
@@ -674,6 +736,41 @@ async function removeDoc(id: string): Promise<void> {
           <div class="col-span-3">
             <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.typeOfPaidNote') }}</label>
             <input v-model.trim="payment.typeOfPaidNote" class="w-full border border-slate-200 rounded-lg px-3 py-2" />
+          </div>
+        </div>
+
+        <!-- Recorded payments -->
+        <div class="mt-5">
+          <div class="text-xs font-medium text-slate-500 mb-2">ประวัติการชำระเงิน</div>
+          <div v-if="payments.length" class="border border-slate-200 rounded-lg overflow-hidden">
+            <table class="min-w-full text-sm">
+              <thead class="bg-slate-50 text-xs text-slate-500">
+                <tr>
+                  <th class="px-3 py-2 text-left">วันที่</th>
+                  <th class="px-3 py-2 text-right">จำนวนเงิน</th>
+                  <th class="px-3 py-2 text-left">ช่องทาง</th>
+                  <th class="px-3 py-2 text-left">อ้างอิง/หมายเหตุ</th>
+                  <th class="px-3 py-2"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="pay in payments" :key="pay.id">
+                  <td class="px-3 py-2">{{ fmtDate(pay.paymentDate) }}</td>
+                  <td class="px-3 py-2 text-right font-mono">{{ pay.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 }) }}</td>
+                  <td class="px-3 py-2">{{ payMethodLabel(pay.method) }}</td>
+                  <td class="px-3 py-2 text-slate-500 truncate max-w-[220px]">{{ pay.reference || '—' }}</td>
+                  <td class="px-3 py-2 text-right">
+                    <button type="button" class="p-1 text-slate-400 hover:text-rose-600" title="ลบ"
+                      :disabled="deletingPayment === pay.id" @click="removePayment(pay.id)">
+                      <i :class="deletingPayment === pay.id ? 'pi pi-spin pi-spinner' : 'pi pi-trash'" class="text-xs" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg px-3 py-3 text-center">
+            ยังไม่มีการบันทึกการชำระ
           </div>
         </div>
       </section>
@@ -1076,6 +1173,17 @@ async function removeDoc(id: string): Promise<void> {
           </tbody>
         </table>
       </section>
+
+      <!-- Record-payment modal — wired to the payments API; refreshes the list. -->
+      <PolicyPaymentModal
+        :open="showPaymentModal"
+        :policy-id="String(policy.id)"
+        :expected="expectedPremium"
+        :carrier-label="(policy.carrierId as string) || ''"
+        :installment-count="payment.installmentTerm || 1"
+        @close="showPaymentModal = false"
+        @saved="loadPayments"
+      />
     </template>
   </div>
 </template>

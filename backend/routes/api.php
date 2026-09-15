@@ -249,6 +249,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::delete('customer-referral-links/{customerReferralLink}', [CustomerReferralLinkController::class, 'destroy']);
 
     // Policy children: payments + documents + lifecycle events.
+    Route::get('policies/{policy}/payments', [PolicyPaymentController::class, 'index']);
     Route::post('policies/{policy}/payments', [PolicyPaymentController::class, 'store']);
     Route::delete('policies/{policy}/payments/{payment}', [PolicyPaymentController::class, 'destroy']);
     Route::post('policies/{policy}/documents', [PolicyDocumentController::class, 'store']);
