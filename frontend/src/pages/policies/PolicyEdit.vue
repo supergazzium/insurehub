@@ -748,6 +748,9 @@ async function removeDoc(id: string): Promise<void> {
                 <tr>
                   <th class="px-3 py-2 text-left">วันที่</th>
                   <th class="px-3 py-2 text-right">จำนวนเงิน</th>
+                  <th class="px-3 py-2 text-right">เบี้ยสุทธิ</th>
+                  <th class="px-3 py-2 text-right">อากร</th>
+                  <th class="px-3 py-2 text-right">VAT</th>
                   <th class="px-3 py-2 text-left">ช่องทาง</th>
                   <th class="px-3 py-2 text-left">อ้างอิง/หมายเหตุ</th>
                   <th class="px-3 py-2"></th>
@@ -757,6 +760,9 @@ async function removeDoc(id: string): Promise<void> {
                 <tr v-for="pay in payments" :key="pay.id">
                   <td class="px-3 py-2">{{ fmtDate(pay.paymentDate) }}</td>
                   <td class="px-3 py-2 text-right font-mono">{{ pay.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 }) }}</td>
+                  <td class="px-3 py-2 text-right font-mono text-slate-500">{{ pay.netAmount != null ? pay.netAmount.toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '—' }}</td>
+                  <td class="px-3 py-2 text-right font-mono text-slate-500">{{ pay.dutyAmount != null ? pay.dutyAmount.toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '—' }}</td>
+                  <td class="px-3 py-2 text-right font-mono text-slate-500">{{ pay.vatAmount != null ? pay.vatAmount.toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '—' }}</td>
                   <td class="px-3 py-2">{{ payMethodLabel(pay.method) }}</td>
                   <td class="px-3 py-2 text-slate-500 truncate max-w-[220px]">{{ pay.reference || '—' }}</td>
                   <td class="px-3 py-2 text-right">

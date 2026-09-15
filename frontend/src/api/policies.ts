@@ -226,16 +226,24 @@ export interface PolicyPaymentRow {
   policyId: string
   paymentDate: string
   amount: number
+  netAmount: number | null
+  dutyAmount: number | null
+  vatAmount: number | null
   method: string
   reference: string
   recordedByUserId: string | null
 }
-/** One งวด row in a payment batch. `method` uses the modal values. */
+/** One งวด row in a payment batch. `method` uses the modal values. The tax
+ *  parts are the decomposition of THIS row's actual amount. */
 export interface PaymentRowInput {
   paymentDate: string
   amount: number
   method: 'transfer' | 'credit_card' | 'cash'
   note?: string
+  taxFormula?: number
+  netAmount?: number
+  dutyAmount?: number
+  vatAmount?: number
 }
 export interface CreatePaymentsPayload {
   payMode: string

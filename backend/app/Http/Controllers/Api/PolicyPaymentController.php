@@ -58,6 +58,11 @@ class PolicyPaymentController extends ApiController
             'payments.*.method' => ['required', 'string', 'in:bankTransfer,creditCard,cash,cheque,directDebit,transfer,credit_card'],
             'payments.*.reference' => ['sometimes', 'nullable', 'string', 'max:255'],
             'payments.*.note' => ['sometimes', 'nullable', 'string', 'max:255'],
+            // Tax decomposition of the actual amount paid (per งวด) + the สูตร used.
+            'payments.*.taxFormula' => ['sometimes', 'nullable', 'integer', 'in:1,2,3,4'],
+            'payments.*.netAmount' => ['sometimes', 'nullable', 'numeric'],
+            'payments.*.dutyAmount' => ['sometimes', 'nullable', 'numeric'],
+            'payments.*.vatAmount' => ['sometimes', 'nullable', 'numeric'],
         ]);
 
         $payMode = $data['payMode'] ?? 'full';
@@ -69,6 +74,9 @@ class PolicyPaymentController extends ApiController
                 $payment = $policy->payments()->create([
                     'payment_date' => $p['paymentDate'],
                     'amount' => $p['amount'],
+                    'net_amount' => $p['netAmount'] ?? null,
+                    'duty_amount' => $p['dutyAmount'] ?? null,
+                    'vat_amount' => $p['vatAmount'] ?? null,
                     'method' => self::normalizeMethod($p['method']),
                     // No dedicated columns for note/payMode/payee — fold the
                     // operator note into `reference` so it's not lost.
@@ -87,6 +95,10 @@ class PolicyPaymentController extends ApiController
                         'payMode' => $payMode,
                         'payee' => $payee,
                         'note' => $p['note'] ?? null,
+                        'taxFormula' => $p['taxFormula'] ?? null,
+                        'netAmount' => isset($p['netAmount']) ? (float) $p['netAmount'] : null,
+                        'dutyAmount' => isset($p['dutyAmount']) ? (float) $p['dutyAmount'] : null,
+                        'vatAmount' => isset($p['vatAmount']) ? (float) $p['vatAmount'] : null,
                     ],
                 ]);
                 $rows->push($payment);

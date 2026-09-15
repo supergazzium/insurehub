@@ -17,6 +17,9 @@ class PolicyPayment extends Model
     protected $casts = [
         'payment_date' => 'date',
         'amount' => 'decimal:2',
+        'net_amount' => 'decimal:2',
+        'duty_amount' => 'decimal:2',
+        'vat_amount' => 'decimal:2',
     ];
 
     public function policy(): BelongsTo

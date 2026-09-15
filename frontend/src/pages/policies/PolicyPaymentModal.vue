@@ -15,6 +15,7 @@
 import { computed, reactive, ref, watch } from 'vue'
 import { createPolicyPayments } from '../../api/policies'
 import { ApiError } from '../../api/client'
+import { decomposeByFormula, type PremiumParts, type TaxFormula } from '../../utils/premiumBreakdown'
 
 /** Expected (computed) premium numbers passed in from the wizard. */
 export interface ExpectedPremium {
@@ -46,6 +47,31 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
 const saving = ref(false)
 const saveError = ref<string | null>(null)
 
+// ── Tax formula (สูตร 1-4) for decomposing the ACTUAL paid amount ──────────
+// Inferred default from the policy's own duty/vat structure; operator can pick
+// another formula in the modal. Each งวด is back-solved from its own amount.
+function inferFormula(): TaxFormula {
+  const duty = props.expected.dutyStamp || 0
+  const vat = props.expected.vat || 0
+  if (Math.round(duty) === 150) return 4
+  if (Math.round(duty) === 20) return 3
+  if (duty === 0 && vat > 0) return 2
+  return 1
+}
+const taxFormula = ref<TaxFormula>(inferFormula())
+const TAX_FORMULAS: { value: TaxFormula; label: string }[] = [
+  { value: 1, label: 'สูตร 1' },
+  { value: 2, label: 'สูตร 2' },
+  { value: 3, label: 'สูตร 3' },
+  { value: 4, label: 'สูตร 4' },
+]
+
+// Decompose an actual paid amount using the selected formula (back-solve from
+// the amount itself, so any per-งวด value — even one over the annual — works).
+function breakdownOf(amount: number | null | undefined): PremiumParts {
+  return decomposeByFormula(Number(amount) || 0, taxFormula.value)
+}
+
 /** Persist the entered rows (those with a real amount) as a payment batch. */
 async function submitPayments(): Promise<void> {
   if (!props.policyId) { emit('close'); return } // preview-only
@@ -54,12 +80,20 @@ async function submitPayments(): Promise<void> {
     payee: payee.value,
     payments: rows
       .filter((r) => r.amount !== null && r.amount !== undefined && r.date)
-      .map((r) => ({
-        paymentDate: r.date,
-        amount: Number(r.amount),
-        method: r.method,
-        note: r.note || undefined,
-      })),
+      .map((r) => {
+        const b = breakdownOf(r.amount)
+        return {
+          paymentDate: r.date,
+          amount: Number(r.amount),
+          method: r.method,
+          note: r.note || undefined,
+          // Tax decomposition of THIS งวด's actual amount, by the chosen สูตร.
+          taxFormula: taxFormula.value,
+          netAmount: b.net,
+          dutyAmount: b.duty,
+          vatAmount: b.vat,
+        }
+      }),
   }
   if (!payload.payments.length) {
     saveError.value = 'กรุณากรอกจำนวนเงินและวันที่อย่างน้อย 1 งวด'
@@ -197,6 +231,8 @@ watch(payMode, (mode) => {
 watch(() => props.open, (v) => {
   if (v) {
     payee.value = 'insurehub'
+    taxFormula.value = inferFormula()
+    saveError.value = null
     const n = props.installmentCount ?? 1
     if (n > 1) {
       payMode.value = 'installment'
@@ -287,6 +323,21 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
           </div>
         </div>
 
+        <!-- สูตรถอดภาษี สำหรับยอดที่ชำระจริง (แต่ละงวด back-solve จากยอดจริง) -->
+        <div class="flex items-center gap-2 flex-wrap">
+          <span class="text-[11px] text-slate-500">สูตรถอดภาษี (จากยอดจ่ายจริง):</span>
+          <div class="inline-flex rounded-lg border border-slate-200 overflow-hidden">
+            <button v-for="f in TAX_FORMULAS" :key="f.value" type="button"
+              @click="taxFormula = f.value"
+              :class="['px-3 py-1 text-xs', taxFormula === f.value ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50']">
+              {{ f.label }}
+            </button>
+          </div>
+          <span class="text-[10px] text-slate-400">
+            <i class="pi pi-info-circle mr-0.5" />สูตร1=อากร0.4%+VAT7% · สูตร2=VAT7% · สูตร3=อากร20 · สูตร4=อากร150
+          </span>
+        </div>
+
         <!-- Payment rows -->
         <div>
           <div class="flex items-center justify-between mb-2">
@@ -333,6 +384,12 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
                 <input v-model.trim="rows[0].note" type="text" placeholder="—"
                   class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
               </div>
+            </div>
+            <!-- ถอดภาษีจากยอดที่จ่ายจริง (สัดส่วนตามกรมธรรม์) -->
+            <div v-if="rows[0].amount" class="mt-2 pt-2 border-t border-dashed border-slate-200 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
+              <span>เบี้ยสุทธิ <span class="tabular-nums text-slate-800">฿{{ fmt(breakdownOf(rows[0].amount).net) }}</span></span>
+              <span>อากรแสตมป์ <span class="tabular-nums text-slate-800">฿{{ fmt(breakdownOf(rows[0].amount).duty) }}</span></span>
+              <span>ภาษีมูลค่าเพิ่ม <span class="tabular-nums text-slate-800">฿{{ fmt(breakdownOf(rows[0].amount).vat) }}</span></span>
             </div>
           </div>
 
@@ -397,6 +454,12 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
                   <input v-model.trim="row.note" type="text" placeholder="—"
                     class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
                 </div>
+              </div>
+              <!-- ถอดภาษีของงวดนี้ จากยอดที่จ่ายจริง (สัดส่วนตามกรมธรรม์) -->
+              <div v-if="row.amount" class="mt-2 pt-2 border-t border-dashed border-slate-200 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
+                <span>เบี้ยสุทธิ <span class="tabular-nums text-slate-800">฿{{ fmt(breakdownOf(row.amount).net) }}</span></span>
+                <span>อากรแสตมป์ <span class="tabular-nums text-slate-800">฿{{ fmt(breakdownOf(row.amount).duty) }}</span></span>
+                <span>ภาษีมูลค่าเพิ่ม <span class="tabular-nums text-slate-800">฿{{ fmt(breakdownOf(row.amount).vat) }}</span></span>
               </div>
             </div>
           </div>
