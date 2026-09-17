@@ -1,13 +1,14 @@
 # syntax=docker/dockerfile:1.7
 
-# ─── Stage 1: composer install (vendor cache) ─────────────────────────────
+# ─── Stage 1: composer install (vendor only) ──────────────────────────────
+# This stage depends ONLY on the composer manifest, so it rebuilds solely when
+# dependencies change — never on app-code edits. Post-install scripts that need
+# the framework tree (e.g. artisan package:discover) are skipped here and run
+# in the runtime stage where the full app tree is present.
 FROM composer:2 AS vendor
 
 WORKDIR /app
 
-# Copy only the manifest first so composer's layer cache survives code-only
-# changes. Post-install scripts (`php artisan package:discover`) need the
-# app tree present, so we defer them until the app is copied.
 COPY composer.json composer.lock ./
 RUN composer install \
         --no-dev \
@@ -16,16 +17,6 @@ RUN composer install \
         --no-scripts \
         --prefer-dist \
         --optimize-autoloader
-
-# Copy the rest of the app and finish the install (runs the post-install
-# hooks that need the framework tree, e.g. artisan package:discover).
-COPY . .
-RUN composer install \
-        --no-dev \
-        --no-interaction \
-        --no-progress \
-        --optimize-autoloader \
-        --classmap-authoritative
 
 # ─── Stage 2: runtime — FrankenPHP + php extensions ────────────────────────
 # FrankenPHP is single-process Caddy + PHP; no separate nginx + php-fpm to
@@ -63,6 +54,10 @@ RUN install-php-extensions \
         exif \
         pcntl
 
+# composer binary — needed to finish the install (post-install scripts +
+# authoritative classmap) once the app tree is present.
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
+
 # Runtime PHP config (opcache + upload limits + Bangkok tz).
 COPY docker/php.ini /usr/local/etc/php/conf.d/zz-app.ini
 
@@ -71,9 +66,27 @@ COPY docker/Caddyfile /etc/caddy/Caddyfile
 
 WORKDIR /app
 
-# Bring in vendored code from stage 1 + the app tree. `--chown` avoids a
-# separate `chown -R` layer (which would double the image size).
-COPY --from=vendor --chown=www-data:www-data /app /app
+# Vendored dependencies from stage 1. This layer is cached and only busts when
+# composer.json/lock change — NOT on app-code edits.
+COPY --from=vendor --chown=www-data:www-data /app/vendor /app/vendor
+
+# App code. This is the ONLY layer that carries application source, so a code
+# change invalidates it (and only it) cleanly — the vendor layer above stays
+# cached. Previously the code came bundled through the vendor stage's own
+# `COPY . .`, which made code changes rebuild the whole vendor stage and, under
+# BuildKit's cross-stage cache, could ship stale code to the runtime image.
+COPY --chown=www-data:www-data . /app
+
+# Finish the composer install now that the full app tree is present: runs the
+# post-install hooks (package:discover) and rewrites the authoritative
+# classmap so newly-added classes are autoloadable. `--no-scripts` is omitted
+# on purpose so the discover hook runs.
+RUN composer install \
+        --no-dev \
+        --no-interaction \
+        --no-progress \
+        --optimize-autoloader \
+        --classmap-authoritative
 
 # Laravel needs write access to storage/ and bootstrap/cache. Pre-warm the
 # cache dirs so a bind-mount volume doesn't need to be pre-created.
