@@ -12,6 +12,8 @@ import {
   type CarrierListRow, type CarrierContact,
 } from '../../api/carriers'
 import { fetchProductList, type ProductListRow } from '../../api/products'
+import { fetchAgentList, type AgentListRow } from '../../api/agents'
+import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 import {
   uploadPolicyDocument, fetchPolicyDocuments, downloadPolicyDocument, deletePolicyDocument,
   type PolicyDocumentRow,
@@ -81,6 +83,7 @@ const filters = reactive({
   toDate: '',
   carrierId: '',
   productId: '',
+  writingAgentId: '',
   productType: '',
   insureType: '' as '' | 'life' | 'non-life' | 'tax',
 })
@@ -235,6 +238,23 @@ async function loadProducts(): Promise<void> {
     allProducts.value = res.data
   } catch { /* silent — dropdown just empty */ }
 }
+// Agents for the writing-agent filter (searchable). Loaded once; filtered
+// client-side by SearchSelect's own type-to-search.
+const allAgents = ref<AgentListRow[]>([])
+async function loadAgents(): Promise<void> {
+  try {
+    const res = await fetchAgentList({ perPage: 500, activeOnly: true })
+    allAgents.value = res.data
+  } catch { /* silent — dropdown just empty */ }
+}
+const agentOptions = computed<SearchOption[]>(() =>
+  allAgents.value
+    .map((a) => ({
+      value: a.id,
+      label: `${a.agentCode} — ${[a.firstName, a.lastName].filter(Boolean).join(' ') || a.nickname}`.trim(),
+    }))
+    .sort((x, y) => x.label.localeCompare(y.label, 'th')),
+)
 const carrierOptions = computed<Option[]>(() => {
   const src = filters.insureType
     ? allCarriers.value.filter((c) => c.insureType === filters.insureType)
@@ -262,11 +282,12 @@ const productTypeOptions = computed<Option[]>(() => {
 // Clear-filters UX
 const hasActiveFilters = computed(() =>
   filters.q !== '' || filters.carrierId !== '' || filters.productId !== '' ||
-  filters.productType !== '' || filters.insureType !== '',
+  filters.writingAgentId !== '' || filters.productType !== '' || filters.insureType !== '',
 )
 function clearFilters(): void {
   filters.q = ''
   filters.carrierId = ''; filters.productId = ''
+  filters.writingAgentId = ''
   filters.productType = ''; filters.insureType = ''
   applyPreset(60)
   // A cleared filter shouldn't carry a stale multi-page selection.
@@ -314,6 +335,7 @@ async function load(): Promise<void> {
       q: filters.q || undefined,
       carrierId: filters.carrierId || undefined,
       productId: filters.productId || undefined,
+    writingAgentId: filters.writingAgentId || undefined,
       productType: filters.productType || undefined,
       insureType: filters.insureType || undefined,
       page: page.value,
@@ -354,7 +376,7 @@ function scheduleReload(): void {
 watch(
   () => [
     filters.q, filters.fromDate, filters.toDate,
-    filters.carrierId, filters.productId, filters.productType, filters.insureType,
+    filters.carrierId, filters.productId, filters.writingAgentId, filters.productType, filters.insureType,
     perPage.value,
   ],
   scheduleReload,
@@ -364,7 +386,7 @@ watch(
 watch(
   () => [
     filters.q, filters.fromDate, filters.toDate,
-    filters.carrierId, filters.productId, filters.productType, filters.insureType,
+    filters.carrierId, filters.productId, filters.writingAgentId, filters.productType, filters.insureType,
     preset.value, sortBy.value, sortDir.value, perPage.value,
   ],
   saveState,
@@ -375,6 +397,7 @@ onMounted(() => {
   restoreState()
   void loadCarriers()
   void loadProducts()
+  void loadAgents()
   void load()
   document.addEventListener('click', closeMoreMenu)
 })
@@ -461,6 +484,7 @@ async function bulkExportCsv(): Promise<void> {
     q: filters.q || undefined,
     carrierId: filters.carrierId || undefined,
     productId: filters.productId || undefined,
+    writingAgentId: filters.writingAgentId || undefined,
     productType: filters.productType || undefined,
     insureType: filters.insureType || undefined,
     page: 1, perPage: 500,
@@ -1007,6 +1031,7 @@ async function exportCsv(): Promise<void> {
       q: filters.q || undefined,
       carrierId: filters.carrierId || undefined,
       productId: filters.productId || undefined,
+    writingAgentId: filters.writingAgentId || undefined,
       productType: filters.productType || undefined,
       insureType: filters.insureType || undefined,
       page: 1,
@@ -1247,6 +1272,13 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
             class="w-full md:w-auto px-3 py-1.5 rounded-lg border border-rose-200 text-xs text-rose-600 hover:bg-rose-50">
             ล้าง
           </button>
+        </div>
+
+        <!-- Writing-agent filter (searchable) -->
+        <div class="md:col-span-4">
+          <label class="text-xs font-medium text-slate-500 mb-1 block">ตัวแทน (ผู้เขียนกรมธรรม์)</label>
+          <SearchSelect v-model="filters.writingAgentId" :options="agentOptions"
+            placeholder="พิมพ์เพื่อค้นหาตัวแทน…" />
         </div>
       </div>
     </section>

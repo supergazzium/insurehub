@@ -179,6 +179,7 @@ export interface ExpiringSoonQuery {
   q?: string
   carrierId?: string
   productId?: string
+  writingAgentId?: string
   productType?: string
   insureType?: string
   page?: number

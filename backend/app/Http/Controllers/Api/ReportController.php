@@ -279,6 +279,9 @@ class ReportController extends ApiController
         if ($productId = $request->input('productId')) {
             $q->where('p.product_id', $productId);
         }
+        if ($writingAgentId = $request->input('writingAgentId')) {
+            $q->where('p.writing_agent_id', $writingAgentId);
+        }
         if ($productType = $request->input('productType')) {
             $q->where('pr.type', $productType);
         }
