@@ -47,3 +47,80 @@ export function fetchAgentList(filters: AgentListFilters = {}) {
 export function fetchAgent(id: string) {
   return api.get<{ data: Record<string, unknown> }>(`agents/${id}`)
 }
+
+// ── สายงาน (teams), ranks, hierarchy editing, promotion approval (Phase 2) ──
+
+export interface TeamRow {
+  id: string
+  code: string
+  name: string | null
+  parentTeamId: string | null
+  leaderAgentId: string | null
+  active: boolean
+  memberCount: number
+}
+export function fetchTeams() {
+  return api.get<{ data: TeamRow[] }>('teams')
+}
+export function createTeam(payload: { code: string; name?: string; parentTeamId?: string | number | null }) {
+  return api.post<{ data: { id: string } }>('teams', payload)
+}
+
+export interface RankRow {
+  id: string
+  level: number
+  levelKey: string        // 'l1'..'l10'
+  code: string
+  nameTh: string
+  nameEn: string
+  monthlyAvgTarget: number
+  threeMonthAccumTarget: number
+  licenseRequired: boolean
+}
+export function fetchRanks() {
+  return api.get<{ data: RankRow[] }>('ranks')
+}
+
+/** PATCH an agent's สายงาน (team + upline) and level. All fields optional. */
+export interface AgentHierarchyPatch {
+  teamId?: string | number | null
+  parentAgentId?: string | number | null
+  level?: string | null   // 'l1'..'l10'
+}
+export function updateAgentHierarchy(agentId: string, patch: AgentHierarchyPatch) {
+  return api.patch<{ data: { id: string; teamId: string | null; parentAgentId: string | null; level: string | null; rankId: string | null } }>(
+    `agents/${agentId}/hierarchy`, patch,
+  )
+}
+
+// ── Promotion approval queue ────────────────────────────────────────────────
+export type PromotionStatus = 'pending' | 'approved' | 'rejected'
+export interface RankPromotionRow {
+  id: string
+  status: PromotionStatus
+  trigger: string
+  agentId: string
+  agentCode: string | null
+  agentName: string
+  fromLevel: number | null
+  fromRankLabel: string | null
+  toLevel: number | null
+  toRankLabel: string | null
+  qualifyingVolume: number
+  qualifyingPeriod: string | null
+  requestedAt: string | null
+  decidedAt: string | null
+  promotedAt: string | null
+  notes: string | null
+}
+export function fetchRankPromotions(status: PromotionStatus | 'all' = 'pending') {
+  return api.get<{ data: RankPromotionRow[]; meta: { pendingCount: number } }>(
+    `rank-promotions${buildQuery({ status })}`,
+  )
+}
+export function approveRankPromotion(id: string) {
+  return api.post<{ data: { id: string; status: PromotionStatus } }>(`rank-promotions/${id}/approve`, {})
+}
+export function rejectRankPromotion(id: string, note?: string) {
+  return api.post<{ data: { id: string; status: PromotionStatus } }>(`rank-promotions/${id}/reject`, { note })
+}

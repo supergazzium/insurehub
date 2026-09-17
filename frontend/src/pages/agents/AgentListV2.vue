@@ -2,11 +2,13 @@
 // Server-side paginated agent list.
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '../../stores/agents'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
+function openAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
 const agentStore = useAgentStore()
 
 const filters = reactive({
@@ -167,7 +169,7 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="a in agentStore.list" :key="a.id" class="hover:bg-slate-50">
+            <tr v-for="a in agentStore.list" :key="a.id" class="cursor-pointer hover:bg-slate-50" @click="openAgent(a.id)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ a.agentCode }}</td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ a.firstName }} {{ a.lastName }}</div>

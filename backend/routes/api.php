@@ -10,6 +10,7 @@ use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AgentHierarchyController;
 use App\Http\Controllers\Api\TeamController;
 use App\Http\Controllers\Api\RankPromotionController;
+use App\Http\Controllers\Api\RankController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CarrierBankAccountController;
 use App\Http\Controllers\Api\CarrierContactController;
@@ -153,6 +154,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::patch('agents/{agent}/hierarchy', [AgentHierarchyController::class, 'update']);
     Route::get('teams', [TeamController::class, 'index']);
     Route::post('teams', [TeamController::class, 'store']);
+    Route::get('ranks', [RankController::class, 'index']);
     Route::get('rank-promotions', [RankPromotionController::class, 'index']);
     Route::post('rank-promotions/{rankPromotion}/approve', [RankPromotionController::class, 'approve']);
     Route::post('rank-promotions/{rankPromotion}/reject', [RankPromotionController::class, 'reject']);

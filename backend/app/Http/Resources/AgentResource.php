@@ -53,7 +53,13 @@ class AgentResource extends JsonResource
             'licenseNonLifeNo' => $this->license_non_life_no ?? '',
             'licenseNonLifeExpiry' => $this->license_non_life_expiry?->toDateString(),
             'parentAgentId' => $this->parent_agent_id !== null ? (string) $this->parent_agent_id : null,
+            'parentAgentName' => $this->parent !== null
+                ? trim(($this->parent->first_name ?? '').' '.($this->parent->last_name ?? ''))
+                : null,
+            'parentAgentCode' => $this->parent?->agent_code,
             'level' => $this->level,
+            'rankId' => $this->rank_id !== null ? (string) $this->rank_id : null,
+            'teamId' => $this->team_id !== null ? (string) $this->team_id : null,
             'commissionPct' => (float) $this->commission_pct,
             'joinedAt' => $this->joined_at?->toDateString() ?? '',
             'headStatus' => $this->head_status ?? '',
