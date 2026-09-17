@@ -293,3 +293,18 @@ export function issuePolicy(id: string, payload: IssuePolicyPayload, opts?: { fo
   const qs = opts?.force ? '?force=1' : ''
   return api.post<Single<Policy>>(`policies/${id}/issue${qs}`, payload)
 }
+
+// ── Policy events (append-only timeline) ───────────────────────────────────
+// GET /policies/{id}/events — the full event history, newest-first, used by
+// the renewal detail page's timeline. `payload` is event-type-specific JSON.
+export interface PolicyEventRow {
+  id: string
+  policyId: string
+  type: string
+  at: string
+  byUserId: string | null
+  payload: Record<string, unknown> | null
+}
+export function fetchPolicyEvents(policyId: string) {
+  return api.get<{ data: PolicyEventRow[] }>(`policies/${policyId}/events`)
+}
