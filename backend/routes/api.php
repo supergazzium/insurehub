@@ -148,6 +148,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::patch('tenant', [TenantController::class, 'update']);
 
     // Business entities — REST resource routes.
+    Route::get('agents/hierarchy-rollup', [AgentHierarchyController::class, 'rollup']);
     Route::apiResource('agents', AgentController::class);
 
     // สายงาน (agent hierarchy) + level management + promotion approval queue

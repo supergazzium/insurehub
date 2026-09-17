@@ -3,13 +3,55 @@ import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore, type Agent } from '../../stores/agents'
 import AgentsSubnav from './AgentsSubnav.vue'
-import AgentTreeNode from './AgentTreeNode.vue'
+import AgentTreeNode, { type RollupEntry } from './AgentTreeNode.vue'
+import AgentPicker from '../../components/AgentPicker.vue'
+import { fetchHierarchyRollup, updateAgentHierarchy } from '../../api/agents'
+import { ApiError } from '../../api/client'
 
 const { t } = useI18n()
 const store = useAgentStore()
 
+// Per-agent สายงาน rollup (team + own/subtree premium) for the tree nodes.
+const rollup = ref<Record<string, RollupEntry>>({})
+async function loadRollup(): Promise<void> {
+  try {
+    const res = await fetchHierarchyRollup()
+    rollup.value = res.data
+  } catch { /* tree still renders without premium annotations */ }
+}
+
+// Re-parent (ย้ายสายงาน) modal state.
+const reparentModal = ref<{ agentId: string; newParentId: string } | null>(null)
+const reparentSaving = ref(false)
+const reparentError = ref<string | null>(null)
+function openReparent(agentId: string): void {
+  reparentError.value = null
+  reparentModal.value = { agentId, newParentId: '' }
+}
+async function confirmReparent(): Promise<void> {
+  if (!reparentModal.value) return
+  const { agentId, newParentId } = reparentModal.value
+  reparentSaving.value = true
+  reparentError.value = null
+  try {
+    await updateAgentHierarchy(agentId, { parentAgentId: newParentId || null })
+    reparentModal.value = null
+    await store.load()      // refresh the tree structure
+    await loadRollup()
+  } catch (e: unknown) {
+    reparentError.value = e instanceof ApiError ? e.message : 'ย้ายสายงานล้มเหลว'
+  } finally {
+    reparentSaving.value = false
+  }
+}
+function reparentAgentName(id: string): string {
+  const a = store.getAgent(id)
+  return a ? `${a.firstName} ${a.lastName}`.trim() : id
+}
+
 onMounted(() => {
   void store.load()
+  void loadRollup()
 })
 
 const selectedAgentId = ref<string>(store.topLevelAgents[0]?.id ?? '')
@@ -213,12 +255,36 @@ function levelBadgeClass(lv: Agent['level']) {
               v-else
               :agent="selectedAgent"
               :expanded="expanded"
+              :rollup="rollup"
               @toggle="toggleNode"
               @select="selectAgent"
+              @reparent="openReparent"
             />
           </div>
         </div>
       </section>
+    </div>
+
+    <!-- Re-parent (ย้ายสายงาน) modal -->
+    <div v-if="reparentModal" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4"
+      @click.self="reparentModal = null">
+      <div class="w-full max-w-md rounded-lg bg-white p-4 shadow-xl">
+        <h3 class="mb-1 text-sm font-semibold text-slate-800">ย้ายสายงาน</h3>
+        <p class="mb-3 text-xs text-slate-500">
+          ย้าย <span class="font-medium">{{ reparentAgentName(reparentModal.agentId) }}</span>
+          และลูกสายทั้งหมด ไปอยู่ภายใต้ต้นสายใหม่
+        </p>
+        <label class="text-[11px] text-slate-500">ต้นสายใหม่ (เว้นว่าง = เป็นระดับบนสุด)</label>
+        <AgentPicker v-model="reparentModal.newParentId" placeholder="ค้นหาตัวแทนต้นสายใหม่" />
+        <p v-if="reparentError" class="mt-2 text-xs text-rose-600">{{ reparentError }}</p>
+        <div class="mt-4 flex justify-end gap-2">
+          <button type="button" class="rounded px-3 py-1.5 text-xs text-slate-500 hover:bg-slate-100"
+            @click="reparentModal = null">ยกเลิก</button>
+          <button type="button" class="rounded bg-sky-600 px-3 py-1.5 text-xs text-white disabled:opacity-50"
+            :disabled="reparentSaving" @click="confirmReparent">
+            {{ reparentSaving ? 'กำลังย้าย…' : 'ย้ายสายงาน' }}</button>
+        </div>
+      </div>
     </div>
   </div>
 </template>

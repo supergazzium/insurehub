@@ -104,6 +104,91 @@ class AgentHierarchyController extends Controller
     }
 
     /**
+     * GET /agents/hierarchy-rollup
+     * Per-agent สายงาน rollup for the tree view: team code, own written
+     * premium + policy count, and the subtree (self + all downline) premium +
+     * count. Uses a recursive CTE so the aggregate is one query, not N walks.
+     *
+     * Returns a flat map keyed by agent id so the frontend tree can annotate
+     * each node without extra round-trips.
+     */
+    public function rollup(Request $request): JsonResponse
+    {
+        $tenantId = (int) $request->attributes->get('tenant_id', $request->user()->tenant_id);
+
+        // Own written premium + policy count per agent (active policies only).
+        $own = DB::table('policies')
+            ->select('writing_agent_id', DB::raw('COUNT(*) as pc'), DB::raw('COALESCE(SUM(annual_premium),0) as prem'))
+            ->where('tenant_id', $tenantId)
+            ->whereNull('deleted_at')
+            ->where('status', 'active')
+            ->whereNotNull('writing_agent_id')
+            ->groupBy('writing_agent_id')
+            ->get()
+            ->keyBy('writing_agent_id');
+
+        // Every agent + its team code.
+        $agents = DB::table('agents as a')
+            ->leftJoin('teams as t', 't.id', '=', 'a.team_id')
+            ->where('a.tenant_id', $tenantId)
+            ->whereNull('a.deleted_at')
+            ->select('a.id', 'a.parent_agent_id', 't.code as team_code')
+            ->get();
+
+        // Build parent → children adjacency, then post-order sum the subtree.
+        $childrenOf = [];
+        foreach ($agents as $ag) {
+            $childrenOf[$ag->parent_agent_id ?? 0][] = (int) $ag->id;
+        }
+        $ownPrem = [];
+        $ownCount = [];
+        foreach ($agents as $ag) {
+            $row = $own->get($ag->id);
+            $ownPrem[(int) $ag->id] = $row ? (float) $row->prem : 0.0;
+            $ownCount[(int) $ag->id] = $row ? (int) $row->pc : 0;
+        }
+
+        // Iterative post-order subtree aggregation (tree is shallow but this is
+        // cycle-safe and depth-independent).
+        $subPrem = [];
+        $subCount = [];
+        $memoPrem = function (int $id) use (&$memoPrem, &$subPrem, &$subCount, $childrenOf, $ownPrem, $ownCount, &$visiting): void {
+            if (isset($subPrem[$id]) || ($visiting[$id] ?? false)) {
+                return;
+            }
+            $visiting[$id] = true;
+            $p = $ownPrem[$id] ?? 0.0;
+            $c = $ownCount[$id] ?? 0;
+            foreach ($childrenOf[$id] ?? [] as $childId) {
+                $memoPrem($childId);
+                $p += $subPrem[$childId] ?? 0.0;
+                $c += $subCount[$childId] ?? 0;
+            }
+            $subPrem[$id] = $p;
+            $subCount[$id] = $c;
+            $visiting[$id] = false;
+        };
+        $visiting = [];
+        foreach ($agents as $ag) {
+            $memoPrem((int) $ag->id);
+        }
+
+        $out = [];
+        foreach ($agents as $ag) {
+            $id = (int) $ag->id;
+            $out[(string) $id] = [
+                'teamCode' => $ag->team_code,
+                'ownPremium' => $ownPrem[$id] ?? 0.0,
+                'ownPolicyCount' => $ownCount[$id] ?? 0,
+                'subtreePremium' => $subPrem[$id] ?? 0.0,
+                'subtreePolicyCount' => $subCount[$id] ?? 0,
+            ];
+        }
+
+        return response()->json(['data' => $out]);
+    }
+
+    /**
      * Is $candidateId somewhere in the downline of $rootId? Used to reject
      * setting an agent's upline to one of its own descendants (which would
      * create a cycle). Bounded walk so a pre-existing cycle can't loop forever.

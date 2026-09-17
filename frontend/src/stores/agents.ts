@@ -22,7 +22,7 @@ import {
 
 export type { AgentListRow, AgentListFilters }
 
-export type AgentLevel = 'l1' | 'l2' | 'l3' | 'l4' | 'l5'
+export type AgentLevel = 'l1' | 'l2' | 'l3' | 'l4' | 'l5' | 'l6' | 'l7' | 'l8' | 'l9' | 'l10'
 export type Gender = 'male' | 'female' | 'other' | ''
 export type AgentKind = 'individual' | 'corporate'
 export type VatType = '' | 'none' | 'vat7' | 'wht1' | 'wht3' | 'wht5'
@@ -90,12 +90,11 @@ export interface RecruitmentLink {
   revoked: boolean
 }
 
+// Legacy commission-percent-by-level fallback. Real commission now comes from
+// commission_tier_rank_rates; this is kept only for the unused setLevel helper.
 const LEVEL_PCT: Record<AgentLevel, number> = {
-  l1: 25,
-  l2: 35,
-  l3: 45,
-  l4: 55,
-  l5: 65,
+  l1: 25, l2: 35, l3: 45, l4: 55, l5: 65,
+  l6: 70, l7: 75, l8: 80, l9: 85, l10: 90,
 }
 
 export const useAgentStore = defineStore('agents', () => {

@@ -87,6 +87,18 @@ export interface AgentHierarchyPatch {
   parentAgentId?: string | number | null
   level?: string | null   // 'l1'..'l10'
 }
+export interface HierarchyRollupEntry {
+  teamCode: string | null
+  ownPremium: number
+  ownPolicyCount: number
+  subtreePremium: number
+  subtreePolicyCount: number
+}
+/** Per-agent team + own/subtree premium rollup for the hierarchy tree. */
+export function fetchHierarchyRollup() {
+  return api.get<{ data: Record<string, HierarchyRollupEntry> }>('agents/hierarchy-rollup')
+}
+
 export function updateAgentHierarchy(agentId: string, patch: AgentHierarchyPatch) {
   return api.patch<{ data: { id: string; teamId: string | null; parentAgentId: string | null; level: string | null; rankId: string | null } }>(
     `agents/${agentId}/hierarchy`, patch,
