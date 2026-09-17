@@ -199,6 +199,9 @@ const money = (n: number | null | undefined) =>
 
 const paidTotal = computed(() => payments.value.reduce((s, p) => s + (p.amount || 0), 0))
 
+// Carrier-supplied quote files only (for the upload panel's inline list).
+const carrierDocs = computed(() => actions.docs.value.filter((d) => d.type === 'renewal_quote_carrier'))
+
 // ── Prepare-form helpers ────────────────────────────────────────────────────
 // The quotation form stores riders/conditions/exclusions as string[]; the UI
 // edits them as one-item-per-line textareas. These computed proxies convert
@@ -323,6 +326,11 @@ onMounted(load)
             @click="openPanel('contact')">
             <i class="pi pi-phone text-[10px]" /> บันทึกการติดต่อ
           </button>
+          <button type="button"
+            :class="['rounded px-2.5 py-1.5 text-xs', panel === 'upload_quote' ? 'bg-violet-100 text-violet-700' : 'bg-violet-50 text-violet-600 hover:bg-violet-100']"
+            @click="openPanel('upload_quote')">
+            <i class="pi pi-upload text-[10px]" /> อัปโหลดใบเสนอราคาบริษัท
+          </button>
           <button type="button" class="rounded bg-slate-50 px-2.5 py-1.5 text-xs hover:bg-slate-100"
             :disabled="actions.saving.value" @click="doNotice">
             <i class="pi pi-bell text-[10px]" /> ส่งแจ้งเตือน
@@ -413,12 +421,34 @@ onMounted(load)
 
         <!-- Upload carrier quote -->
         <div v-else-if="panel === 'upload_quote'" class="rounded border border-slate-200 bg-slate-50 p-3">
-          <p class="mb-2 text-xs text-slate-600">อัปโหลดไฟล์ใบเสนอราคาที่ได้รับจากบริษัทประกัน (PDF / รูปภาพ)</p>
+          <p class="mb-1 text-xs font-medium text-slate-600">อัปโหลดใบเสนอราคาที่ได้รับจากบริษัทประกัน</p>
+          <p class="mb-2 text-[11px] text-slate-500">
+            เลือกไฟล์ PDF หรือรูปภาพที่บริษัทประกันส่งกลับมา — เมื่ออัปโหลดแล้ว สถานะจะเปลี่ยนเป็น “ได้รับใบเสนอราคา”
+          </p>
           <button type="button" class="rounded bg-sky-600 px-3 py-1.5 text-xs text-white disabled:opacity-50"
             :disabled="actions.saving.value" @click="triggerUpload">
-            <i class="pi pi-upload text-[10px]" /> เลือกไฟล์
+            <i class="pi pi-upload text-[10px]" /> {{ actions.saving.value ? 'กำลังอัปโหลด…' : 'เลือกไฟล์' }}
           </button>
           <input ref="uploadInput" type="file" class="hidden" accept=".pdf,.jpg,.jpeg,.png,.webp" @change="onFile" />
+
+          <!-- Already-uploaded carrier files -->
+          <div v-if="carrierDocs.length" class="mt-3 border-t border-slate-200 pt-2">
+            <p class="mb-1 text-[10px] text-slate-400">ไฟล์ที่อัปโหลดแล้ว</p>
+            <ul class="space-y-1">
+              <li v-for="d in carrierDocs" :key="d.id"
+                class="flex items-center justify-between gap-2 rounded border border-slate-100 bg-white px-2 py-1 text-[11px]">
+                <span class="min-w-0 truncate text-slate-700">{{ d.fileName }}</span>
+                <span class="flex shrink-0 gap-1">
+                  <button type="button" class="rounded p-0.5 text-slate-400 hover:text-sky-600" title="เปิด"
+                    :disabled="actions.docBusy.value === d.id" @click="actions.openDoc(d, 'open')"><i class="pi pi-eye text-[11px]" /></button>
+                  <button type="button" class="rounded p-0.5 text-slate-400 hover:text-sky-600" title="ดาวน์โหลด"
+                    :disabled="actions.docBusy.value === d.id" @click="actions.openDoc(d, 'download')"><i class="pi pi-download text-[11px]" /></button>
+                  <button type="button" class="rounded p-0.5 text-slate-400 hover:text-rose-600" title="ลบ"
+                    :disabled="actions.docBusy.value === d.id" @click="actions.deleteDoc(d)"><i class="pi pi-trash text-[11px]" /></button>
+                </span>
+              </li>
+            </ul>
+          </div>
         </div>
 
         <!-- Prepare InsureHub quote -->
