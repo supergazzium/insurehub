@@ -8,6 +8,7 @@ const { t } = useI18n()
 const tabs = [
   { name: 'agents', to: '/agents', i18n: 'agents.tabs.list', icon: 'pi pi-list' },
   { name: 'agents-hierarchy', to: '/agents/hierarchy', i18n: 'agents.tabs.hierarchy', icon: 'pi pi-sitemap' },
+  { name: 'agents-org-chart', to: '/agents/org-chart', i18n: 'agents.tabs.orgchart', icon: 'pi pi-share-alt' },
   { name: 'agents-recruitment', to: '/agents/recruitment', i18n: 'agents.tabs.recruitment', icon: 'pi pi-share-alt' },
 ]
 

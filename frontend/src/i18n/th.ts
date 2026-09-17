@@ -665,6 +665,7 @@ export default {
     tabs: {
       list: 'รายการตัวแทน',
       hierarchy: 'โครงสร้างสายงาน',
+      orgchart: 'ผังสายงาน',
       recruitment: 'การรับสมัคร',
     },
     list: {

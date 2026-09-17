@@ -14,6 +14,7 @@ export interface AgentListRow {
   phone: string
   level: string
   team: string
+  teamId: string | null
   teamNo: string
   headStatus: string
   licenseLifeNo: string

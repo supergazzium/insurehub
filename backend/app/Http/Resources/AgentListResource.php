@@ -30,6 +30,7 @@ class AgentListResource extends JsonResource
             'phone' => $this->phone ?? '',
             'level' => $this->level,
             'team' => $this->team ?? '',
+            'teamId' => $this->team_id !== null ? (string) $this->team_id : null,
             'teamNo' => $this->team_no ?? '',
             'headStatus' => $this->head_status ?? '',
             'licenseLifeNo' => $this->license_life_no ?? '',

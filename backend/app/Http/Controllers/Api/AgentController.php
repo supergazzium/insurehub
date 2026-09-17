@@ -35,7 +35,7 @@ class AgentController extends ApiController
                 'a.team', 'a.team_no', 'a.head_status',
                 'a.license_life_no', 'a.license_life_expiry',
                 'a.license_non_life_no', 'a.license_non_life_expiry',
-                'a.parent_agent_id', 'a.joined_at', 'a.active',
+                'a.parent_agent_id', 'a.team_id', 'a.joined_at', 'a.active',
                 'parent.agent_code as parent_agent_code',
                 'parent.first_name as parent_agent_first_name',
                 'parent.last_name as parent_agent_last_name',
