@@ -693,6 +693,8 @@ export default {
     },
     riders: {
       title: 'Riders (up to 5)',
+      add: 'Add',
+      notes: 'Notes',
       name: 'Name',
       namePlaceholder: 'Rider name — leave blank to skip this slot',
       premium: 'Premium',

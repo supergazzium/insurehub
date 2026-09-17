@@ -1752,6 +1752,8 @@ export default {
     },
     riders: {
       title: 'สัญญาแนบท้าย (สูงสุด 5)',
+      add: 'เพิ่ม',
+      notes: 'หมายเหตุ',
       name: 'ชื่อ',
       namePlaceholder: 'ชื่อสัญญาแนบท้าย — เว้นว่างหากไม่ใช้ช่องนี้',
       premium: 'เบี้ย',

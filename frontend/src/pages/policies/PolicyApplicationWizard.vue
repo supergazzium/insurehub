@@ -921,6 +921,34 @@ function riderLabel(idx: number): string {
   return (typeof name === 'string' && name.trim()) ? name : `${t('policyCreate.riders.title')} #${idx + 1}`
 }
 
+// ── Rider table (independent of riskSchema) ────────────────────────────────
+// Not every product carries a rider field in its risk schema, so we edit
+// form.risk['riders.rows'] directly here. All downstream logic (premium total,
+// per-rider commission, save) already reads from this same array.
+function addRiderRow(): void {
+  const rows = riderRows.value.slice()
+  rows.push({ name: '', premium: 0, notes: '' })
+  form.risk = { ...form.risk, 'riders.rows': rows }
+}
+function removeRiderRow(idx: number): void {
+  const rows = riderRows.value.slice()
+  rows.splice(idx, 1)
+  form.risk = { ...form.risk, 'riders.rows': rows }
+}
+/** Update a plain field (name / premium / notes) on a rider row immutably. */
+function setRiderField(idx: number, key: 'name' | 'premium' | 'notes', raw: string): void {
+  const rows = riderRows.value.slice()
+  if (!rows[idx]) return
+  const val = key === 'premium' ? (raw === '' ? 0 : Number(raw)) : raw
+  rows[idx] = { ...rows[idx], [key]: val }
+  form.risk = { ...form.risk, 'riders.rows': rows }
+}
+function riderField(idx: number, key: 'name' | 'premium' | 'notes'): string | number {
+  const v = riderRows.value[idx]?.[key]
+  if (key === 'premium') return v === null || v === undefined || v === '' ? 0 : Number(v)
+  return typeof v === 'string' ? v : ''
+}
+
 /** @param gross the VAT/duty-inclusive amount the formula back-solved from;
  *  it becomes รวมเบี้ยที่ต้องชำระ (may include rider premiums for life). */
 function applyFormula(net: number, duty: number, vat: number, gross: number) {
@@ -1762,6 +1790,58 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           :only="['riders', 'beneficiaries']"
           :product-search-context="productSearchContext"
         />
+
+        <!-- สัญญาเพิ่มเติม (Riders) — always available, independent of the
+             product's risk schema (many products carry no rider field). -->
+        <div class="mt-4">
+          <div class="flex items-center justify-between mb-2">
+            <h4 class="text-xs font-medium text-slate-600">
+              {{ t('policyCreate.riders.title') }}
+              <span class="text-slate-400 font-normal ml-1">({{ riderRows.length }})</span>
+            </h4>
+            <button type="button" class="text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1" @click="addRiderRow">
+              <i class="pi pi-plus text-[10px]" /> {{ t('policyCreate.riders.add') }}
+            </button>
+          </div>
+          <div v-if="riderRows.length" class="overflow-x-auto">
+            <table class="min-w-full text-sm">
+              <thead class="text-[10px] text-slate-400 uppercase">
+                <tr>
+                  <th class="text-left px-2 py-1 w-8">#</th>
+                  <th class="text-left px-2 py-1">{{ t('policyCreate.riders.name') }}</th>
+                  <th class="text-right px-2 py-1 w-32">{{ t('policyCreate.riders.premium') }}</th>
+                  <th class="text-left px-2 py-1">{{ t('policyCreate.riders.notes') }}</th>
+                  <th class="w-10"></th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="(_r, idx) in riderRows" :key="idx">
+                  <td class="px-2 py-1 text-slate-400 text-xs">{{ idx + 1 }}</td>
+                  <td class="px-2 py-1">
+                    <input :value="riderField(idx, 'name')" @input="setRiderField(idx, 'name', ($event.target as HTMLInputElement).value)"
+                      class="w-full border border-slate-200 rounded px-2 py-1" placeholder="ชื่อสัญญาเพิ่มเติม" />
+                  </td>
+                  <td class="px-2 py-1">
+                    <input :value="riderField(idx, 'premium')" @input="setRiderField(idx, 'premium', ($event.target as HTMLInputElement).value)"
+                      type="number" step="0.01" class="w-full border border-slate-200 rounded px-2 py-1 text-right font-mono text-xs" />
+                  </td>
+                  <td class="px-2 py-1">
+                    <input :value="riderField(idx, 'notes')" @input="setRiderField(idx, 'notes', ($event.target as HTMLInputElement).value)"
+                      class="w-full border border-slate-200 rounded px-2 py-1" />
+                  </td>
+                  <td class="px-2 py-1 text-right">
+                    <button type="button" class="text-rose-500 hover:text-rose-700 p-1" @click="removeRiderRow(idx)">
+                      <i class="pi pi-trash text-xs" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <div v-else class="text-xs text-slate-400 border border-dashed border-slate-200 rounded-lg px-3 py-3 text-center">
+            ยังไม่มีสัญญาเพิ่มเติม — กด “เพิ่ม”
+          </div>
+        </div>
       </div>
     </section>
 
