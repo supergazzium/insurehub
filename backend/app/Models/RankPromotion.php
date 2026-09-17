@@ -14,6 +14,8 @@ class RankPromotion extends Model
     protected $casts = [
         'qualifying_rolling_3_month_volume' => 'decimal:2',
         'promoted_at' => 'datetime',
+        'requested_at' => 'datetime',
+        'decided_at' => 'datetime',
     ];
 
     public function agent(): BelongsTo

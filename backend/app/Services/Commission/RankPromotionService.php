@@ -147,30 +147,51 @@ class RankPromotionService
     }
 
     /**
-     * Perform the promotion: set agents.rank_id + write the audit row.
-     * Wrapped in a transaction so a mid-write crash doesn't leave the
-     * audit and current-state out of sync.
+     * PROPOSE a promotion for user approval — does NOT change the agent's
+     * rank. Writes a rank_promotions row with status='pending'; the agent's
+     * rank_id is only updated later when a user approves via
+     * RankPromotionApproval::approve(). Non-demotion still holds (callers
+     * only reach here for an upgrade).
+     *
+     * Idempotent: if an identical pending proposal already exists (same
+     * agent + target rank), it is returned rather than duplicated — so a
+     * second payment in the same window doesn't spam the approval queue.
      */
     private function promote(Agent $agent, Rank $toRank, float $volume, string $yearMonth): RankPromotion
     {
         return DB::transaction(function () use ($agent, $toRank, $volume, $yearMonth): RankPromotion {
-            $fromRankId = $agent->rank_id;
-            $agent->rank_id = $toRank->id;
-            $agent->save();
+            $existing = RankPromotion::query()
+                ->where('agent_id', $agent->id)
+                ->where('to_rank_id', $toRank->id)
+                ->where('status', 'pending')
+                ->first();
+            if ($existing !== null) {
+                // Keep the qualifying figures fresh but don't re-queue.
+                $existing->update([
+                    'qualifying_rolling_3_month_volume' => $volume,
+                    'qualifying_period_year_month' => $yearMonth,
+                ]);
+
+                return $existing;
+            }
 
             $promotion = RankPromotion::create([
                 'agent_id' => $agent->id,
-                'from_rank_id' => $fromRankId,
+                'from_rank_id' => $agent->rank_id,
                 'to_rank_id' => $toRank->id,
                 'qualifying_rolling_3_month_volume' => $volume,
                 'qualifying_period_year_month' => $yearMonth,
                 'trigger' => 'auto',
-                'promoted_at' => Carbon::now(),
+                'status' => 'pending',
+                'requested_at' => Carbon::now(),
+                // promoted_at stays null until approval — it is the "took
+                // effect" timestamp, not the "was proposed" timestamp.
+                'promoted_at' => null,
             ]);
 
-            Log::info('MGM rank promotion', [
+            Log::info('MGM rank promotion PROPOSED (pending approval)', [
                 'agent_id' => $agent->id,
-                'from_rank_id' => $fromRankId,
+                'from_rank_id' => $agent->rank_id,
                 'to_rank_id' => $toRank->id,
                 'to_rank_code' => $toRank->code,
                 'volume' => $volume,

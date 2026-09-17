@@ -7,6 +7,9 @@ use App\Http\Controllers\Api\AdminRoleController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AgentCommissionController;
 use App\Http\Controllers\Api\AgentController;
+use App\Http\Controllers\Api\AgentHierarchyController;
+use App\Http\Controllers\Api\TeamController;
+use App\Http\Controllers\Api\RankPromotionController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CarrierBankAccountController;
 use App\Http\Controllers\Api\CarrierContactController;
@@ -145,6 +148,14 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // Business entities — REST resource routes.
     Route::apiResource('agents', AgentController::class);
+
+    // สายงาน (agent hierarchy) + level management + promotion approval queue
+    Route::patch('agents/{agent}/hierarchy', [AgentHierarchyController::class, 'update']);
+    Route::get('teams', [TeamController::class, 'index']);
+    Route::post('teams', [TeamController::class, 'store']);
+    Route::get('rank-promotions', [RankPromotionController::class, 'index']);
+    Route::post('rank-promotions/{rankPromotion}/approve', [RankPromotionController::class, 'approve']);
+    Route::post('rank-promotions/{rankPromotion}/reject', [RankPromotionController::class, 'reject']);
     // Registered before apiResource so 'next-code' doesn't get parsed as
     // a customer id by the {customer} route parameter.
     Route::get('customers/next-code', [CustomerController::class, 'nextCode']);
