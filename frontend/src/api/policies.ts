@@ -12,6 +12,7 @@ export interface PolicyListRow {
   policyNo: string | null
   customerId: string
   productId: string
+  productType?: string | null
   carrierId: string
   writingAgentId: string
   status: PolicyStatus

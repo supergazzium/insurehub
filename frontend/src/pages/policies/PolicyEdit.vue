@@ -40,7 +40,7 @@ const dates = reactive({
   policyEnd: '' as string | null, periodPaidEnd: '' as string | null,
   mailingDate: '' as string | null, appDate: '' as string | null,
   policyYear: 1, actYear: 1, newOrRenew: 'new',
-  freelookActive: false, freelookEndDate: '' as string | null,
+  freelookEndDate: '' as string | null,
 })
 
 // ── Section 3: Premium & tax ──────────────
@@ -214,6 +214,7 @@ const docMsg = ref<{ ok: boolean; text: string } | null>(null)
 /** Fields locked once status ≥ issued. Client mirror of server list. */
 const LOCK_TRIGGER = ['issued', 'active', 'lapsed', 'cancelled', 'reinstated', 'expired']
 const status = computed(() => (policy.value?.status as string) || '')
+const isLifeProduct = computed(() => (policy.value?.productType as string) === 'life')
 const isLocked = computed(() => LOCK_TRIGGER.includes(status.value))
 
 function n(v: unknown, dflt = 0): number {
@@ -230,7 +231,6 @@ function hydrate(p: Record<string, unknown>): void {
   dates.policyYear = n(p.policyYear, 1)
   dates.actYear = n(p.actYear, 1)
   dates.newOrRenew = (p.newOrRenew as string) || 'new'
-  dates.freelookActive = Boolean(p.freelookActive)
   dates.freelookEndDate = (p.freelookEndDate as string) ?? ''
 
   premium.netPremium = n(p.netPremium)
@@ -668,15 +668,9 @@ async function removeDoc(id: string): Promise<void> {
               <option value="renew">renew</option>
             </select>
           </div>
-          <div class="flex items-end pb-2">
-            <label class="inline-flex items-center gap-2 text-sm text-slate-700">
-              <input v-model="dates.freelookActive" type="checkbox" class="rounded border-slate-300" />
-              {{ t('policyEdit.f.freelookActive') }}
-            </label>
-          </div>
-          <div>
-            <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.freelookEndDate') }}</label>
-            <DateInput v-model="dates.freelookEndDate" :disabled="!dates.freelookActive" />
+          <div v-if="isLifeProduct">
+            <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.freelookDate') }}</label>
+            <DateInput v-model="dates.freelookEndDate" />
           </div>
         </div>
       </section>

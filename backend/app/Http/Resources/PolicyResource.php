@@ -32,6 +32,7 @@ class PolicyResource extends JsonResource
             'policyNo' => $this->policy_no,
             'customerId' => (string) $this->customer_id,
             'productId' => (string) $this->product_id,
+            'productType' => $this->product?->type,
             'carrierId' => (string) $this->carrier_id,
             'writingAgentId' => (string) $this->writing_agent_id,
             'coverage' => (float) $this->coverage,

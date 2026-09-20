@@ -162,7 +162,9 @@ onMounted(load)
               </span>
             </td>
             <td class="px-4 py-3 text-slate-600">
-              <template v-if="category === 'freelook'">Free Look ถึง {{ fmtDate(r.freelookEndDate) }}</template>
+              <template v-if="category === 'freelook'">
+                <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">ยังไม่บันทึกวัน Free Look</span>
+              </template>
               <template v-else-if="category === 'cancelled'">ยกเลิก {{ fmtDate(r.cancelDate) }}</template>
               <template v-else-if="category === 'not_delivered'">รับเมื่อ {{ fmtDate(r.receivedDate) || '—' }}</template>
               <template v-else>มีผล {{ fmtDate(r.effectiveDate) || '—' }}</template>

@@ -1952,6 +1952,7 @@ export default {
       newOrRenew: 'ใหม่/ต่ออายุ',
       freelookActive: 'อยู่ในช่วง Free Look',
       freelookEndDate: 'วันสิ้นสุด Free Look',
+      freelookDate: 'วัน Free Look',
       netPremium: 'เบี้ยสุทธิ', mainPremium: 'เบี้ยหลัก', dutyStamp: 'อากรแสตมป์',
       vat: 'VAT', totalPremiumPaid: 'ยอดชำระรวม', annualPremium: 'เบี้ยรายปี',
       coverage: 'ทุนประกัน', creditCardFee: 'ค่าธรรมเนียมบัตร',
