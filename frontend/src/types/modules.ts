@@ -6,7 +6,7 @@ export interface ModuleDef {
   icon: string
   i18nKey: string
   functions: string[]
-  group: 'core' | 'people' | 'business' | 'commission' | 'reporting' | 'platform' | 'support' | 'portal'
+  group: 'core' | 'agents' | 'people' | 'business' | 'commission' | 'reporting' | 'platform' | 'support' | 'portal'
   // If omitted, module is visible to admin/staff/super_admin only. Include
   // 'agent' to also expose it to logged-in agents inside their portal.
   roles?: Array<'admin' | 'super_admin' | 'staff' | 'agent'>
@@ -106,7 +106,7 @@ export const MODULES: ModuleDef[] = [
     routeName: 'agents',
     icon: 'pi pi-users',
     i18nKey: 'agents',
-    group: 'people',
+    group: 'agents',
     functions: [
       'ลงทะเบียนตัวแทน (สร้างโปรไฟล์ กำหนดผู้แนะนำ)',
       'แก้ไขโปรไฟล์ตัวแทน',
@@ -124,6 +124,20 @@ export const MODULES: ModuleDef[] = [
       'ติดตามการใช้งานลิงก์รับสมัคร (คลิก สมัครสำเร็จ รอดำเนินการ)',
       'ยกเลิก / สร้างลิงก์รับสมัครใหม่',
       'ดูตัวแทนที่รับสมัครผ่านลิงก์ของฉัน',
+    ],
+  },
+  {
+    key: 'agent-management',
+    number: 6.5,
+    routePath: '/agents/manage',
+    routeName: 'agents-manage',
+    icon: 'pi pi-user-edit',
+    i18nKey: 'agentManagement',
+    group: 'agents',
+    functions: [
+      'สร้าง / แก้ไขข้อมูลตัวแทน',
+      'อนุมัติ / ปฏิเสธตัวแทนที่รอดำเนินการ',
+      'เปิด / ปิดการใช้งานตัวแทน',
     ],
   },
   {
@@ -501,7 +515,8 @@ export const MODULES: ModuleDef[] = [
 export const MODULE_GROUPS: { key: ModuleDef['group']; labelTh: string }[] = [
   { key: 'core', labelTh: 'ระบบหลัก' },
   { key: 'business', labelTh: 'ข้อมูลธุรกิจ' },
-  { key: 'people', labelTh: 'บุคลากรและลูกค้า' },
+  { key: 'agents', labelTh: 'ตัวแทน' },
+  { key: 'people', labelTh: 'ลูกค้า' },
   { key: 'commission', labelTh: 'ค่าคอมมิชชั่นและจ่ายเงิน' },
   { key: 'reporting', labelTh: 'รายงานและแจ้งเตือน' },
   { key: 'platform', labelTh: 'แพลตฟอร์ม' },

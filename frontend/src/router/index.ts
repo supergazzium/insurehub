@@ -55,7 +55,7 @@ import { MODULES } from '../types/modules'
 
 const IMPLEMENTED_MODULES = new Set([
   'tenant-settings', 'carriers', 'products', 'contracts',
-  'agents', 'customers', 'policies', 'renewal-pipeline', 'collections',
+  'agents', 'agent-management', 'customers', 'policies', 'renewal-pipeline', 'collections',
   'rebate-reconciliation',
   'import-failures',
   'agent-support', 'agent-operation-support',
