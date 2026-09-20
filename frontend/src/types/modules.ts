@@ -193,6 +193,19 @@ export const MODULES: ModuleDef[] = [
       'สรุปยอด premium ที่ต้องต่ออายุในช่วงเวลา',
     ],
   },
+  {
+    key: 'collections',
+    number: 9,
+    routePath: '/policies/collections',
+    routeName: 'policies-collections',
+    icon: 'pi pi-wallet',
+    i18nKey: 'collections',
+    group: 'business',
+    functions: [
+      'ติดตามเงินค้างชำระ (เงินสด / ผ่อน / แบ่งชำระ)',
+      'ทวงเงินตามงวด + บันทึกประวัติการทวง',
+    ],
+  },
   // NOTE: `commission-engine` and `commission-ledger` module entries removed
   // with the MGM rewrite. New MGM-based equivalents will be added when their
   // pages ship (PR-D and later).

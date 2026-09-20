@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AdminRoleController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AgentCommissionController;
 use App\Http\Controllers\Api\AgentController;
+use App\Http\Controllers\Api\CollectionsController;
 use App\Http\Controllers\Api\AgentHierarchyController;
 use App\Http\Controllers\Api\TeamController;
 use App\Http\Controllers\Api\RankPromotionController;
@@ -152,6 +153,11 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('agents/hierarchy-rollup', [AgentHierarchyController::class, 'rollup']);
     Route::get('agents/level-progress-board', [LevelProgressController::class, 'board']);
     Route::apiResource('agents', AgentController::class);
+
+    // การติดตามเงิน (payment collections / dunning)
+    Route::get('collections', [CollectionsController::class, 'index']);
+    Route::get('policies/{policy}/reminders', [CollectionsController::class, 'reminders']);
+    Route::post('policies/{policy}/reminders', [CollectionsController::class, 'storeReminder']);
 
     // สายงาน (agent hierarchy) + level management + promotion approval queue
     Route::patch('agents/{agent}/hierarchy', [AgentHierarchyController::class, 'update']);

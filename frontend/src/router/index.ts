@@ -55,7 +55,7 @@ import { MODULES } from '../types/modules'
 
 const IMPLEMENTED_MODULES = new Set([
   'tenant-settings', 'carriers', 'products', 'contracts',
-  'agents', 'customers', 'policies', 'renewal-pipeline',
+  'agents', 'customers', 'policies', 'renewal-pipeline', 'collections',
   'rebate-reconciliation',
   'import-failures',
   'agent-support', 'agent-operation-support',
@@ -155,6 +155,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'customers/:id/edit', name: 'customer-edit', component: () => import('../pages/customers/CustomerEditPage.vue'), meta: { moduleKey: 'customers' } },
       { path: 'policies', name: 'policies', component: PolicyList, meta: { moduleKey: 'policies' } },
       { path: 'policies/expiring', name: 'policies-expiring', component: ExpiringSoon, meta: { moduleKey: 'renewal-pipeline' } },
+      { path: 'policies/collections', name: 'policies-collections', component: () => import('../pages/policies/Collections.vue'), meta: { moduleKey: 'collections' } },
       { path: 'policies/:id/renewal', name: 'policy-renewal', component: () => import('../pages/policies/RenewalDetail.vue'), meta: { moduleKey: 'renewal-pipeline' } },
       { path: 'commissions/rebates', name: 'commission-rebates', component: RebateReconciliation, meta: { moduleKey: 'rebate-reconciliation' } },
       { path: 'settings/import-failures', name: 'settings-import-failures', component: ImportFailures, meta: { moduleKey: 'import-failures' } },
