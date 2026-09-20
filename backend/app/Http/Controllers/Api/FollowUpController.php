@@ -109,9 +109,12 @@ class FollowUpController extends Controller
             'no_policy_no' => $q->whereIn('p.status', ['active', 'issued'])
                 ->where(fn ($w) => $w->whereNull('p.policy_no')->orWhere('p.policy_no', '')),
             'not_delivered' => $q->where('p.status', 'active')->whereNull('p.mailing_date'),
+            // Active Free Look policies that still need attention: either the
+            // end date was never recorded (that missing date IS the follow-up),
+            // or it's recorded and the window is still open.
             'freelook' => $q->where('p.freelook_active', 1)
-                ->whereNotNull('p.freelook_end_date')
-                ->whereDate('p.freelook_end_date', '>=', now()->toDateString()),
+                ->where(fn ($w) => $w->whereNull('p.freelook_end_date')
+                    ->orWhereDate('p.freelook_end_date', '>=', now()->toDateString())),
             'no_commission' => $q->where('p.status', 'active')
                 ->where(fn ($w) => $w->whereNull('p.comm_carrier_to_hub_amount')
                     ->orWhere('p.comm_carrier_to_hub_amount', 0)
