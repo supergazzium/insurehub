@@ -34,6 +34,7 @@ import DateInput from '../../components/DateInput.vue'
 import DurationChip from '../../components/DurationChip.vue'
 import RiskFieldRenderer from '../../components/RiskFieldRenderer.vue'
 import EntityPicker from '../../components/EntityPicker.vue'
+import { INSTALLMENT_MODES } from '../../utils/installmentCalc'
 import PolicyPaymentModal, { type ExpectedPremium } from './PolicyPaymentModal.vue'
 import PolicyEndorsementModal, { type EndorsementInitial } from './PolicyEndorsementModal.vue'
 import {
@@ -225,6 +226,8 @@ const form = reactive({
   // installment rows in the payment modal.
   installmentCount: 1 as number,
   installmentTerm: '' as string,
+  installmentMode: '' as string,   // A/B/C — who bears fee + interest
+  compulsoryPremium: 0 as number,  // พ.ร.บ. — billed on งวด 1 only
   firstDueInst: 0 as number,
   firstDueInstDate: '' as string,
   nextDueInst: 0 as number,
@@ -1123,12 +1126,14 @@ function buildDraftPayload(): Record<string, unknown> {
     mainPremium: form.grossPremiumInput || form.mainPremium || 0,
     dutyStamp: form.dutyStamp || 0,
     vat: form.vat || 0,
+    compulsoryPremium: form.compulsoryPremium || 0,
     totalPremiumPaid: form.totalPremiumPaid || 0,
     whtAmt: form.whtAmt || 0,
     netCustomerPaid: form.netCustomerPaid || 0,
     annualPremium: form.annualPremium || 0,
     premiumMode: form.premiumMode,
     installmentTerm: form.installmentTerm || null,
+    installmentMode: form.installmentMode || null,
     firstDueInst: form.firstDueInst || 0,
     firstDueInstDate: form.firstDueInstDate || null,
     nextDueInst: form.nextDueInst || 0,
@@ -1355,6 +1360,8 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
     form.grossPremiumInput = form.mainPremium
     form.dutyStamp = Number(premium.dutyStamp ?? p.dutyStamp ?? 0)
     form.vat = Number(premium.vat ?? p.vat ?? 0)
+    form.compulsoryPremium = Number(premium.compulsory ?? p.compulsoryPremium ?? 0)
+    form.installmentMode = (installment.mode as string) ?? (p.installmentMode as string) ?? ''
     form.totalPremiumPaid = Number(premium.totalPaid ?? p.totalPremiumPaid ?? 0)
     form.netCustomerPaid = Number(premium.netCustomerPaid ?? p.netCustomerPaid ?? 0)
     form.whtAmt = Number(wht.amount ?? p.whtAmt ?? 0)
@@ -1965,6 +1972,20 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <input v-model.trim="form.installmentTerm" type="text"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
+        <!-- Installment mode (A/B/C) — who bears fee + interest. Drives the
+             payment modal's schedule. -->
+        <FormField label="รูปแบบการผ่อน (Mode)">
+          <select v-model="form.installmentMode"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option value="">— ไม่ระบุ —</option>
+            <option v-for="m in INSTALLMENT_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+          </select>
+        </FormField>
+        <!-- พ.ร.บ. — billed in full on งวด 1 only. -->
+        <FormField label="พ.ร.บ. (compulsory)">
+          <input v-model.number="form.compulsoryPremium" type="number" min="0" step="0.01"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
       </div>
 
       <!-- C-21: editable commission, both directions. Defaults from the
@@ -2281,6 +2302,9 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       :carrier-label="carrierLabel"
       :installment-count="Number(form.installmentCount) || 1"
       :frequency-label="t(`policyCreate.premiumModes.${form.premiumMode}`)"
+      :main-premium="Number(form.mainPremium) || 0"
+      :compulsory-premium="Number(form.compulsoryPremium) || 0"
+      :installment-mode="form.installmentMode"
       @close="showPaymentModal = false"
     />
 

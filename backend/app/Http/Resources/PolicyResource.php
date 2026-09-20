@@ -47,6 +47,7 @@ class PolicyResource extends JsonResource
             'typeOfPaidNote' => $this->type_of_paid_note ?? '',
             'financeCompany' => $this->finance_company ?? '',
             'installmentTerm' => $this->installment_term !== null ? (int) $this->installment_term : 0,
+            'mainPremium' => $this->main_premium !== null ? (float) $this->main_premium : 0.0,
             'compulsoryPremium' => $this->compulsory_premium !== null ? (float) $this->compulsory_premium : 0.0,
             'installmentMode' => $this->installment_mode,
             'firstDueInst' => $this->first_due_inst !== null ? (float) $this->first_due_inst : 0,
@@ -129,6 +130,7 @@ class PolicyResource extends JsonResource
             // Installment / payment terms.
             'installment' => [
                 'term' => $this->installment_term ?? '',
+                'mode' => $this->installment_mode,
                 'firstDueAmount' => $this->first_due_inst !== null ? (float) $this->first_due_inst : null,
                 'firstDueDate' => $this->first_due_inst_date?->toDateString(),
                 'nextDueAmount' => $this->next_due_inst !== null ? (float) $this->next_due_inst : null,
