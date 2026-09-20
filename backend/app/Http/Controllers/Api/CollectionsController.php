@@ -72,16 +72,24 @@ class CollectionsController extends Controller
         foreach ($rows as $r) {
             $main = (float) ($r->main_premium ?? 0);
             $compulsory = (float) ($r->compulsory_premium ?? 0);
+            // Total owed = main premium + พ.ร.บ.
             $totalDue = round($main + $compulsory, 2);
-            // Fall back to the policy's recorded total if main isn't set.
+            // Amount already paid = the imported "paid so far" figure
+            // (total_premium_paid, from the legacy system) PLUS any payments
+            // recorded through the app (policy_payments). For legacy policies
+            // with no recorded rows this is just the imported figure.
+            $paid = round((float) ($r->total_premium_paid ?? 0) + (float) $r->paid_total, 2);
+            // If we somehow have no main premium, treat the paid figure as the
+            // whole thing (nothing to chase).
             if ($totalDue <= 0) {
-                $totalDue = (float) ($r->total_premium_paid ?? 0);
+                $totalDue = $paid;
             }
-            $paid = (float) $r->paid_total;
             $outstanding = round($totalDue - $paid, 2);
 
-            if ($outstanding <= 0.009) {
-                continue; // fully paid
+            // Treat anything under ฿1 as fully paid — that residue is only
+            // per-installment ceiling rounding, not a real balance owed.
+            if ($outstanding < 1.0) {
+                continue;
             }
 
             $rowKind = $this->classify($r);
