@@ -135,18 +135,18 @@ async function submit(): Promise<void> {
     if (isEdit.value) {
       await updateAgentFull(editId.value!, payload.value)
       // team + level go through the hierarchy endpoint separately (kept in sync).
-      router.push({ name: 'agents-manage' })
+      router.push({ name: 'agents' })
     } else {
       const res = await createAgentFull(payload.value)
       const id = (res.data as Record<string, unknown>).id
       // Apply team/level via the hierarchy endpoint after creation if set.
-      router.push(id ? { name: 'agent-detail', params: { id: String(id) } } : { name: 'agents-manage' })
+      router.push(id ? { name: 'agent-detail', params: { id: String(id) } } : { name: 'agents' })
     }
   } catch (e: unknown) {
     error.value = e instanceof ApiError ? e.message : 'บันทึกไม่สำเร็จ'
   } finally { saving.value = false }
 }
-function cancel(): void { router.push({ name: 'agents-manage' }) }
+function cancel(): void { router.push({ name: 'agents' }) }
 
 onMounted(load)
 </script>

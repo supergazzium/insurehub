@@ -127,20 +127,6 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
-    key: 'agent-management',
-    number: 6.5,
-    routePath: '/agents/manage',
-    routeName: 'agents-manage',
-    icon: 'pi pi-user-edit',
-    i18nKey: 'agentManagement',
-    group: 'agents',
-    functions: [
-      'สร้าง / แก้ไขข้อมูลตัวแทน',
-      'อนุมัติ / ปฏิเสธตัวแทนที่รอดำเนินการ',
-      'เปิด / ปิดการใช้งานตัวแทน',
-    ],
-  },
-  {
     key: 'customers',
     number: 7,
     routePath: '/customers',

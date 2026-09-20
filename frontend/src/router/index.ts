@@ -55,7 +55,7 @@ import { MODULES } from '../types/modules'
 
 const IMPLEMENTED_MODULES = new Set([
   'tenant-settings', 'carriers', 'products', 'contracts',
-  'agents', 'agent-management', 'customers', 'policies', 'renewal-pipeline', 'collections',
+  'agents', 'customers', 'policies', 'renewal-pipeline', 'collections',
   'rebate-reconciliation',
   'import-failures',
   'agent-support', 'agent-operation-support',
@@ -145,9 +145,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'agents/hierarchy', name: 'agents-hierarchy', component: AgentHierarchy, meta: { moduleKey: 'agents' } },
       { path: 'agents/org-chart', name: 'agents-org-chart', component: () => import('../pages/agents/AgentOrgChart.vue'), meta: { moduleKey: 'agents' } },
       { path: 'agents/recruitment', name: 'agents-recruitment', component: AgentRecruitment, meta: { moduleKey: 'agents' } },
-      { path: 'agents/promotions', name: 'agents-promotions', component: () => import('../pages/agents/PromotionApprovals.vue'), meta: { moduleKey: 'agents' } },
+            { path: 'agents/approvals', name: 'agents-approvals', component: () => import('../pages/agents/AgentApprovals.vue'), meta: { moduleKey: 'agents' } },
+      { path: 'agents/promotions', redirect: { name: 'agents-approvals' } },
       { path: 'agents/level-progress', name: 'agents-level-progress', component: () => import('../pages/agents/LevelProgressBoard.vue'), meta: { moduleKey: 'agents' } },
-      { path: 'agents/manage', name: 'agents-manage', component: () => import('../pages/agents/AgentManagement.vue'), meta: { moduleKey: 'agents' } },
+      { path: 'agents/manage', redirect: { name: 'agents' } },
       { path: 'agents/new', name: 'agent-new', component: () => import('../pages/agents/AgentFormPage.vue'), meta: { moduleKey: 'agents' } },
       { path: 'agents/:id/edit-info', name: 'agent-edit-info', component: () => import('../pages/agents/AgentFormPage.vue'), meta: { moduleKey: 'agents' } },
       { path: 'agents/:id', name: 'agent-detail', component: () => import('../pages/agents/AgentDetail.vue'), meta: { moduleKey: 'agents' } },

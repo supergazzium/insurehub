@@ -257,6 +257,7 @@ onMounted(loadAll)
           <button type="button" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" @click="zoomBy(1.1)">＋</button>
           <button type="button" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" @click="zoomBy(0.9)">－</button>
           <button type="button" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" @click="resetView">รีเซ็ต</button>
+          <RouterLink to="/agents/hierarchy" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"><i class="pi pi-list text-[10px]" /> ดูแบบต้นไม้</RouterLink>
         </div>
       </div>
 

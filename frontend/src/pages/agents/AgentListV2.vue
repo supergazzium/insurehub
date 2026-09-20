@@ -4,12 +4,50 @@ import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useAgentStore } from '../../stores/agents'
+import { fetchPendingAgents, approveAgent, rejectAgent, setAgentActive, type AgentListRow } from '../../api/agents'
+import { ApiError } from '../../api/client'
 
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
 function openAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
 const agentStore = useAgentStore()
+
+// ── Management actions (create / approve / deactivate) ─────────────────────
+const pending = ref<AgentListRow[]>([])
+const busy = ref<string | null>(null)
+const flash = ref<{ ok: boolean; text: string } | null>(null)
+function setFlash(ok: boolean, text: string) { flash.value = { ok, text }; setTimeout(() => flash.value = null, 3500) }
+function aName(a: { firstName?: string; lastName?: string; agentCode: string }): string {
+  return `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim() || a.agentCode
+}
+async function loadPending(): Promise<void> {
+  try { const r = await fetchPendingAgents(); pending.value = r.data } catch { pending.value = [] }
+}
+function createNew(): void { router.push({ name: 'agent-new' }) }
+function editAgent(id: string): void { router.push({ name: 'agent-edit-info', params: { id } }) }
+async function approve(a: AgentListRow): Promise<void> {
+  busy.value = a.id
+  try { await approveAgent(a.id); setFlash(true, `อนุมัติ ${aName(a)} แล้ว`); await load(); await loadPending() }
+  catch (e: unknown) { setFlash(false, e instanceof ApiError ? e.message : 'อนุมัติล้มเหลว') }
+  finally { busy.value = null }
+}
+async function reject(a: AgentListRow): Promise<void> {
+  const note = window.prompt(`เหตุผลที่ปฏิเสธ ${aName(a)}:`)
+  if (note === null || note.trim() === '') return
+  busy.value = a.id
+  try { await rejectAgent(a.id, note.trim()); setFlash(true, `ปฏิเสธ ${aName(a)} แล้ว`); await load(); await loadPending() }
+  catch (e: unknown) { setFlash(false, e instanceof ApiError ? e.message : 'ปฏิเสธล้มเหลว') }
+  finally { busy.value = null }
+}
+async function toggleActive(a: AgentListRow): Promise<void> {
+  const next = !a.active
+  if (!next && !window.confirm(`ปิดใช้งาน ${aName(a)}?`)) return
+  busy.value = a.id
+  try { await setAgentActive(a.id, next); setFlash(true, next ? 'เปิดใช้งานแล้ว' : 'ปิดใช้งานแล้ว'); await load() }
+  catch (e: unknown) { setFlash(false, e instanceof ApiError ? e.message : 'ดำเนินการล้มเหลว') }
+  finally { busy.value = null }
+}
 
 const filters = reactive({
   q: '',
@@ -40,6 +78,7 @@ onMounted(() => {
   const q = route.query.q
   if (typeof q === 'string' && q.trim() !== '') filters.q = q.trim()
   void load()
+  void loadPending()
 })
 
 let debounceTimer: number | undefined
@@ -99,8 +138,32 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
         <h1 class="text-2xl font-semibold text-slate-900">{{ t('modules.agents.name') }}</h1>
         <p class="text-slate-500 text-sm mt-1">{{ t('modules.agents.description') }}</p>
       </div>
-      <div v-if="agentStore.listMeta" class="text-sm text-slate-500">{{ rangeText }}</div>
+      <div class="flex items-center gap-3">
+        <span v-if="agentStore.listMeta" class="text-sm text-slate-500">{{ rangeText }}</span>
+        <button type="button" class="rounded-lg bg-brand-600 px-3 py-1.5 text-sm text-white hover:bg-brand-700" @click="createNew">
+          <i class="pi pi-plus text-[10px]" /> เพิ่มตัวแทน
+        </button>
+      </div>
     </header>
+
+    <!-- Flash -->
+    <transition name="fade">
+      <div v-if="flash" :class="['rounded px-3 py-2 text-sm', flash.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700']">{{ flash.text }}</div>
+    </transition>
+
+    <!-- Pending approvals -->
+    <section v-if="pending.length" class="rounded-lg border border-amber-200 bg-amber-50 p-3">
+      <div class="mb-2 text-xs font-medium text-amber-800"><i class="pi pi-clock text-[10px]" /> รออนุมัติ {{ pending.length }} ราย</div>
+      <ul class="space-y-1">
+        <li v-for="a in pending" :key="a.id" class="flex items-center justify-between gap-2 rounded bg-white px-2 py-1.5 text-xs">
+          <span class="text-slate-700">{{ aName(a) }} <span class="text-slate-400">{{ a.agentCode }}</span></span>
+          <span class="flex gap-1.5">
+            <button type="button" class="rounded bg-emerald-600 px-2 py-0.5 text-white disabled:opacity-50" :disabled="busy === a.id" @click="approve(a)">อนุมัติ</button>
+            <button type="button" class="rounded border border-rose-300 px-2 py-0.5 text-rose-600 disabled:opacity-50" :disabled="busy === a.id" @click="reject(a)">ปฏิเสธ</button>
+          </span>
+        </li>
+      </ul>
+    </section>
 
     <section class="card p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
       <div class="md:col-span-2">
@@ -166,6 +229,7 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
               <th class="px-4 py-2 text-left">License Life</th>
               <th class="px-4 py-2 text-left">License Non-Life</th>
               <th class="px-4 py-2 text-left">Status</th>
+              <th class="px-4 py-2 text-right">จัดการ</th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
@@ -204,15 +268,25 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
                 </span>
               </td>
               <td class="px-4 py-2">
-                <span v-if="a.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">active</span>
-                <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">inactive</span>
+                <span v-if="a.approvalStatus === 'pending'" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-amber-50 text-amber-700">รออนุมัติ</span>
+                <span v-else-if="a.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">เปิดใช้งาน</span>
+                <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">ปิดใช้งาน</span>
+              </td>
+              <td class="px-4 py-2 text-right" @click.stop>
+                <div class="flex justify-end gap-1.5">
+                  <button v-if="a.approvalStatus === 'pending'" type="button" class="rounded bg-emerald-600 px-2 py-1 text-xs text-white disabled:opacity-50" :disabled="busy === a.id" @click="approve(a)">อนุมัติ</button>
+                  <button type="button" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" @click="editAgent(a.id)">แก้ไข</button>
+                  <button type="button"
+                    :class="['rounded px-2 py-1 text-xs disabled:opacity-50', a.active ? 'border border-rose-300 text-rose-600 hover:bg-rose-50' : 'border border-emerald-300 text-emerald-600 hover:bg-emerald-50']"
+                    :disabled="busy === a.id" @click="toggleActive(a)">{{ a.active ? 'ปิด' : 'เปิด' }}</button>
+                </div>
               </td>
             </tr>
             <tr v-if="!agentStore.listLoading && agentStore.list.length === 0">
-              <td colspan="8" class="px-4 py-6 text-center text-slate-500">ไม่พบตัวแทน</td>
+              <td colspan="9" class="px-4 py-6 text-center text-slate-500">ไม่พบตัวแทน</td>
             </tr>
             <tr v-if="agentStore.listLoading && agentStore.list.length === 0">
-              <td colspan="8" class="px-4 py-6 text-center text-slate-500">Loading…</td>
+              <td colspan="9" class="px-4 py-6 text-center text-slate-500">Loading…</td>
             </tr>
           </tbody>
         </table>

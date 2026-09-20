@@ -1,25 +1,25 @@
 <script setup lang="ts">
 import { onMounted, ref } from 'vue'
-import { useI18n } from 'vue-i18n'
-import { fetchRankPromotions } from '../../api/agents'
-
-const { t } = useI18n()
+import { fetchPendingAgents, fetchRankPromotions } from '../../api/agents'
 
 const tabs = [
-  { name: 'agents', to: '/agents', i18n: 'agents.tabs.list', icon: 'pi pi-list' },
-  { name: 'agents-hierarchy', to: '/agents/hierarchy', i18n: 'agents.tabs.hierarchy', icon: 'pi pi-sitemap' },
-  { name: 'agents-org-chart', to: '/agents/org-chart', i18n: 'agents.tabs.orgchart', icon: 'pi pi-share-alt' },
-  { name: 'agents-recruitment', to: '/agents/recruitment', i18n: 'agents.tabs.recruitment', icon: 'pi pi-share-alt' },
-  { name: 'agents-level-progress', to: '/agents/level-progress', i18n: 'agents.tabs.levelprogress', icon: 'pi pi-chart-line' },
+  { name: 'agents', to: '/agents', label: 'รายชื่อ', icon: 'pi pi-users' },
+  { name: 'agents-approvals', to: '/agents/approvals', label: 'รออนุมัติ', icon: 'pi pi-verified', badge: true },
+  { name: 'agents-org-chart', to: '/agents/org-chart', label: 'สายงาน', icon: 'pi pi-sitemap' },
+  { name: 'agents-recruitment', to: '/agents/recruitment', label: 'การรับสมัคร', icon: 'pi pi-share-alt' },
+  { name: 'agents-level-progress', to: '/agents/level-progress', label: 'เลื่อนระดับ', icon: 'pi pi-chart-line' },
 ]
 
-// Live pending-promotion count for the approvals tab badge.
+// Combined pending count (agents awaiting approval + promotions awaiting approval).
 const pendingCount = ref(0)
 onMounted(async () => {
   try {
-    const res = await fetchRankPromotions('pending')
-    pendingCount.value = res.meta.pendingCount
-  } catch { /* badge just stays 0 */ }
+    const [ag, promo] = await Promise.all([
+      fetchPendingAgents().catch(() => ({ data: [] })),
+      fetchRankPromotions('pending').catch(() => ({ data: [], meta: { pendingCount: 0 } })),
+    ])
+    pendingCount.value = ag.data.length + (promo.meta?.pendingCount ?? 0)
+  } catch { /* badge stays 0 */ }
 })
 </script>
 
@@ -30,22 +30,11 @@ onMounted(async () => {
       :key="tk.name"
       :to="tk.to"
       class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition flex items-center gap-2"
-      active-class="border-brand-600 text-brand-700"
-      exact-active-class="border-brand-600 text-brand-700"
       :class="$route.name === tk.name ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:text-slate-900'"
     >
       <i :class="tk.icon + ' text-xs'" />
-      {{ t(tk.i18n) }}
-    </RouterLink>
-    <!-- Promotion approvals — with pending-count badge -->
-    <RouterLink
-      to="/agents/promotions"
-      class="px-4 py-2.5 text-sm font-medium border-b-2 -mb-px whitespace-nowrap transition flex items-center gap-2"
-      :class="$route.name === 'agents-promotions' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:text-slate-900'"
-    >
-      <i class="pi pi-verified text-xs" />
-      อนุมัติเลื่อนระดับ
-      <span v-if="pendingCount > 0" class="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] leading-none text-white">{{ pendingCount }}</span>
+      {{ tk.label }}
+      <span v-if="tk.badge && pendingCount > 0" class="rounded-full bg-amber-500 px-1.5 py-0.5 text-[10px] leading-none text-white">{{ pendingCount }}</span>
     </RouterLink>
   </div>
 </template>
