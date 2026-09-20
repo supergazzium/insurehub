@@ -72,6 +72,8 @@ class AgentResource extends JsonResource
             'teamNo' => $this->team_no ?? '',
             'notes' => $this->notes ?? '',
             'active' => (bool) $this->active,
+            'hasVat' => (bool) $this->has_vat,
+            'vatMode' => $this->vat_mode,
             'approvalStatus' => $this->approval_status ?? 'approved',
         ];
     }

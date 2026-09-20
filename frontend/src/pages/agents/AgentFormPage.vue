@@ -11,7 +11,8 @@ import AgentsSubnav from './AgentsSubnav.vue'
 import {
   fetchAgent, createAgentFull, updateAgentFull, fetchTeams, fetchRanks,
   fetchLevelProgress, fetchRankPromotions, approveAgent, rejectAgent, setAgentActive,
-  type TeamRow, type RankRow, type LevelProgress, type RankPromotionRow,
+  fetchAgentNotes, createAgentNote,
+  type TeamRow, type RankRow, type LevelProgress, type RankPromotionRow, type AgentNoteRow,
 } from '../../api/agents'
 import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
@@ -29,6 +30,10 @@ const teams = ref<TeamRow[]>([])
 const ranks = ref<RankRow[]>([])
 const progress = ref<LevelProgress | null>(null)
 const promotions = ref<RankPromotionRow[]>([])
+const notes = ref<AgentNoteRow[]>([])
+const newNote = ref('')
+const newNoteKind = ref('general')
+const noteSaving = ref(false)
 const approvalStatus = ref<string>('approved')
 const busy = ref(false)
 const money = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 0 })
@@ -43,6 +48,7 @@ const form = reactive({
   email: '', phone: '', lineId: '',
   idCard: '', birthDate: '',
   juristicName: '', taxId: '',
+  hasVat: false, vatMode: 'include' as 'include' | 'exclude',
   address: '', province: '', district: '', subDistrict: '', postcode: '',
   bankNameText: '', bankAccountNo: '', bankAccountName: '',
   licenseLifeNo: '', licenseLifeExpiry: '',
@@ -94,6 +100,8 @@ async function load(): Promise<void> {
       s('joinedAt', d.joinedAt); s('notes', d.notes)
       form.active = d.active !== false
       approvalStatus.value = (d.approvalStatus as string) ?? 'approved'
+      form.hasVat = d.hasVat === true
+      form.vatMode = (d.vatMode as 'include' | 'exclude') || 'include'
       // Detail extras — progress + promotion history (best-effort).
       const [prog, promo] = await Promise.all([
         fetchLevelProgress(editId.value!).catch(() => ({ data: null as LevelProgress | null })),
@@ -101,6 +109,8 @@ async function load(): Promise<void> {
       ])
       progress.value = prog.data
       promotions.value = promo.data.filter((x) => x.agentId === editId.value)
+      const nt = await fetchAgentNotes(editId.value!).catch(() => ({ data: [] as AgentNoteRow[] }))
+      notes.value = nt.data
     }
   } catch (e: unknown) {
     error.value = e instanceof ApiError ? e.message : 'โหลดข้อมูลไม่สำเร็จ'
@@ -125,6 +135,8 @@ const payload = computed<Record<string, unknown>>(() => {
     birthDate: toIsoDate(form.birthDate) || null,
     juristicName: form.juristicName || null,
     taxId: form.taxId || null,
+    hasVat: form.hasVat,
+    vatMode: form.hasVat ? form.vatMode : null,
     address: form.address || null,
     province: form.province || null,
     district: form.district || null,
@@ -198,6 +210,22 @@ function statusLabel(st: string): string {
   return st === 'approved' ? 'อนุมัติแล้ว' : st === 'rejected' ? 'ปฏิเสธ' : 'รออนุมัติ'
 }
 
+async function addNote(): Promise<void> {
+  if (!editId.value || !newNote.value.trim()) return
+  noteSaving.value = true
+  try {
+    await createAgentNote(editId.value, newNote.value.trim(), newNoteKind.value)
+    newNote.value = ''
+    newNoteKind.value = 'general'
+    const nt = await fetchAgentNotes(editId.value)
+    notes.value = nt.data
+  } catch (e: unknown) { error.value = e instanceof ApiError ? e.message : 'บันทึกโน้ตล้มเหลว' }
+  finally { noteSaving.value = false }
+}
+function noteKindLabel(k: string): string {
+  return { general: 'ทั่วไป', call: 'โทรติดตาม', followup: 'ติดตาม', document: 'เอกสาร' }[k] ?? k
+}
+
 onMounted(load)
 </script>
 
@@ -259,6 +287,19 @@ onMounted(load)
               <FormField label="ชื่อนิติบุคคล" class="col-span-2"><input v-model.trim="form.juristicName" class="ipt" /></FormField>
               <FormField label="เลขประจำตัวผู้เสียภาษี"><input v-model.trim="form.taxId" class="ipt" /></FormField>
             </template>
+          </div>
+          <!-- VAT -->
+          <div class="mt-3 border-t border-slate-100 pt-3">
+            <label class="flex items-center gap-2 text-sm text-slate-700">
+              <input type="checkbox" v-model="form.hasVat" class="h-4 w-4" /> ตัวแทนมี VAT
+            </label>
+            <div v-if="form.hasVat" class="mt-2">
+              <label class="text-[11px] text-slate-500">รูปแบบ VAT</label>
+              <div class="inline-flex overflow-hidden rounded-lg border border-slate-200 ml-2">
+                <button type="button" :class="['px-3 py-1 text-xs', form.vatMode === 'include' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50']" @click="form.vatMode = 'include'">รวม VAT (Include)</button>
+                <button type="button" :class="['px-3 py-1 text-xs', form.vatMode === 'exclude' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50']" @click="form.vatMode = 'exclude'">ไม่รวม VAT (Exclude)</button>
+              </div>
+            </div>
           </div>
         </section>
 
@@ -362,6 +403,31 @@ onMounted(load)
               </li>
             </ul>
             <p v-else class="text-xs text-slate-400">ยังไม่มีประวัติการเลื่อนระดับ</p>
+          </section>
+
+          <!-- Note history (follow-ups) -->
+          <section class="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 class="mb-2 text-sm font-semibold text-slate-700">บันทึกการติดตาม / โน้ต</h2>
+            <div class="mb-3 flex gap-2">
+              <select v-model="newNoteKind" class="rounded border border-slate-300 px-2 py-1 text-xs">
+                <option value="general">ทั่วไป</option>
+                <option value="call">โทรติดตาม</option>
+                <option value="followup">ติดตาม</option>
+                <option value="document">เอกสาร</option>
+              </select>
+              <input v-model="newNote" placeholder="เช่น โทรคุยแล้ว ลูกค้าสนใจสมัคร…" class="flex-1 rounded border border-slate-300 px-2 py-1 text-xs" @keyup.enter="addNote" />
+              <button type="button" class="rounded bg-brand-600 px-3 py-1 text-xs text-white disabled:opacity-50" :disabled="noteSaving || !newNote.trim()" @click="addNote">เพิ่มโน้ต</button>
+            </div>
+            <ul v-if="notes.length" class="space-y-1.5">
+              <li v-for="n in notes" :key="n.id" class="rounded border border-slate-100 px-2 py-1.5 text-xs">
+                <div class="flex items-center justify-between">
+                  <span class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-600">{{ noteKindLabel(n.kind) }}</span>
+                  <span class="text-[10px] text-slate-400">{{ fmtDate(n.createdAt) }}</span>
+                </div>
+                <div class="mt-0.5 text-slate-700">{{ n.note }}</div>
+              </li>
+            </ul>
+            <p v-else class="text-xs text-slate-400">ยังไม่มีโน้ต</p>
           </section>
         </template>
 

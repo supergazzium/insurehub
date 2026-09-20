@@ -7,6 +7,7 @@ use App\Http\Controllers\Api\AdminRoleController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AgentCommissionController;
 use App\Http\Controllers\Api\AgentController;
+use App\Http\Controllers\Api\AgentNoteController;
 use App\Http\Controllers\Api\CollectionsController;
 use App\Http\Controllers\Api\AgentHierarchyController;
 use App\Http\Controllers\Api\TeamController;
@@ -161,6 +162,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // สายงาน (agent hierarchy) + level management + promotion approval queue
     Route::patch('agents/{agent}/hierarchy', [AgentHierarchyController::class, 'update']);
+    Route::get('agents/{agent}/notes', [AgentNoteController::class, 'index']);
+    Route::post('agents/{agent}/notes', [AgentNoteController::class, 'store']);
     Route::get('agents/{agent}/level-progress', [LevelProgressController::class, 'show']);
     Route::get('teams', [TeamController::class, 'index']);
     Route::post('teams', [TeamController::class, 'store']);

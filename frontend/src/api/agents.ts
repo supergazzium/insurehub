@@ -191,3 +191,17 @@ export function createAgentFull(payload: Record<string, unknown>) {
 export function updateAgentFull(id: string, payload: Record<string, unknown>) {
   return api.patch<{ data: Record<string, unknown> }>(`agents/${id}`, payload)
 }
+
+// ── Agent VAT + notes ───────────────────────────────────────────────────────
+export interface AgentNoteRow {
+  id: string
+  note: string
+  kind: string
+  createdAt: string | null
+}
+export function fetchAgentNotes(agentId: string) {
+  return api.get<{ data: AgentNoteRow[] }>(`agents/${agentId}/notes`)
+}
+export function createAgentNote(agentId: string, note: string, kind = 'general') {
+  return api.post<{ data: { id: string } }>(`agents/${agentId}/notes`, { note, kind })
+}
