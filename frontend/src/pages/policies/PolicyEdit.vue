@@ -9,6 +9,7 @@ import { useI18n } from 'vue-i18n'
 import { fetchPolicyPayments, deletePolicyPayment, type PolicyPaymentRow } from '../../api/policies'
 import PolicyPaymentModal, { type ExpectedPremium } from './PolicyPaymentModal.vue'
 import { fmtDate } from '../../util/dateFormat'
+import { calcInstallment, installmentModeLabel, type InstallmentMode } from '../../utils/installmentCalc'
 import { fetchPolicy, patchPolicySection, syncPolicyRiders, syncPolicyBeneficiaries,
   uploadPolicyDocument, deletePolicyDocument, recomputeCommission,
   type PolicySection, type RiderInput, type BeneficiaryInput } from '../../api/policies'
@@ -72,6 +73,58 @@ const typeOfPaidOptions = computed(() => {
 // ── Recorded payments (wired to the payments API) ─────────────────────────
 const showPaymentModal = ref(false)
 const payments = ref<PolicyPaymentRow[]>([])
+
+// ── Installment schedule (per the installment spec) ────────────────────────
+// Computed from the policy's mode / main premium / พ.ร.บ. / งวด count. Shown on
+// the payment history whenever an installment mode is set, even before any
+// payment, so the operator sees the plan + progress.
+const installmentSchedule = computed(() => {
+  const mode = payment.installmentMode as InstallmentMode
+  const count = Math.floor(Number(payment.installmentTerm) || 0)
+  const main = Number(premium.mainPremium) || 0
+  if (!(['A', 'B', 'C'] as const).includes(mode) || count < 2 || count > 10 || main <= 0) {
+    return null
+  }
+  try {
+    return calcInstallment(main, Number(premium.compulsoryPremium) || 0, count, mode)
+  } catch {
+    return null
+  }
+})
+
+// Match recorded payments to งวด in date order: the i-th recorded payment
+// covers งวด i+1 of the plan. Returns per-งวด { due, paid, paidAmount }.
+const scheduleRows = computed(() => {
+  const sched = installmentSchedule.value
+  if (!sched) return []
+  const paidOrdered = [...payments.value].sort((a, b) => a.paymentDate.localeCompare(b.paymentDate))
+  return sched.installments.map((line, i) => {
+    const pay = paidOrdered[i]
+    return {
+      index: line.index,
+      due: line.amount,
+      paid: !!pay,
+      paidAmount: pay ? pay.amount : null,
+      paidDate: pay ? pay.paymentDate : null,
+    }
+  })
+})
+
+// งวด label for a recorded payment (by its position in date order).
+const paymentGuadLabel = computed<Record<string, string>>(() => {
+  const sched = installmentSchedule.value
+  if (!sched) return {}
+  const ordered = [...payments.value].sort((a, b) => a.paymentDate.localeCompare(b.paymentDate))
+  const out: Record<string, string> = {}
+  ordered.forEach((p, i) => {
+    if (i < sched.installmentCount) out[p.id] = `งวด ${i + 1}/${sched.installmentCount}`
+  })
+  return out
+})
+
+const scheduleTotalDue = computed(() => (installmentSchedule.value?.totalCustomerPayment ?? 0))
+const schedulePaidTotal = computed(() => payments.value.reduce((s, p) => s + (p.amount || 0), 0))
+const money2 = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const deletingPayment = ref<string | null>(null)
 
 async function loadPayments(): Promise<void> {
@@ -741,6 +794,51 @@ async function removeDoc(id: string): Promise<void> {
           </div>
         </div>
 
+        <!-- Installment plan (per the spec) — งวด schedule + paid progress. -->
+        <div v-if="installmentSchedule" class="mt-5 rounded-lg border border-indigo-200 bg-indigo-50/30 p-3">
+          <div class="mb-2 flex items-center justify-between">
+            <div class="text-xs font-medium text-indigo-800">
+              แผนการผ่อน · {{ installmentModeLabel(installmentSchedule.mode) }} · {{ installmentSchedule.installmentCount }} งวด
+            </div>
+            <div class="text-[11px] text-slate-500">
+              ชำระแล้ว <span class="font-medium text-emerald-700">฿{{ money2(schedulePaidTotal) }}</span>
+              / ฿{{ money2(scheduleTotalDue) }}
+            </div>
+          </div>
+          <div class="overflow-hidden rounded border border-indigo-100 bg-white">
+            <table class="min-w-full text-xs">
+              <thead class="bg-indigo-50/60 text-[10px] text-indigo-700">
+                <tr>
+                  <th class="px-3 py-1.5 text-left">งวด</th>
+                  <th class="px-3 py-1.5 text-right">ยอดที่ต้องชำระ</th>
+                  <th class="px-3 py-1.5 text-right">ชำระจริง</th>
+                  <th class="px-3 py-1.5 text-left">สถานะ</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="r in scheduleRows" :key="r.index" :class="r.paid ? '' : 'bg-white'">
+                  <td class="px-3 py-1.5 text-slate-700">งวด {{ r.index }}</td>
+                  <td class="px-3 py-1.5 text-right font-mono text-slate-700">฿{{ money2(r.due) }}</td>
+                  <td class="px-3 py-1.5 text-right font-mono" :class="r.paid ? 'text-slate-700' : 'text-slate-300'">
+                    {{ r.paid ? '฿' + money2(r.paidAmount || 0) : '—' }}
+                  </td>
+                  <td class="px-3 py-1.5">
+                    <span v-if="r.paid" class="inline-flex items-center gap-1 rounded bg-emerald-50 px-1.5 py-0.5 text-[10px] text-emerald-700">
+                      <i class="pi pi-check text-[9px]" /> ชำระแล้ว
+                    </span>
+                    <span v-else class="inline-flex items-center gap-1 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">
+                      รอชำระ
+                    </span>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="mt-1 text-[10px] text-slate-400">
+            <i class="pi pi-info-circle text-[9px]" /> พ.ร.บ. + ค่าธรรมเนียม/ดอกเบี้ย (ถ้ามี) รวมอยู่ในงวดแรก · ยอดปัดขึ้นต่องวด
+          </p>
+        </div>
+
         <!-- Recorded payments -->
         <div class="mt-5">
           <div class="text-xs font-medium text-slate-500 mb-2">ประวัติการชำระเงิน</div>
@@ -749,6 +847,7 @@ async function removeDoc(id: string): Promise<void> {
               <thead class="bg-slate-50 text-xs text-slate-500">
                 <tr>
                   <th class="px-3 py-2 text-left">วันที่</th>
+                  <th v-if="installmentSchedule" class="px-3 py-2 text-left">งวด</th>
                   <th class="px-3 py-2 text-right">จำนวนเงิน</th>
                   <th class="px-3 py-2 text-right">เบี้ยสุทธิ</th>
                   <th class="px-3 py-2 text-right">อากร</th>
@@ -761,6 +860,7 @@ async function removeDoc(id: string): Promise<void> {
               <tbody class="divide-y divide-slate-100">
                 <tr v-for="pay in payments" :key="pay.id">
                   <td class="px-3 py-2">{{ fmtDate(pay.paymentDate) }}</td>
+                  <td v-if="installmentSchedule" class="px-3 py-2 text-slate-500">{{ paymentGuadLabel[pay.id] || '—' }}</td>
                   <td class="px-3 py-2 text-right font-mono">{{ pay.amount.toLocaleString('th-TH', { minimumFractionDigits: 2 }) }}</td>
                   <td class="px-3 py-2 text-right font-mono text-slate-500">{{ pay.netAmount != null ? pay.netAmount.toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '—' }}</td>
                   <td class="px-3 py-2 text-right font-mono text-slate-500">{{ pay.dutyAmount != null ? pay.dutyAmount.toLocaleString('th-TH', { minimumFractionDigits: 2 }) : '—' }}</td>
