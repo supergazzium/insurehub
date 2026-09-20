@@ -65,10 +65,9 @@ function pick(c: FollowUpCategory): void { category.value = c; load() }
 function reload(): void { window.clearTimeout(debounce); debounce = window.setTimeout(load, 250) }
 
 function openPolicy(r: FollowUpRow): void {
-  // Follow-ups are about fixing a field (policy no, delivery date, Free
-  // Look date, commission…), so open the sectioned editor which holds them
-  // all. There is no bare /policies/:id route.
-  router.push({ name: 'policy-edit', params: { id: r.policyId } })
+  // Open the full-page wizard/editor (same as the policy list). It hydrates
+  // from GET /policies/{id} and holds every field a follow-up needs to fix.
+  router.push({ name: 'policy-edit-draft', params: { id: r.policyId } })
 }
 
 onMounted(load)

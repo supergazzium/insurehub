@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // C-14 (v2 layout) — Policy Application Wizard as a full-page route.
 //
-// Sections (rendered as vertically-stacked cards, matching PolicyEdit.vue):
+// Sections (rendered as vertically-stacked cards):
 //   1. Party           — customer + writing agent + new/renew + refAppToId
 //   2. Product + Cov   — insureType → carrier → product; effective + duration chip
 //   3. Risk (dynamic)  — RiskFieldRenderer against product.productType.riskSchema
@@ -78,7 +78,7 @@ const { t } = useI18n()
 // ── State ────────────────────────────────────────────────────────────────
 
 // Full-page layout — no step gating. All 5 sections visible at once,
-// matching PolicyEdit.vue. `draftId` still tracks the persisted row.
+// `draftId` tracks the persisted row.
 const draftId = ref<string | null>(props.id ?? null)
 // Status of the loaded policy (edit mode). Null in create mode. When the
 // policy is past 'draft', autosave must use the general PATCH /policies/{id}
@@ -256,6 +256,8 @@ const form = reactive({
   delivered: false as boolean,
   mailingDate: '' as string,
   mailingNote: '' as string,
+  // Free Look date — life products only.
+  freelookEndDate: '' as string,
 })
 
 // Touched flags for auto-fills (mirrors legacy wizard L556-681).
@@ -1152,6 +1154,8 @@ function buildDraftPayload(): Record<string, unknown> {
     // การจัดส่ง (delivered to customer) — reuses the mailing_* columns.
     mailingDate: form.delivered ? (form.mailingDate || null) : null,
     mailingNote: form.mailingNote || null,
+    // Free Look date (life products). Empty until recorded.
+    freelookEndDate: form.freelookEndDate || null,
   }
 
   // Split the risk value bag into top-level columns + risk_data.<kind>.
@@ -1351,6 +1355,8 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
     const mailingDate = renewMode ? '' : String(p.mailingDate ?? '')
     form.mailingDate = mailingDate
     form.delivered = !!mailingDate
+    // Free Look date — cleared on renewal (fresh lifecycle).
+    form.freelookEndDate = renewMode ? '' : String(p.freelookEndDate ?? '')
     form.mailingNote = renewMode ? '' : String(p.mailingNote ?? '')
 
     // สลักหลังเบี้ยเพิ่ม — outstanding endorsement premium (cleared on renewal,
@@ -2292,6 +2298,16 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
                 class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
             </FormField>
           </div>
+        </div>
+
+        <!-- Free Look date — life products only -->
+        <div v-if="kind === 'life'" class="rounded-lg border border-slate-200 p-4">
+          <span class="font-medium text-sm text-slate-800">{{ t('policyCreate.fulfilment.freelook') }}</span>
+          <p class="text-xs text-slate-500 mt-0.5 mb-3">{{ t('policyCreate.fulfilment.freelookHint') }}</p>
+          <FormField :label="t('policyCreate.fulfilment.freelookDate')">
+            <input type="date" v-model="form.freelookEndDate"
+              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          </FormField>
         </div>
       </div>
     </section>

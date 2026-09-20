@@ -32,7 +32,7 @@ async function convert(): Promise<void> {
   try {
     const res = await convertQuoteToApplication(quote.value.id)
     quote.value = res.data
-    void router.push({ name: 'policy-edit', params: { id: res.data.id } })
+    void router.push({ name: 'policy-edit-draft', params: { id: res.data.id } })
   } catch (e: unknown) {
     error.value = e instanceof ApiError ? e.message : 'Convert failed.'
   } finally {

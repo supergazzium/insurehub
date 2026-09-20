@@ -164,7 +164,7 @@ function statusBadge(s: string): string {
             @click="showIssueModal = true">
             <i class="pi pi-check-circle text-[10px]" /> {{ $t('policyIssue.open') }}
           </button>
-          <RouterLink v-if="policy" :to="{ name: 'policy-edit', params: { id: policy.id } }"
+          <RouterLink v-if="policy" :to="{ name: 'policy-edit-draft', params: { id: policy.id } }"
             class="px-3 py-1.5 rounded-md bg-brand-600 text-white text-xs hover:bg-brand-700 flex items-center gap-1.5">
             <i class="pi pi-pencil text-[10px]" /> {{ $t('policyEdit.openFullEditor') }}
           </RouterLink>

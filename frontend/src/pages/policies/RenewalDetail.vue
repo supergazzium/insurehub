@@ -185,7 +185,7 @@ function goRenew() {
   router.push({ name: 'policy-new', query: { renewFrom: policyId.value } })
 }
 function openFullEdit() {
-  const href = router.resolve({ name: 'policy-edit', params: { id: policyId.value } }).href
+  const href = router.resolve({ name: 'policy-edit-draft', params: { id: policyId.value } }).href
   window.open(href, '_blank', 'noopener')
 }
 

@@ -31,7 +31,6 @@ import CancellationReport from '../pages/reports/CancellationReport.vue'
 import QuoteList from '../pages/quotes/QuoteList.vue'
 import QuoteEdit from '../pages/quotes/QuoteEdit.vue'
 import QuoteDetail from '../pages/quotes/QuoteDetail.vue'
-import PolicyEdit from '../pages/policies/PolicyEdit.vue'
 import MfaSetup from '../pages/auth/MfaSetup.vue'
 import AccessControl from '../pages/admin/AccessControl.vue'
 import TenantSettings from '../pages/settings/TenantSettings.vue'
@@ -188,7 +187,6 @@ const routes: RouteRecordRaw[] = [
       { path: 'quotes/:id/edit', name: 'quote-edit', component: QuoteEdit },
       { path: 'quotes/:id', name: 'quote-detail', component: QuoteDetail },
       // Phase 6 — Policy sectioned edit
-      { path: 'policies/:id/edit', name: 'policy-edit', component: PolicyEdit, meta: { moduleKey: 'policies' } },
       // C-14/C-18 — 5-section Application Wizard (replaces the modal).
       // `new` creates a fresh draft; `edit-draft/:id` resumes an existing
       // draft with hydrated form state. Same PolicyApplicationWizard.vue
