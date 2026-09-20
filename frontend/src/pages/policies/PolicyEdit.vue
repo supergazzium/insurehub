@@ -40,6 +40,7 @@ const dates = reactive({
   policyEnd: '' as string | null, periodPaidEnd: '' as string | null,
   mailingDate: '' as string | null, appDate: '' as string | null,
   policyYear: 1, actYear: 1, newOrRenew: 'new',
+  freelookActive: false, freelookEndDate: '' as string | null,
 })
 
 // ── Section 3: Premium & tax ──────────────
@@ -229,6 +230,8 @@ function hydrate(p: Record<string, unknown>): void {
   dates.policyYear = n(p.policyYear, 1)
   dates.actYear = n(p.actYear, 1)
   dates.newOrRenew = (p.newOrRenew as string) || 'new'
+  dates.freelookActive = Boolean(p.freelookActive)
+  dates.freelookEndDate = (p.freelookEndDate as string) ?? ''
 
   premium.netPremium = n(p.netPremium)
   premium.mainPremium = n(p.mainPremium)
@@ -664,6 +667,16 @@ async function removeDoc(id: string): Promise<void> {
               <option value="new">new</option>
               <option value="renew">renew</option>
             </select>
+          </div>
+          <div class="flex items-end pb-2">
+            <label class="inline-flex items-center gap-2 text-sm text-slate-700">
+              <input v-model="dates.freelookActive" type="checkbox" class="rounded border-slate-300" />
+              {{ t('policyEdit.f.freelookActive') }}
+            </label>
+          </div>
+          <div>
+            <label class="text-xs text-slate-500 mb-1 block">{{ t('policyEdit.f.freelookEndDate') }}</label>
+            <DateInput v-model="dates.freelookEndDate" :disabled="!dates.freelookActive" />
           </div>
         </div>
       </section>

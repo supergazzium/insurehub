@@ -82,6 +82,7 @@ class PolicyResource extends JsonResource
             'actYear' => (int) $this->act_year,
             'newOrRenew' => $this->new_or_renew,
             'freelookActive' => (bool) $this->freelook_active,
+            'freelookEndDate' => $this->freelook_end_date?->format('Y-m-d') ?? $this->freelook_end_date,
             'status' => $this->status,
             // Original Thai label from insurehub_legacy.lu_policy_status.
             'statusLabel' => $this->legacyStatus?->name_th ?? $this->status,

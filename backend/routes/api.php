@@ -9,6 +9,7 @@ use App\Http\Controllers\Api\AgentCommissionController;
 use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AgentNoteController;
 use App\Http\Controllers\Api\CollectionsController;
+use App\Http\Controllers\Api\FollowUpController;
 use App\Http\Controllers\Api\AgentHierarchyController;
 use App\Http\Controllers\Api\TeamController;
 use App\Http\Controllers\Api\RankPromotionController;
@@ -157,6 +158,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // การติดตามเงิน (payment collections / dunning)
     Route::get('collections', [CollectionsController::class, 'index']);
+    Route::get('follow-ups', [FollowUpController::class, 'index']);
     Route::get('policies/{policy}/reminders', [CollectionsController::class, 'reminders']);
     Route::post('policies/{policy}/reminders', [CollectionsController::class, 'storeReminder']);
 

@@ -206,6 +206,18 @@ export const MODULES: ModuleDef[] = [
       'ทวงเงินตามงวด + บันทึกประวัติการทวง',
     ],
   },
+  {
+    key: 'follow-ups',
+    number: 10,
+    routePath: '/policies/follow-ups',
+    routeName: 'policies-follow-ups',
+    icon: 'pi pi-flag',
+    i18nKey: 'followUps',
+    group: 'business',
+    functions: [
+      'ติดตามงานค้าง แยกตามประเภท (รออนุมัติ / เลขกรมธรรม์ / จัดส่ง / Freelook / ค่าคอม / ยกเลิก)',
+    ],
+  },
   // NOTE: `commission-engine` and `commission-ledger` module entries removed
   // with the MGM rewrite. New MGM-based equivalents will be added when their
   // pages ship (PR-D and later).

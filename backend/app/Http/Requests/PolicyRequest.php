@@ -91,6 +91,7 @@ class PolicyRequest extends FormRequest
             'actYear' => ['sometimes', 'integer', 'min:1'],
             'newOrRenew' => ['sometimes', 'string', 'in:new,renew'],
             'freelookActive' => ['sometimes', 'boolean'],
+            'freelookEndDate' => ['sometimes', 'nullable', 'date'],
             // 7-state model per B1 §1. Legacy codes (quote/application/
             // reinstated) still accepted on READ paths for the shim window;
             // writes go through PolicyEventController which enforces the
@@ -249,6 +250,7 @@ class PolicyRequest extends FormRequest
             'actYear' => 'act_year',
             'newOrRenew' => 'new_or_renew',
             'freelookActive' => 'freelook_active',
+            'freelookEndDate' => 'freelook_end_date',
             'status' => 'status',
             'notes' => 'notes',
             'internalNote' => 'internal_note',

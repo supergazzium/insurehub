@@ -39,6 +39,7 @@ class Policy extends Model
         'payment_date' => 'date',
         'mailing_date' => 'date',
         'freelook_active' => 'boolean',
+        'freelook_end_date' => 'date',
         'vehicle_on_non_motor' => 'boolean',
         // Added 2027-02-15 (C-4). Persistent home for risk-* fields that
         // previously lived as ~30 top-level columns. The writer shim in

@@ -113,6 +113,11 @@ export default {
       short: 'ติดตามเงิน',
       description: 'ติดตามเงินค้างชำระ ทวงตามงวด และบันทึกประวัติการทวง',
     },
+    followUps: {
+      name: 'ติดตามงานค้าง',
+      short: 'งานค้าง',
+      description: 'ติดตามงานค้าง แยกตามประเภท เช่น รออนุมัติ เลขกรมธรรม์ จัดส่ง Freelook ค่าคอม และรายการยกเลิก',
+    },
     commissionEngine: {
       name: 'ระบบคำนวณค่าคอมมิชชั่น',
       short: 'คำนวณค่าคอมฯ',
@@ -1945,6 +1950,8 @@ export default {
       mailingDate: 'วันจัดส่ง', appDate: 'วันสมัคร',
       policyYear: 'ปีที่กรมธรรม์', actYear: 'ปีที่ต่ออายุ',
       newOrRenew: 'ใหม่/ต่ออายุ',
+      freelookActive: 'อยู่ในช่วง Free Look',
+      freelookEndDate: 'วันสิ้นสุด Free Look',
       netPremium: 'เบี้ยสุทธิ', mainPremium: 'เบี้ยหลัก', dutyStamp: 'อากรแสตมป์',
       vat: 'VAT', totalPremiumPaid: 'ยอดชำระรวม', annualPremium: 'เบี้ยรายปี',
       coverage: 'ทุนประกัน', creditCardFee: 'ค่าธรรมเนียมบัตร',

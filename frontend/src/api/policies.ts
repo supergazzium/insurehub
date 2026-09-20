@@ -29,6 +29,7 @@ export interface PolicyListRow {
   issueDate: string | null
   cancelDate: string | null
   freelookActive: boolean
+  freelookEndDate: string | null
   premiumCheck: string
   customerCode: string | null
   customerName: string
