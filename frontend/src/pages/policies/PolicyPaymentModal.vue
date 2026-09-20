@@ -16,6 +16,7 @@ import { computed, reactive, ref, watch } from 'vue'
 import { createPolicyPayments } from '../../api/policies'
 import { ApiError } from '../../api/client'
 import { decomposeByFormula, type PremiumParts, type TaxFormula } from '../../utils/premiumBreakdown'
+import { calcInstallment, INSTALLMENT_MODES, type InstallmentMode, type InstallmentResult } from '../../utils/installmentCalc'
 
 /** Expected (computed) premium numbers passed in from the wizard. */
 export interface ExpectedPremium {
@@ -39,6 +40,12 @@ const props = defineProps<{
   installmentCount?: number
   /** Human label of the payment frequency (รายเดือน / รายปี / …). */
   frequencyLabel?: string
+  /** เบี้ยหลัก (main_premium) — the base for the installment engine. */
+  mainPremium?: number
+  /** พ.ร.บ. (compulsory_premium) — billed on งวด 1 only. */
+  compulsoryPremium?: number
+  /** Saved installment mode A/B/C from the policy; the operator can override. */
+  installmentMode?: string | null
 }>()
 
 // `saved` fires after a successful POST so the parent can refresh.
@@ -46,6 +53,13 @@ const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
 
 const saving = ref(false)
 const saveError = ref<string | null>(null)
+
+// ── Installment engine (per the Insurehub installment spec) ────────────────
+// Mode A/B/C decides who bears fee + interest. Defaults from the policy,
+// overridable here. พ.ร.บ. is billed on งวด 1 only.
+const instMode = ref<InstallmentMode>('A')
+const instCompulsory = ref<number>(0)
+const instCount = ref<number>(2)
 
 // ── Tax formula (สูตร 1-4) for decomposing the ACTUAL paid amount ──────────
 // Inferred default from the policy's own duty/vat structure; operator can pick
@@ -195,12 +209,30 @@ const plannedTotal = computed<number>(() =>
 /** Plan vs total expected: >0 plan exceeds, <0 plan is short of the premium. */
 const planVsExpected = computed<number>(() => round2(plannedTotal.value - expectedAmount.value))
 
-/** Build `n` installment rows with the total expected split evenly across
- *  them (the last row absorbs any rounding remainder so the plan sums exactly
- *  to the expected amount). Each row's ยอดที่ต้องชำระ is prefilled; ยอดชำระจริง
- *  stays blank until the customer pays. */
+// The spec installment result (งวด schedule + agent costs) for the current
+// main premium / พ.ร.บ. / mode / count. Null when inputs are invalid (e.g.
+// count < 2 or no main premium) — the UI then falls back to an even split.
+const installmentResult = computed<InstallmentResult | null>(() => {
+  const main = Number(props.mainPremium) || Number(props.expected.netPremium) || 0
+  const count = Math.floor(instCount.value)
+  if (!(main > 0) || count < 2 || count > 10) return null
+  try {
+    return calcInstallment(main, Number(instCompulsory.value) || 0, count, instMode.value)
+  } catch {
+    return null
+  }
+})
+
+/** Build installment rows from the spec calculator when possible; otherwise
+ *  fall back to an even split of the expected total. Each row's ยอดที่ต้องชำระ
+ *  is the computed งวด amount; ยอดชำระจริง stays blank until the customer pays. */
 function buildInstallmentRows(n: number): PayRow[] {
   const count = Math.max(1, Math.floor(n) || 1)
+  const res = installmentResult.value
+  if (res && res.installmentCount === count) {
+    return res.installments.map((l) => ({ ...blankRow(), expected: l.amount }))
+  }
+  // Fallback: even split (last row absorbs the remainder).
   const total = expectedAmount.value
   const per = round2(total / count)
   const out: PayRow[] = []
@@ -216,7 +248,7 @@ function buildInstallmentRows(n: number): PayRow[] {
 // other modes get one blank row.
 watch(payMode, (mode) => {
   if (mode === 'installment' || mode === 'split') {
-    rows.splice(0, rows.length, ...buildInstallmentRows(props.installmentCount ?? 1))
+    rows.splice(0, rows.length, ...buildInstallmentRows(instCount.value))
   } else {
     rows.splice(0, rows.length, blankRow())
   }
@@ -233,7 +265,12 @@ watch(() => props.open, (v) => {
     payee.value = 'insurehub'
     taxFormula.value = inferFormula()
     saveError.value = null
+    // Seed the installment engine from the policy.
+    const savedMode = (props.installmentMode as InstallmentMode) || 'A'
+    instMode.value = (['A', 'B', 'C'] as const).includes(savedMode) ? savedMode : 'A'
+    instCompulsory.value = Number(props.compulsoryPremium) || 0
     const n = props.installmentCount ?? 1
+    instCount.value = Math.min(10, Math.max(2, n > 1 ? n : 2))
     if (n > 1) {
       payMode.value = 'installment'
       rows.splice(0, rows.length, ...buildInstallmentRows(n))
@@ -241,6 +278,15 @@ watch(() => props.open, (v) => {
       payMode.value = 'full'
       rows.splice(0, rows.length, blankRow())
     }
+  }
+})
+
+// Rebuild the งวด rows whenever the installment inputs change (mode / พ.ร.บ. /
+// count), but only while in a multi-งวด mode so single-payment modes are left
+// alone.
+watch([instMode, instCompulsory, instCount], () => {
+  if (payMode.value === 'installment' || payMode.value === 'split') {
+    rows.splice(0, rows.length, ...buildInstallmentRows(instCount.value))
   }
 })
 
@@ -336,6 +382,48 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
           <span class="text-[10px] text-slate-400">
             <i class="pi pi-info-circle mr-0.5" />สูตร1=อากร0.4%+VAT7% · สูตร2=VAT7% · สูตร3=อากร20 · สูตร4=อากร150
           </span>
+        </div>
+
+        <!-- ── Installment engine controls (per the installment spec) ────── -->
+        <div v-if="isInstallment" class="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
+          <div class="mb-2 text-[11px] font-medium text-indigo-800">คำนวณงวดผ่อน (ตามสูตร Insurehub)</div>
+          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+            <div>
+              <label class="block text-[10px] text-slate-500 mb-0.5">รูปแบบ (Mode)</label>
+              <select v-model="instMode" class="w-full border border-slate-300 rounded-md px-2 py-1 text-xs">
+                <option v-for="m in INSTALLMENT_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
+              </select>
+            </div>
+            <div>
+              <label class="block text-[10px] text-slate-500 mb-0.5">จำนวนงวด (2–10)</label>
+              <input v-model.number="instCount" type="number" min="2" max="10"
+                class="w-full border border-slate-300 rounded-md px-2 py-1 text-xs" />
+            </div>
+            <div>
+              <label class="block text-[10px] text-slate-500 mb-0.5">เบี้ยหลัก (main)</label>
+              <input :value="Number(mainPremium) || expected.netPremium" type="number" readonly
+                class="w-full border border-slate-200 bg-slate-50 rounded-md px-2 py-1 text-xs text-slate-500" />
+            </div>
+            <div>
+              <label class="block text-[10px] text-slate-500 mb-0.5">พ.ร.บ. (งวดแรก)</label>
+              <input v-model.number="instCompulsory" type="number" min="0" step="0.01"
+                class="w-full border border-slate-300 rounded-md px-2 py-1 text-xs" />
+            </div>
+          </div>
+          <p class="mt-1 text-[10px] text-slate-500">
+            {{ INSTALLMENT_MODES.find((m) => m.value === instMode)?.hint }}
+          </p>
+          <!-- Computed schedule summary + agent costs -->
+          <div v-if="installmentResult" class="mt-2 grid grid-cols-2 sm:grid-cols-4 gap-x-4 gap-y-1 border-t border-indigo-100 pt-2 text-[11px]">
+            <span>งวด 1 <span class="float-right tabular-nums font-medium text-slate-800">฿{{ fmt(installmentResult.installments[0].amount) }}</span></span>
+            <span>งวด 2–{{ installmentResult.installmentCount }} <span class="float-right tabular-nums text-slate-800">฿{{ fmt(installmentResult.installments[1]?.amount ?? 0) }}</span></span>
+            <span>Fee ลูกค้า <span class="float-right tabular-nums text-slate-800">฿{{ fmt(installmentResult.customerFee) }}</span></span>
+            <span>ดอกเบี้ยลูกค้า <span class="float-right tabular-nums text-slate-800">฿{{ fmt(installmentResult.customerInterest) }}</span></span>
+            <span class="text-emerald-700">รวมลูกค้าจ่าย <span class="float-right tabular-nums font-medium">฿{{ fmt(installmentResult.totalCustomerPayment) }}</span></span>
+            <span v-if="installmentResult.agentFeeCost > 0" class="text-amber-700">Fee ตัวแทนรับภาระ <span class="float-right tabular-nums">฿{{ fmt(installmentResult.agentFeeCost) }}</span></span>
+            <span v-if="installmentResult.agentInterestCost > 0" class="text-amber-700">ดอกเบี้ยตัวแทนรับภาระ <span class="float-right tabular-nums">฿{{ fmt(installmentResult.agentInterestCost) }}</span></span>
+          </div>
+          <p v-else class="mt-2 text-[10px] text-rose-600">กรอกเบี้ยหลัก &gt; 0 และจำนวนงวด 2–10 เพื่อคำนวณ</p>
         </div>
 
         <!-- Payment rows -->

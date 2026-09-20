@@ -43,7 +43,7 @@ const dates = reactive({
 
 // ── Section 3: Premium & tax ──────────────
 const premium = reactive({
-  netPremium: 0, mainPremium: 0, dutyStamp: 0, vat: 0, totalPremiumPaid: 0,
+  netPremium: 0, mainPremium: 0, dutyStamp: 0, vat: 0, compulsoryPremium: 0, totalPremiumPaid: 0,
   annualPremium: 0, coverage: 0, creditCardFee: 0, discountAmount: 0,
   whtAmt: 0, whtStatus: '', frontEndFee: 0,
 })
@@ -51,7 +51,7 @@ const premium = reactive({
 // ── Section 4: Payment plan ──────────────
 const payment = reactive({
   paymentMethodId: null as number | null, typeOfPaid: '', typeOfPaidNote: '',
-  financeCompany: '', installmentTerm: 0,
+  financeCompany: '', installmentTerm: 0, installmentMode: '' as string,
   firstDueInst: 0, nextDueInst: 0,
   firstDueInstDate: '' as string | null, lastDueInstDate: '' as string | null,
   premiumMode: 'annual', subsidiseFromAgent: 0, subsidiseToFinance: 0,
@@ -181,6 +181,7 @@ function hydrate(p: Record<string, unknown>): void {
   premium.mainPremium = n(p.mainPremium)
   premium.dutyStamp = n(p.dutyStamp)
   premium.vat = n(p.vat)
+  premium.compulsoryPremium = n(p.compulsoryPremium)
   premium.totalPremiumPaid = n(p.totalPremiumPaid)
   premium.annualPremium = n(p.annualPremium)
   premium.coverage = n(p.coverage)
@@ -195,6 +196,7 @@ function hydrate(p: Record<string, unknown>): void {
   payment.typeOfPaidNote = (p.typeOfPaidNote as string) ?? ''
   payment.financeCompany = (p.financeCompany as string) ?? ''
   payment.installmentTerm = n(p.installmentTerm)
+  payment.installmentMode = (p.installmentMode as string) ?? ''
   payment.firstDueInst = n(p.firstDueInst)
   payment.nextDueInst = n(p.nextDueInst)
   payment.firstDueInstDate = (p.firstDueInstDate as string) ?? ''
@@ -1187,6 +1189,9 @@ async function removeDoc(id: string): Promise<void> {
         :expected="expectedPremium"
         :carrier-label="(policy.carrierId as string) || ''"
         :installment-count="payment.installmentTerm || 1"
+        :main-premium="premium.mainPremium"
+        :compulsory-premium="premium.compulsoryPremium"
+        :installment-mode="payment.installmentMode"
         @close="showPaymentModal = false"
         @saved="loadPayments"
       />
