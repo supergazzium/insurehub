@@ -596,7 +596,7 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
       <!-- Footer -->
       <div class="px-5 py-4 border-t border-slate-200 flex items-center justify-between sticky bottom-0 bg-white gap-3">
         <p v-if="saveError" class="text-xs text-rose-600 flex-1"><i class="pi pi-exclamation-circle mr-1" />{{ saveError }}</p>
-        <p v-else-if="!policyId" class="text-[10px] text-slate-400 flex-1"><i class="pi pi-info-circle mr-1" />ตัวอย่างหน้าจอ — บันทึกได้จากหน้าแก้ไขกรมธรรม์</p>
+        <p v-else-if="!policyId" class="text-[10px] text-amber-600 flex-1"><i class="pi pi-info-circle mr-1" />บันทึกร่างกรมธรรม์ก่อน จึงจะบันทึกการชำระเงินได้ (กด “บันทึกร่าง” ที่ด้านบน)</p>
         <p v-else class="text-[10px] text-slate-400 flex-1"><i class="pi pi-info-circle mr-1" />บันทึกแล้วจะคำนวณคอมมิชชั่นให้อัตโนมัติ</p>
         <div class="flex gap-2 shrink-0">
           <button type="button" @click="emit('close')" :disabled="saving" class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 disabled:opacity-50">ปิด</button>

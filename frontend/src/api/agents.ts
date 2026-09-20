@@ -26,6 +26,7 @@ export interface AgentListRow {
   parentAgentName: string
   joinedAt: string | null
   active: boolean
+  approvalStatus?: string
 }
 
 export interface AgentListFilters {
@@ -165,4 +166,28 @@ export function fetchLevelProgressBoard() {
   return api.get<{ data: LevelProgressBoardRow[]; meta: { month: string; agentCount: number } }>(
     'agents/level-progress-board',
   )
+}
+
+
+// ── Agent management: approve / reject / deactivate / pending (admin) ────────
+export function fetchPendingAgents() {
+  return api.get<{ data: AgentListRow[] }>('admin/agents/pending')
+}
+export function approveAgent(id: string) {
+  return api.post<{ message: string }>(`admin/agents/${id}/approve`, {})
+}
+export function rejectAgent(id: string, note: string) {
+  return api.post<{ message: string }>(`admin/agents/${id}/reject`, { note })
+}
+/** Activate / deactivate via the standard agent PATCH. */
+export function setAgentActive(id: string, active: boolean) {
+  return api.patch<{ data: Record<string, unknown> }>(`agents/${id}`, { active })
+}
+/** Full create — POST /agents (agentCode required). */
+export function createAgentFull(payload: Record<string, unknown>) {
+  return api.post<{ data: Record<string, unknown> }>('agents', payload)
+}
+/** Full update — PATCH /agents/{id}. */
+export function updateAgentFull(id: string, payload: Record<string, unknown>) {
+  return api.patch<{ data: Record<string, unknown> }>(`agents/${id}`, payload)
 }

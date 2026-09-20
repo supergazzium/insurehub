@@ -1187,6 +1187,17 @@ function collectSubmitProblems(): string[] {
 
 // ── Action buttons ────────────────────────────────────────────────────────
 
+/** Open the payment modal — ensure a draft exists first so the payment can
+ *  actually be saved (the modal needs a policy id). Auto-saves a draft when
+ *  none exists yet. */
+async function openPaymentModal(): Promise<void> {
+  if (!draftId.value) {
+    if (!form.customerId) return
+    await saveDraftNow()
+  }
+  showPaymentModal.value = true
+}
+
 async function saveDraftNow(): Promise<void> {
   // Ensure any pending autosave writes first, then acknowledge with a
   // toast; stay on the page so the operator can keep editing.
@@ -2167,8 +2178,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <h2 class="font-semibold text-slate-900">การชำระเงิน</h2>
           <p class="text-xs text-slate-500 mt-0.5">บันทึกการชำระเงินจากลูกค้า — จ่ายเต็ม / หักคอมมิสชั่น / มีส่วนลด / ผ่อน</p>
         </div>
-        <button type="button" @click="showPaymentModal = true"
-          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5">
+        <button type="button" @click="openPaymentModal" :disabled="!form.customerId"
+          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1.5">
           <i class="pi pi-wallet text-xs" /> บันทึกการชำระเงิน
         </button>
       </div>
@@ -2298,6 +2309,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
          ผ่อน rows; premiumMode label shown as the plan. -->
     <PolicyPaymentModal
       :open="showPaymentModal"
+      :policy-id="draftId"
       :expected="expectedPremium"
       :carrier-label="carrierLabel"
       :installment-count="Number(form.installmentCount) || 1"

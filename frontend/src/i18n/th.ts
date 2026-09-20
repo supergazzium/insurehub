@@ -669,6 +669,7 @@ export default {
   agents: {
     tabs: {
       list: 'รายการตัวแทน',
+      manage: 'จัดการตัวแทน',
       hierarchy: 'โครงสร้างสายงาน',
       orgchart: 'ผังสายงาน',
       levelprogress: 'ใกล้เลื่อนระดับ',

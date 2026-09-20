@@ -42,6 +42,7 @@ class AgentListResource extends JsonResource
             'parentAgentName' => trim(($this->parent_agent_first_name ?? '') . ' ' . ($this->parent_agent_last_name ?? '')),
             'joinedAt' => $this->joined_at,
             'active' => (bool) $this->active,
+            'approvalStatus' => $this->approval_status ?? 'approved',
         ];
     }
 }
