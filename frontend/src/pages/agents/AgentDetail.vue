@@ -2,8 +2,8 @@
 import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
-  fetchAgent, fetchTeams, fetchRanks, updateAgentHierarchy, fetchRankPromotions,
-  type TeamRow, type RankRow, type RankPromotionRow,
+  fetchAgent, fetchTeams, fetchRanks, updateAgentHierarchy, fetchRankPromotions, fetchLevelProgress,
+  type TeamRow, type RankRow, type RankPromotionRow, type LevelProgress,
 } from '../../api/agents'
 import { ApiError } from '../../api/client'
 import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
@@ -19,6 +19,7 @@ const agent = ref<Record<string, unknown> | null>(null)
 const teams = ref<TeamRow[]>([])
 const ranks = ref<RankRow[]>([])
 const promotions = ref<RankPromotionRow[]>([])
+const progress = ref<LevelProgress | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 const saving = ref(false)
@@ -52,26 +53,23 @@ const levelOptions = computed<SearchOption[]>(() => [
   })),
 ])
 
-const currentRank = computed(() => ranks.value.find((r) => r.levelKey === form.value.level) ?? null)
-const nextRank = computed(() => {
-  if (!currentRank.value) return ranks.value[0] ?? null
-  return ranks.value.find((r) => r.level === currentRank.value!.level + 1) ?? null
-})
 
 async function load(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const [a, t, r, p] = await Promise.all([
+    const [a, t, r, p, prog] = await Promise.all([
       fetchAgent(agentId.value),
       fetchTeams(),
       fetchRanks(),
       fetchRankPromotions('all').catch(() => ({ data: [] as RankPromotionRow[], meta: { pendingCount: 0 } })),
+      fetchLevelProgress(agentId.value).catch(() => ({ data: null as LevelProgress | null })),
     ])
     agent.value = a.data
     teams.value = t.data
     ranks.value = r.data
     promotions.value = p.data.filter((x) => x.agentId === agentId.value)
+    progress.value = prog.data
     form.value = {
       teamId: s('teamId'),
       parentAgentId: s('parentAgentId'),
@@ -191,16 +189,38 @@ onMounted(load)
 
         <!-- Level progress -->
         <div class="mb-4 rounded-lg border border-slate-200 bg-white p-4">
-          <h2 class="mb-2 text-sm font-semibold text-slate-700">เป้าหมายระดับถัดไป</h2>
-          <div v-if="nextRank" class="text-xs text-slate-600">
-            เพื่อเลื่อนสู่ <span class="font-medium">{{ nextRank.nameTh }}</span> ต้องมียอดสะสม 3 เดือน
-            <span class="font-medium">{{ money(nextRank.threeMonthAccumTarget) }}</span> บาท
-            <span v-if="nextRank.licenseRequired" class="text-rose-600"> · ต้องมีใบอนุญาต</span>
+          <h2 class="mb-2 text-sm font-semibold text-slate-700">ความคืบหน้าสู่ระดับถัดไป</h2>
+          <template v-if="progress && progress.nextLevel !== null">
+            <div class="mb-1 flex items-baseline justify-between text-xs">
+              <span class="text-slate-600">
+                <span class="font-medium">{{ progress.currentRankLabel ?? ('ระดับ ' + progress.currentLevel) }}</span>
+                <i class="pi pi-arrow-right mx-1 text-[9px] text-slate-400" />
+                <span class="font-medium text-sky-700">{{ progress.nextRankLabel }}</span>
+              </span>
+              <span class="font-semibold text-sky-700">{{ progress.progressPct }}%</span>
+            </div>
+            <div class="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div class="h-full rounded-full bg-gradient-to-r from-sky-400 to-sky-600 transition-all"
+                :style="{ width: progress.progressPct + '%' }" />
+            </div>
+            <div class="mt-1.5 flex items-center justify-between text-[11px] text-slate-500">
+              <span>ยอดสะสม 3 เดือน ฿{{ money(progress.currentVolume) }}</span>
+              <span>เป้า ฿{{ money(progress.target) }}</span>
+            </div>
+            <p v-if="progress.remaining > 0" class="mt-1 text-[11px] text-amber-600">
+              เหลืออีก ฿{{ money(progress.remaining) }} เพื่อเลื่อนระดับ
+            </p>
+            <p v-if="progress.licenseBlocked" class="mt-1 text-[11px] text-rose-600">
+              <i class="pi pi-exclamation-triangle text-[9px]" /> ระดับนี้ต้องมีใบอนุญาต — ตัวแทนยังไม่มีใบอนุญาต
+            </p>
             <p class="mt-1 text-[10px] text-slate-400">
               ระบบจะเสนอเลื่อนระดับอัตโนมัติเมื่อยอดถึงเป้า แต่ต้องได้รับการอนุมัติจากผู้ดูแลก่อน
             </p>
-          </div>
-          <p v-else class="text-xs text-slate-400">อยู่ที่ระดับสูงสุดแล้ว</p>
+          </template>
+          <p v-else-if="progress && progress.nextLevel === null" class="text-xs text-emerald-600">
+            <i class="pi pi-check-circle text-[10px]" /> อยู่ที่ระดับสูงสุดแล้ว
+          </p>
+          <p v-else class="text-xs text-slate-400">ยังไม่มีข้อมูลยอดขาย</p>
         </div>
 
         <!-- Promotion history for this agent -->

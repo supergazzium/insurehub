@@ -10,6 +10,7 @@ const tabs = [
   { name: 'agents-hierarchy', to: '/agents/hierarchy', i18n: 'agents.tabs.hierarchy', icon: 'pi pi-sitemap' },
   { name: 'agents-org-chart', to: '/agents/org-chart', i18n: 'agents.tabs.orgchart', icon: 'pi pi-share-alt' },
   { name: 'agents-recruitment', to: '/agents/recruitment', i18n: 'agents.tabs.recruitment', icon: 'pi pi-share-alt' },
+  { name: 'agents-level-progress', to: '/agents/level-progress', i18n: 'agents.tabs.levelprogress', icon: 'pi pi-chart-line' },
 ]
 
 // Live pending-promotion count for the approvals tab badge.

@@ -137,3 +137,32 @@ export function approveRankPromotion(id: string) {
 export function rejectRankPromotion(id: string, note?: string) {
   return api.post<{ data: { id: string; status: PromotionStatus } }>(`rank-promotions/${id}/reject`, { note })
 }
+
+// ── Level progress (Phase 4) ────────────────────────────────────────────────
+export interface LevelProgress {
+  month?: string
+  currentLevel: number
+  currentRankLabel: string | null
+  nextLevel: number | null
+  nextRankLabel: string | null
+  currentVolume: number
+  target: number
+  progressPct: number
+  remaining: number
+  nextRequiresLicense: boolean
+  licenseBlocked: boolean
+}
+export function fetchLevelProgress(agentId: string) {
+  return api.get<{ data: LevelProgress }>(`agents/${agentId}/level-progress`)
+}
+
+export interface LevelProgressBoardRow extends LevelProgress {
+  agentId: string
+  agentCode: string | null
+  agentName: string
+}
+export function fetchLevelProgressBoard() {
+  return api.get<{ data: LevelProgressBoardRow[]; meta: { month: string; agentCount: number } }>(
+    'agents/level-progress-board',
+  )
+}

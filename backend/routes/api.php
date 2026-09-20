@@ -11,6 +11,7 @@ use App\Http\Controllers\Api\AgentHierarchyController;
 use App\Http\Controllers\Api\TeamController;
 use App\Http\Controllers\Api\RankPromotionController;
 use App\Http\Controllers\Api\RankController;
+use App\Http\Controllers\Api\LevelProgressController;
 use App\Http\Controllers\Api\AuthController;
 use App\Http\Controllers\Api\CarrierBankAccountController;
 use App\Http\Controllers\Api\CarrierContactController;
@@ -149,10 +150,12 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // Business entities — REST resource routes.
     Route::get('agents/hierarchy-rollup', [AgentHierarchyController::class, 'rollup']);
+    Route::get('agents/level-progress-board', [LevelProgressController::class, 'board']);
     Route::apiResource('agents', AgentController::class);
 
     // สายงาน (agent hierarchy) + level management + promotion approval queue
     Route::patch('agents/{agent}/hierarchy', [AgentHierarchyController::class, 'update']);
+    Route::get('agents/{agent}/level-progress', [LevelProgressController::class, 'show']);
     Route::get('teams', [TeamController::class, 'index']);
     Route::post('teams', [TeamController::class, 'store']);
     Route::get('ranks', [RankController::class, 'index']);

@@ -666,6 +666,7 @@ export default {
       list: 'รายการตัวแทน',
       hierarchy: 'โครงสร้างสายงาน',
       orgchart: 'ผังสายงาน',
+      levelprogress: 'ใกล้เลื่อนระดับ',
       recruitment: 'การรับสมัคร',
     },
     list: {

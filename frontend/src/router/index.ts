@@ -146,6 +146,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'agents/org-chart', name: 'agents-org-chart', component: () => import('../pages/agents/AgentOrgChart.vue'), meta: { moduleKey: 'agents' } },
       { path: 'agents/recruitment', name: 'agents-recruitment', component: AgentRecruitment, meta: { moduleKey: 'agents' } },
       { path: 'agents/promotions', name: 'agents-promotions', component: () => import('../pages/agents/PromotionApprovals.vue'), meta: { moduleKey: 'agents' } },
+      { path: 'agents/level-progress', name: 'agents-level-progress', component: () => import('../pages/agents/LevelProgressBoard.vue'), meta: { moduleKey: 'agents' } },
       { path: 'agents/:id', name: 'agent-detail', component: () => import('../pages/agents/AgentDetail.vue'), meta: { moduleKey: 'agents' } },
       { path: 'customers', name: 'customers', component: CustomerList, meta: { moduleKey: 'customers' } },
       { path: 'customers/referrals', name: 'customers-referrals', component: CustomerReferral, meta: { moduleKey: 'customers' } },
