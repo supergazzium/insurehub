@@ -74,17 +74,17 @@ class CollectionsController extends Controller
             $compulsory = (float) ($r->compulsory_premium ?? 0);
             // Total owed = main premium + พ.ร.บ.
             $totalDue = round($main + $compulsory, 2);
-            // Amount already paid = the imported "paid so far" figure
-            // (total_premium_paid, from the legacy system) PLUS any payments
-            // recorded through the app (policy_payments). For legacy policies
-            // with no recorded rows this is just the imported figure.
-            //
-            // FORWARD DIRECTION: policy_payments is the auditable source of
-            // truth (one verifiable record per payment). As policies migrate to
-            // app-recorded payments, the total_premium_paid term becomes the
-            // legacy-only fallback and can be dropped per policy once its full
-            // history is captured as policy_payments rows.
-            $paid = round((float) ($r->total_premium_paid ?? 0) + (float) $r->paid_total, 2);
+            // Amount already paid = the sum of recorded policy_payments rows —
+            // the auditable source of truth (one verifiable record per payment).
+            // Legacy imported balances were backfilled into policy_payments
+            // (method 'legacyImport') by `payments:backfill-legacy`, so this
+            // covers old and new alike. total_premium_paid is only a fallback if
+            // a policy somehow has no rows at all.
+            $paid = (float) $r->paid_total;
+            if ($paid <= 0 && (float) ($r->total_premium_paid ?? 0) > 0) {
+                $paid = (float) $r->total_premium_paid;
+            }
+            $paid = round($paid, 2);
             // If we somehow have no main premium, treat the paid figure as the
             // whole thing (nothing to chase).
             if ($totalDue <= 0) {

@@ -144,7 +144,7 @@ async function removePayment(id: string): Promise<void> {
   } finally { deletingPayment.value = null }
 }
 function payMethodLabel(m: string): string {
-  return { bankTransfer: 'โอนเงิน', creditCard: 'บัตรเครดิต', cash: 'เงินสด', cheque: 'เช็ค', directDebit: 'หักบัญชี' }[m] ?? m
+  return { bankTransfer: 'โอนเงิน', creditCard: 'บัตรเครดิต', cash: 'เงินสด', cheque: 'เช็ค', directDebit: 'หักบัญชี', legacyImport: 'ข้อมูลเดิม (นำเข้า)' }[m] ?? m
 }
 
 // Expected-premium block the payment modal reads (from the current premium form).
