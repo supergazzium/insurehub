@@ -52,6 +52,10 @@ class PolicyPaymentController extends ApiController
         $data = $request->validate([
             'payMode' => ['sometimes', 'nullable', 'string', 'in:full,less_commission,with_discount,split,installment'],
             'payee' => ['sometimes', 'nullable', 'string', 'in:insurehub,carrier'],
+            // Installment engine (per spec) — batch-level mode + agent costs.
+            'installmentMode' => ['sometimes', 'nullable', 'string', 'in:A,B,C'],
+            'agentFeeCost' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'agentInterestCost' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'payments' => ['required', 'array', 'min:1'],
             'payments.*.paymentDate' => ['required', 'date'],
             'payments.*.amount' => ['required', 'numeric', 'min:0'],
@@ -106,6 +110,24 @@ class PolicyPaymentController extends ApiController
             // Flip issued → active once any premium is recorded.
             if ($policy->status === 'issued') {
                 $policy->update(['status' => 'active']);
+            }
+
+            // Installment engine (spec §10): persist the chosen mode on the
+            // policy and book the cost the AGENT bears (fee/interest) to
+            // commission settlement as a negative-amount ledger row. Anchored
+            // on the batch's first payment so it books exactly once.
+            $instMode = $data['installmentMode'] ?? null;
+            if ($instMode !== null && $rows->isNotEmpty()) {
+                if ($policy->installment_mode !== $instMode) {
+                    $policy->update(['installment_mode' => $instMode]);
+                }
+                app(\App\Services\Commission\InstallmentAgentCost::class)->record(
+                    $policy,
+                    $rows->first(),
+                    $instMode,
+                    (float) ($data['agentFeeCost'] ?? 0),
+                    (float) ($data['agentInterestCost'] ?? 0),
+                );
             }
 
             return $rows;

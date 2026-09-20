@@ -29,6 +29,10 @@ class CommissionLedger extends Model
 
     public const TYPE_BREAKOFF_OVERRIDE = 'BREAKOFF_OVERRIDE';
 
+    /** Installment cost the AGENT bears (fee / interest) — an agent expense,
+     *  stored as a NEGATIVE amount so settlement nets it against payouts. */
+    public const TYPE_INSTALLMENT_AGENT_COST = 'INSTALLMENT_AGENT_COST';
+
     public const STATUS_UNSETTLED = 'unsettled';
 
     public const STATUS_SETTLED = 'settled';
@@ -38,6 +42,8 @@ class CommissionLedger extends Model
     public const PAYER_INSURER = 'INSURER';
 
     public const PAYER_BROKER = 'BROKER';
+
+    public const PAYER_AGENT = 'AGENT';
 
     public function tenant(): BelongsTo
     {

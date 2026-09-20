@@ -89,9 +89,18 @@ function breakdownOf(amount: number | null | undefined): PremiumParts {
 /** Persist the entered rows (those with a real amount) as a payment batch. */
 async function submitPayments(): Promise<void> {
   if (!props.policyId) { emit('close'); return } // preview-only
+  const res = installmentResult.value
   const payload = {
     payMode: payMode.value,
     payee: payee.value,
+    // Installment engine (spec): send the mode + agent costs so the backend can
+    // book the agent-borne cost to commission settlement. Only when in a
+    // multi-งวด mode with a valid computed schedule.
+    ...(isInstallment.value && res ? {
+      installmentMode: res.mode,
+      agentFeeCost: res.agentFeeCost,
+      agentInterestCost: res.agentInterestCost,
+    } : {}),
     payments: rows
       .filter((r) => r.amount !== null && r.amount !== undefined && r.date)
       .map((r) => {
