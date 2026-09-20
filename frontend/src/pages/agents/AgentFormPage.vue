@@ -10,14 +10,16 @@ import SearchSelect, { type SearchOption } from '../../components/SearchSelect.v
 import AgentsSubnav from './AgentsSubnav.vue'
 import {
   fetchAgent, createAgentFull, updateAgentFull, fetchTeams, fetchRanks,
-  type TeamRow, type RankRow,
+  fetchLevelProgress, fetchRankPromotions, approveAgent, rejectAgent, setAgentActive,
+  type TeamRow, type RankRow, type LevelProgress, type RankPromotionRow,
 } from '../../api/agents'
+import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
 import { toIsoDate } from '../../util/dateFormat'
 
 const route = useRoute()
 const router = useRouter()
-const editId = computed(() => (route.name === 'agent-edit-info' ? String(route.params.id) : null))
+const editId = computed(() => (route.name === 'agent-detail' || route.name === 'agent-edit-info' ? String(route.params.id) : null))
 const isEdit = computed(() => editId.value !== null)
 
 const loading = ref(false)
@@ -25,6 +27,12 @@ const saving = ref(false)
 const error = ref<string | null>(null)
 const teams = ref<TeamRow[]>([])
 const ranks = ref<RankRow[]>([])
+const progress = ref<LevelProgress | null>(null)
+const promotions = ref<RankPromotionRow[]>([])
+const approvalStatus = ref<string>('approved')
+const busy = ref(false)
+const money = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 0 })
+const agentNameOrCode = computed(() => `${form.firstName} ${form.lastName}`.trim() || form.agentCode)
 
 const form = reactive({
   agentCode: '',
@@ -85,6 +93,14 @@ async function load(): Promise<void> {
       s('teamId', d.teamId); s('parentAgentId', d.parentAgentId); s('level', d.level)
       s('joinedAt', d.joinedAt); s('notes', d.notes)
       form.active = d.active !== false
+      approvalStatus.value = (d.approvalStatus as string) ?? 'approved'
+      // Detail extras — progress + promotion history (best-effort).
+      const [prog, promo] = await Promise.all([
+        fetchLevelProgress(editId.value!).catch(() => ({ data: null as LevelProgress | null })),
+        fetchRankPromotions('all').catch(() => ({ data: [] as RankPromotionRow[], meta: { pendingCount: 0 } })),
+      ])
+      progress.value = prog.data
+      promotions.value = promo.data.filter((x) => x.agentId === editId.value)
     }
   } catch (e: unknown) {
     error.value = e instanceof ApiError ? e.message : 'โหลดข้อมูลไม่สำเร็จ'
@@ -148,6 +164,40 @@ async function submit(): Promise<void> {
 }
 function cancel(): void { router.push({ name: 'agents' }) }
 
+// ── Status actions (approve / deactivate) — edit mode only ─────────────────
+async function doApprove(): Promise<void> {
+  if (!editId.value) return
+  busy.value = true
+  try { await approveAgent(editId.value); await load() }
+  catch (e: unknown) { error.value = e instanceof ApiError ? e.message : 'อนุมัติล้มเหลว' }
+  finally { busy.value = false }
+}
+async function doReject(): Promise<void> {
+  if (!editId.value) return
+  const note = window.prompt('เหตุผลที่ปฏิเสธ:')
+  if (note === null || note.trim() === '') return
+  busy.value = true
+  try { await rejectAgent(editId.value, note.trim()); await load() }
+  catch (e: unknown) { error.value = e instanceof ApiError ? e.message : 'ปฏิเสธล้มเหลว' }
+  finally { busy.value = false }
+}
+async function doToggleActive(): Promise<void> {
+  if (!editId.value) return
+  const next = !form.active
+  if (!next && !window.confirm('ปิดใช้งานตัวแทนนี้?')) return
+  busy.value = true
+  try { await setAgentActive(editId.value, next); form.active = next }
+  catch (e: unknown) { error.value = e instanceof ApiError ? e.message : 'ดำเนินการล้มเหลว' }
+  finally { busy.value = false }
+}
+
+function statusBadge(st: string): string {
+  return st === 'approved' ? 'bg-emerald-50 text-emerald-700' : st === 'rejected' ? 'bg-rose-50 text-rose-700' : 'bg-amber-50 text-amber-700'
+}
+function statusLabel(st: string): string {
+  return st === 'approved' ? 'อนุมัติแล้ว' : st === 'rejected' ? 'ปฏิเสธ' : 'รออนุมัติ'
+}
+
 onMounted(load)
 </script>
 
@@ -156,9 +206,27 @@ onMounted(load)
     <AgentsSubnav />
     <div class="mx-auto max-w-4xl px-4 py-5">
       <button type="button" class="mb-2 text-xs text-slate-500 hover:text-slate-700" @click="cancel">
-        <i class="pi pi-arrow-left text-[10px]" /> กลับไปจัดการตัวแทน
+        <i class="pi pi-arrow-left text-[10px]" /> กลับไปรายชื่อตัวแทน
       </button>
-      <h1 class="mb-4 text-lg font-semibold text-slate-800">{{ isEdit ? 'แก้ไขข้อมูลตัวแทน' : 'เพิ่มตัวแทนใหม่' }}</h1>
+      <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 class="text-lg font-semibold text-slate-800">
+            {{ isEdit ? (agentNameOrCode || 'แก้ไขข้อมูลตัวแทน') : 'เพิ่มตัวแทนใหม่' }}
+          </h1>
+          <p v-if="isEdit" class="text-xs text-slate-500">
+            {{ form.agentCode }}
+            <span :class="['ml-1 rounded px-1.5 py-0.5 text-[10px]', statusBadge(approvalStatus)]">{{ statusLabel(approvalStatus) }}</span>
+            <span :class="['ml-1 rounded px-1.5 py-0.5 text-[10px]', form.active ? 'bg-emerald-50 text-emerald-700' : 'bg-slate-100 text-slate-500']">{{ form.active ? 'เปิดใช้งาน' : 'ปิดใช้งาน' }}</span>
+          </p>
+        </div>
+        <div v-if="isEdit" class="flex shrink-0 gap-2">
+          <button v-if="approvalStatus === 'pending'" type="button" class="rounded bg-emerald-600 px-2.5 py-1.5 text-xs text-white disabled:opacity-50" :disabled="busy" @click="doApprove">อนุมัติ</button>
+          <button v-if="approvalStatus === 'pending'" type="button" class="rounded border border-rose-300 px-2.5 py-1.5 text-xs text-rose-600 disabled:opacity-50" :disabled="busy" @click="doReject">ปฏิเสธ</button>
+          <button type="button"
+            :class="['rounded px-2.5 py-1.5 text-xs disabled:opacity-50', form.active ? 'border border-rose-300 text-rose-600 hover:bg-rose-50' : 'border border-emerald-300 text-emerald-600 hover:bg-emerald-50']"
+            :disabled="busy" @click="doToggleActive">{{ form.active ? 'ปิดใช้งาน' : 'เปิดใช้งาน' }}</button>
+        </div>
+      </div>
 
       <div v-if="loading" class="py-16 text-center text-sm text-slate-400"><i class="pi pi-spin pi-spinner" /> กำลังโหลด…</div>
       <div v-else class="space-y-4">
@@ -258,6 +326,44 @@ onMounted(load)
             <input type="checkbox" v-model="form.active" class="h-4 w-4" /> เปิดใช้งาน (active)
           </label>
         </section>
+
+        <!-- ── Detail-only (edit mode): level progress + promotion history ─── -->
+        <template v-if="isEdit">
+          <section v-if="progress && progress.nextLevel !== null" class="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 class="mb-2 text-sm font-semibold text-slate-700">ความคืบหน้าสู่ระดับถัดไป</h2>
+            <div class="mb-1 flex items-baseline justify-between text-xs">
+              <span class="text-slate-600">
+                <span class="font-medium">{{ progress.currentRankLabel ?? ('ระดับ ' + progress.currentLevel) }}</span>
+                <i class="pi pi-arrow-right mx-1 text-[9px] text-slate-400" />
+                <span class="font-medium text-sky-700">{{ progress.nextRankLabel }}</span>
+              </span>
+              <span class="font-semibold text-sky-700">{{ progress.progressPct }}%</span>
+            </div>
+            <div class="h-2.5 w-full overflow-hidden rounded-full bg-slate-100">
+              <div class="h-full rounded-full bg-gradient-to-r from-sky-400 to-sky-600 transition-all" :style="{ width: progress.progressPct + '%' }" />
+            </div>
+            <div class="mt-1.5 flex items-center justify-between text-[11px] text-slate-500">
+              <span>ยอดสะสม 3 เดือน ฿{{ money(progress.currentVolume) }}</span>
+              <span>เป้า ฿{{ money(progress.target) }}</span>
+            </div>
+            <p v-if="progress.remaining > 0" class="mt-1 text-[11px] text-amber-600">เหลืออีก ฿{{ money(progress.remaining) }} เพื่อเลื่อนระดับ</p>
+            <p v-if="progress.licenseBlocked" class="mt-1 text-[11px] text-rose-600"><i class="pi pi-exclamation-triangle text-[9px]" /> ระดับนี้ต้องมีใบอนุญาต — ตัวแทนยังไม่มีใบอนุญาต</p>
+          </section>
+
+          <section class="rounded-lg border border-slate-200 bg-white p-4">
+            <h2 class="mb-2 text-sm font-semibold text-slate-700">ประวัติการเลื่อนระดับ</h2>
+            <ul v-if="promotions.length" class="space-y-1.5">
+              <li v-for="p in promotions" :key="p.id" class="flex items-center justify-between gap-2 rounded border border-slate-100 px-2 py-1.5 text-xs">
+                <span class="text-slate-700">{{ p.fromRankLabel ?? '—' }} → {{ p.toRankLabel ?? '—' }} <span class="text-[10px] text-slate-400">({{ p.trigger === 'auto' ? 'อัตโนมัติ' : 'กำหนดเอง' }})</span></span>
+                <span class="flex items-center gap-2">
+                  <span class="text-[10px] text-slate-400">{{ fmtDate(p.decidedAt ?? p.requestedAt) }}</span>
+                  <span :class="['rounded px-1.5 py-0.5 text-[10px]', statusBadge(p.status)]">{{ statusLabel(p.status) }}</span>
+                </span>
+              </li>
+            </ul>
+            <p v-else class="text-xs text-slate-400">ยังไม่มีประวัติการเลื่อนระดับ</p>
+          </section>
+        </template>
 
         <div class="flex justify-end gap-2">
           <button type="button" class="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-50" @click="cancel">ยกเลิก</button>

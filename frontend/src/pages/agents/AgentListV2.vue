@@ -25,7 +25,7 @@ async function loadPending(): Promise<void> {
   try { const r = await fetchPendingAgents(); pending.value = r.data } catch { pending.value = [] }
 }
 function createNew(): void { router.push({ name: 'agent-new' }) }
-function editAgent(id: string): void { router.push({ name: 'agent-edit-info', params: { id } }) }
+function editAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
 async function approve(a: AgentListRow): Promise<void> {
   busy.value = a.id
   try { await approveAgent(a.id); setFlash(true, `อนุมัติ ${aName(a)} แล้ว`); await load(); await loadPending() }
