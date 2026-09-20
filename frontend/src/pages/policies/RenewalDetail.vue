@@ -178,6 +178,12 @@ async function onRegenerate(d: Parameters<typeof actions.regenerateInsurehubQuot
 }
 
 function backToList() { router.push({ name: 'policies-expiring' }) }
+/** Final step: start the renewal by opening the new-policy wizard prefilled
+ *  from this policy. Fires NO event here — the source policy only flips to
+ *  "renewed" once the draft is actually created (backend storeDraft). */
+function goRenew() {
+  router.push({ name: 'policy-new', query: { renewFrom: policyId.value } })
+}
 function openFullEdit() {
   const href = router.resolve({ name: 'policy-edit', params: { id: policyId.value } }).href
   window.open(href, '_blank', 'noopener')
@@ -321,6 +327,13 @@ onMounted(load)
             @click="openPanel(ACTION_PANEL[nextAction.action])">
             <i :class="['pi', nextAction.icon, 'text-[10px]']" /> {{ nextAction.label }}
           </button>
+          <!-- Final step: ต่ออายุ — navigates to the new-policy wizard prefilled
+               from this policy. Not a panel: it's the handoff to renewal. -->
+          <button v-if="nextAction && nextAction.action === 'start_renewal'" type="button"
+            class="rounded bg-emerald-600 px-2.5 py-1.5 text-xs font-medium text-white hover:bg-emerald-700"
+            @click="goRenew">
+            <i class="pi pi-arrow-right text-[10px]" /> {{ nextAction.label }}
+          </button>
           <button type="button"
             :class="['rounded px-2.5 py-1.5 text-xs', panel === 'contact' ? 'bg-slate-200' : 'bg-slate-50 hover:bg-slate-100']"
             @click="openPanel('contact')">
@@ -345,7 +358,7 @@ onMounted(load)
         <!-- Manual advance -->
         <div class="mb-3 flex flex-wrap items-center gap-1.5 border-t border-slate-100 pt-2">
           <span class="text-[10px] text-slate-400">ทำนอกระบบแล้ว? ทำเครื่องหมายขั้นตอน:</span>
-          <button v-for="st in (['contacted','quote_requested','quote_received','quote_prepared','quote_sent','renewed'] as const)"
+          <button v-for="st in (['contacted','quote_requested','quote_received','quote_prepared','quote_sent'] as const)"
             :key="st" type="button"
             class="rounded border border-slate-200 px-1.5 py-0.5 text-[10px] text-slate-500 hover:bg-slate-50"
             :disabled="actions.saving.value" @click="doManual(st)">

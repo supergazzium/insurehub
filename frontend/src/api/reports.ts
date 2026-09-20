@@ -150,7 +150,7 @@ export function declineRenewal(policyId: string, reason?: string) {
 // real side-effect (no email/upload). The "I did this outside the system" path.
 export type ManualStage =
   | 'contacted' | 'quote_requested' | 'quote_received'
-  | 'quote_prepared' | 'quote_sent' | 'renewed' | 'declined'
+  | 'quote_prepared' | 'quote_sent' | 'declined'
 export function markRenewalStage(policyId: string, stage: ManualStage, note?: string) {
   return api.post<{ message: string; stage: ManualStage }>(
     `policies/${policyId}/renewal/mark-stage`, { stage, note },

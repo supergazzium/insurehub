@@ -263,7 +263,6 @@ export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
     quote_received: 'quoteReceivedAt',
     quote_prepared: 'quotePreparedAt',
     quote_sent: 'quoteSentAt',
-    renewed: 'renewalStartedAt',
     declined: 'renewalDeclinedAt',
   }
   async function manualMark(stage: ManualStage): Promise<boolean> {

@@ -255,6 +255,36 @@ class PolicyController extends ApiController
                 'payload' => ['source' => 'wizard'],
             ]);
 
+            // Renewal draft: this is the moment the renewal actually STARTS, so
+            // fire renewalStarted on the SOURCE policy — that flips its renewal
+            // stage to "renewed" in the expiring-soon pipeline. Guarded so a
+            // re-created draft for the same source doesn't double-log.
+            $sourceId = $payload['ref_app_to_id'] ?? null;
+            if ($sourceId !== null) {
+                $source = Policy::query()
+                    ->where('tenant_id', $tenantId)
+                    ->whereKey($sourceId)
+                    ->first();
+                if ($source !== null) {
+                    $alreadyStarted = PolicyEvent::query()
+                        ->where('policy_id', $source->id)
+                        ->where('type', 'renewalStarted')
+                        ->exists();
+                    if (! $alreadyStarted) {
+                        PolicyEvent::create([
+                            'policy_id' => $source->id,
+                            'type' => 'renewalStarted',
+                            'occurred_at' => now(),
+                            'by_user_id' => $request->user()?->id,
+                            'payload' => [
+                                'source' => 'renewal-draft',
+                                'newPolicyId' => (string) $policy->id,
+                            ],
+                        ]);
+                    }
+                }
+            }
+
             return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType']);
         });
 
@@ -1046,7 +1076,7 @@ class PolicyController extends ApiController
     {
         $this->authorizeTenant($request, $policy);
         $data = $request->validate([
-            'stage' => ['required', 'string', 'in:contacted,quote_requested,quote_received,quote_prepared,quote_sent,renewed,declined'],
+            'stage' => ['required', 'string', 'in:contacted,quote_requested,quote_received,quote_prepared,quote_sent,declined'],
             'note' => ['sometimes', 'nullable', 'string', 'max:500'],
         ]);
 
@@ -1057,7 +1087,6 @@ class PolicyController extends ApiController
             'quote_received' => 'renewalQuoteReceived',
             'quote_prepared' => 'renewalQuotePrepared',
             'quote_sent' => 'renewalQuoteSent',
-            'renewed' => 'renewalStarted',
             'declined' => 'renewalDeclined',
         ][$data['stage']];
 
