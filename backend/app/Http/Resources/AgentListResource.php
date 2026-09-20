@@ -43,6 +43,8 @@ class AgentListResource extends JsonResource
             'joinedAt' => $this->joined_at,
             'active' => (bool) $this->active,
             'approvalStatus' => $this->approval_status ?? 'approved',
+            'lastNoteAt' => $this->last_note_at ?? null,
+            'noteCount' => (int) ($this->note_count ?? 0),
         ];
     }
 }

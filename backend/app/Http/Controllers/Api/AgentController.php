@@ -39,6 +39,8 @@ class AgentController extends ApiController
                 'parent.agent_code as parent_agent_code',
                 'parent.first_name as parent_agent_first_name',
                 'parent.last_name as parent_agent_last_name',
+                \DB::raw('(SELECT MAX(an.created_at) FROM agent_notes an WHERE an.agent_id = a.id) as last_note_at'),
+                \DB::raw('(SELECT COUNT(*) FROM agent_notes an WHERE an.agent_id = a.id) as note_count'),
             ]);
 
         if ($search = $request->string('q')->toString()) {

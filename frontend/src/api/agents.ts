@@ -27,6 +27,8 @@ export interface AgentListRow {
   joinedAt: string | null
   active: boolean
   approvalStatus?: string
+  lastNoteAt?: string | null
+  noteCount?: number
 }
 
 export interface AgentListFilters {
