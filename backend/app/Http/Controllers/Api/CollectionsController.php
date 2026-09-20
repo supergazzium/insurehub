@@ -78,6 +78,12 @@ class CollectionsController extends Controller
             // (total_premium_paid, from the legacy system) PLUS any payments
             // recorded through the app (policy_payments). For legacy policies
             // with no recorded rows this is just the imported figure.
+            //
+            // FORWARD DIRECTION: policy_payments is the auditable source of
+            // truth (one verifiable record per payment). As policies migrate to
+            // app-recorded payments, the total_premium_paid term becomes the
+            // legacy-only fallback and can be dropped per policy once its full
+            // history is captured as policy_payments rows.
             $paid = round((float) ($r->total_premium_paid ?? 0) + (float) $r->paid_total, 2);
             // If we somehow have no main premium, treat the paid figure as the
             // whole thing (nothing to chase).

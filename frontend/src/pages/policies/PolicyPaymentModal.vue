@@ -119,7 +119,12 @@ async function submitPayments(): Promise<void> {
       }),
   }
   if (!payload.payments.length) {
-    saveError.value = 'กรุณากรอกจำนวนเงินและวันที่อย่างน้อย 1 งวด'
+    // Give a precise reason — the most common miss is entering an amount but
+    // leaving the date blank, which silently drops the row.
+    const hasAmountNoDate = rows.some((r) => (r.amount !== null && r.amount !== undefined) && !r.date)
+    saveError.value = hasAmountNoDate
+      ? 'กรุณาระบุวันที่ชำระของแต่ละงวด'
+      : 'กรุณากรอกจำนวนเงินและวันที่อย่างน้อย 1 งวด'
     return
   }
   saving.value = true
@@ -178,7 +183,15 @@ interface PayRow {
   note: string
   proofName: string // just the file name; no real upload in this FE-only build
 }
-function blankRow(): PayRow { return { expected: null, amount: null, date: '', method: 'transfer', note: '', proofName: '' } }
+/** Today's date as YYYY-MM-DD for the <input type=date>. */
+function todayStr(): string {
+  const d = new Date()
+  const p = (n: number) => String(n).padStart(2, '0')
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`
+}
+// New rows default the payment date to TODAY (cash payments are almost always
+// same-day), so the operator can save without hunting for the date field.
+function blankRow(): PayRow { return { expected: null, amount: null, date: todayStr(), method: 'transfer', note: '', proofName: '' } }
 
 /** Per-installment reconciliation: actual − expected.
  *  status: 'exact' (ครบ) | 'over' (เกิน) | 'short' (ขาด) | 'pending' (ยังไม่จ่าย). */
