@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed, reactive } from 'vue'
 import { useRouter } from 'vue-router'
-import { useAgentStore, type Agent } from '../../stores/agents'
+import { useAgentStore } from '../../stores/agents'
 import {
   fetchTeams, fetchHierarchyRollup, updateAgentHierarchy,
   type TeamRow, type HierarchyRollupEntry,
@@ -40,7 +40,6 @@ async function loadAll(): Promise<void> {
   }
 }
 
-const money = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 0 })
 const money1 = (n: number) =>
   n >= 1_000_000 ? `${(n / 1_000_000).toFixed(1)}M` : n >= 1000 ? `${Math.round(n / 1000)}K` : String(Math.round(n))
 

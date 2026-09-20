@@ -31,7 +31,7 @@ const CATEGORIES: CatDef[] = [
   { key: 'cancelled', label: 'ตรวจสอบรายการยกเลิก', hint: 'กรมธรรม์ที่ถูกยกเลิก', icon: 'pi-times-circle', color: 'slate' },
 ]
 
-const chipCls = (c: CatDef, active: boolean): string => {
+const chipCls = (_c: CatDef, active: boolean): string => {
   const base = 'flex items-center gap-2 rounded-lg border px-3 py-2 text-left text-sm transition'
   if (active) return `${base} border-sky-500 bg-sky-50 text-sky-800 ring-1 ring-sky-300`
   return `${base} border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:bg-slate-50`

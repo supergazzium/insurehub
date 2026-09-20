@@ -16,12 +16,20 @@ import {
 } from '../../api/agents'
 import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
-import { toIsoDate } from '../../util/dateFormat'
 
 const route = useRoute()
 const router = useRouter()
 const editId = computed(() => (route.name === 'agent-detail' || route.name === 'agent-edit-info' ? String(route.params.id) : null))
 const isEdit = computed(() => editId.value !== null)
+
+// AddressPicker (edit mode) emits (fieldKey, value) after it PATCHes agents/{id};
+// mirror the value into the local form so displayed state stays in sync.
+function applyAddress(field: string, value: string | null): void {
+  if (field === 'province') form.province = value ?? ''
+  else if (field === 'district') form.district = value ?? ''
+  else if (field === 'subDistrict') form.subDistrict = value ?? ''
+  else if (field === 'postcode') form.postcode = value ?? ''
+}
 
 const loading = ref(false)
 const saving = ref(false)
@@ -132,7 +140,7 @@ const payload = computed<Record<string, unknown>>(() => {
     phone: form.phone || null,
     lineId: form.lineId || null,
     idCard: form.idCard || null,
-    birthDate: toIsoDate(form.birthDate) || null,
+    birthDate: form.birthDate || null,
     juristicName: form.juristicName || null,
     taxId: form.taxId || null,
     hasVat: form.hasVat,
@@ -143,11 +151,11 @@ const payload = computed<Record<string, unknown>>(() => {
     subDistrict: form.subDistrict || null,
     postcode: form.postcode || null,
     licenseLifeNo: form.licenseLifeNo || null,
-    licenseLifeExpiry: toIsoDate(form.licenseLifeExpiry) || null,
+    licenseLifeExpiry: form.licenseLifeExpiry || null,
     licenseNonLifeNo: form.licenseNonLifeNo || null,
-    licenseNonLifeExpiry: toIsoDate(form.licenseNonLifeExpiry) || null,
+    licenseNonLifeExpiry: form.licenseNonLifeExpiry || null,
     parentAgentId: form.parentAgentId || null,
-    joinedAt: toIsoDate(form.joinedAt) || null,
+    joinedAt: form.joinedAt || null,
     notes: form.notes || null,
     active: form.active,
     bank: { bankName: form.bankNameText || null, accountNo: form.bankAccountNo || null, accountName: form.bankAccountName || null },
@@ -314,11 +322,21 @@ onMounted(load)
           <div class="mt-3">
             <FormField label="ที่อยู่"><input v-model.trim="form.address" class="ipt" /></FormField>
             <div class="mt-2">
+              <!-- Edit mode: AddressPicker auto-PATCHes agents/{id} and emits the
+                   change back into the form. Create mode has no id yet, so plain
+                   inputs collect the fields and they save with the rest on submit. -->
               <AddressPicker
+                v-if="isEdit && editId"
+                entity="agents" :id="editId"
                 :fields="{ province: 'province', district: 'district', subDistrict: 'subDistrict', postcode: 'postcode' }"
                 :province="form.province" :district="form.district" :sub-district="form.subDistrict" :postcode="form.postcode"
-                @update:province="(v) => form.province = v" @update:district="(v) => form.district = v"
-                @update:subDistrict="(v) => form.subDistrict = v" @update:postcode="(v) => form.postcode = v" />
+                @update="(f: string, v: string | null) => applyAddress(f, v)" />
+              <div v-else class="grid grid-cols-2 gap-3">
+                <FormField label="จังหวัด"><input v-model.trim="form.province" class="ipt" /></FormField>
+                <FormField label="อำเภอ/เขต"><input v-model.trim="form.district" class="ipt" /></FormField>
+                <FormField label="ตำบล/แขวง"><input v-model.trim="form.subDistrict" class="ipt" /></FormField>
+                <FormField label="รหัสไปรษณีย์"><input v-model.trim="form.postcode" class="ipt" /></FormField>
+              </div>
             </div>
           </div>
         </section>
