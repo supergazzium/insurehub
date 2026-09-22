@@ -14,7 +14,7 @@ import ReconDashboardPanel from './ReconDashboardPanel.vue'
 const money = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 type Tab = 'MAIN' | 'OV' | 'HISTORY' | 'BATCHES' | 'DASHBOARD'
-const tab = ref<Tab>('MAIN')
+const tab = ref<Tab>('HISTORY')
 const TABS: { key: Tab; label: string }[] = [
   { key: 'MAIN', label: 'ค่าคอมหลัก' },
   { key: 'OV', label: 'ค่าคอม OV' },
@@ -91,6 +91,8 @@ function onDrawerSaved(): void { openId.value = null; load() }
 onMounted(async () => {
   const c = await fetchCarrierList({})
   carriers.value = c.data
+  // History is the default tab — show all existing records on landing.
+  load()
 })
 </script>
 
