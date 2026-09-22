@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref, computed, reactive } from 'vue'
+import { onMounted, ref, computed, reactive, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { useAgentStore } from '../../stores/agents'
 import {
@@ -8,6 +8,7 @@ import {
 } from '../../api/agents'
 import { ApiError } from '../../api/client'
 import AgentsSubnav from './AgentsSubnav.vue'
+import AgentPicker from '../../components/AgentPicker.vue'
 import { layoutForest, type LayoutNode } from './orgChartLayout'
 
 const router = useRouter()
@@ -65,6 +66,37 @@ const showOrphans = ref(false)
 //   'team'   = ทีม grouping (team_id + parent_team_id) — org reporting units
 type OrgMode = 'upline' | 'team'
 const mode = ref<OrgMode>('team')
+
+// ── Trace a สายงาน: pick a person → highlight their chain (upline + downline),
+//    dim everyone else. Makes a single chain easy to follow. ──
+const traceId = ref('')          // selected agent id (upline mode)
+const traceSet = computed<Set<string>>(() => {
+  if (mode.value !== 'upline' || !traceId.value) return new Set()
+  const ids = new Set<string>()
+  ids.add(traceId.value)
+  for (const up of store.getUplineChain(traceId.value)) ids.add(up.id)
+  for (const dn of store.getAllDownline(traceId.value)) ids.add(dn.id)
+  return ids
+})
+// The upline path as plain text: self ← upline ← … ← top.
+const tracePath = computed(() => {
+  if (!traceId.value) return []
+  const self = store.getAgent(traceId.value)
+  if (!self) return []
+  const names = [self, ...store.getUplineChain(traceId.value)]
+  return names.map((a) => ({ id: a.id, name: `${a.firstName} ${a.lastName}`.trim() || a.agentCode, level: a.level }))
+})
+function isDimmed(nodeId: string): boolean {
+  if (mode.value !== 'upline' || !traceId.value) return false
+  if (nodeId === HQ_ID) return false
+  if (!nodeId.startsWith('agent:')) return false
+  return !traceSet.value.has(nodeId.slice('agent:'.length))
+}
+function isTraceHit(nodeId: string): boolean {
+  return nodeId === `agent:${traceId.value}`
+}
+// Switching to team mode clears any active trace.
+watch(mode, (m) => { if (m !== 'upline') traceId.value = '' })
 
 const graph = computed(() => {
   const nodes: Record<string, OrgNode> = {}
@@ -307,6 +339,27 @@ onMounted(loadAll)
         </button>
       </div>
 
+      <!-- Trace a สายงาน (upline mode only) -->
+      <div v-if="mode === 'upline'" class="mb-2 rounded-lg border border-emerald-200 bg-emerald-50/50 px-3 py-2">
+        <div class="flex flex-wrap items-center gap-2">
+          <span class="text-xs font-medium text-emerald-800"><i class="pi pi-search-plus text-[10px]" /> ตามสายงานของ:</span>
+          <div class="w-64"><AgentPicker v-model="traceId" placeholder="เลือกตัวแทนเพื่อไล่สายงาน…" /></div>
+          <button v-if="traceId" type="button" class="rounded border border-slate-300 px-2 py-1 text-[11px] text-slate-600 hover:bg-white" @click="traceId = ''">ล้าง</button>
+        </div>
+        <!-- Plain-text upline path — read the chain without the tree -->
+        <div v-if="tracePath.length" class="mt-2 flex flex-wrap items-center gap-1 text-xs">
+          <template v-for="(p, i) in tracePath" :key="p.id">
+            <button type="button"
+              :class="['rounded px-2 py-0.5 font-medium', i === 0 ? 'bg-emerald-600 text-white' : 'bg-white text-slate-700 ring-1 ring-slate-200 hover:ring-emerald-300']"
+              @click="router.push({ name: 'agent-detail', params: { id: p.id } })">
+              {{ p.name }} <span class="opacity-60">{{ p.level }}</span>
+            </button>
+            <i v-if="i < tracePath.length - 1" class="pi pi-arrow-left text-[9px] text-slate-400"></i>
+          </template>
+          <span class="ml-1 text-[10px] text-slate-400">(ล่าง → บน = ผู้ขาย ไปจนถึงต้นสาย)</span>
+        </div>
+      </div>
+
       <transition name="fade">
         <div v-if="flash" :class="['mb-2 rounded px-3 py-2 text-sm', flash.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700']">{{ flash.text }}</div>
       </transition>
@@ -337,6 +390,8 @@ onMounted(loadAll)
               :class="['group rounded-lg border px-2.5 py-1.5 shadow-sm transition',
                 nodeClass(graph.nodes[id].kind, graph.nodes[id].active),
                 hoverTarget === id ? 'ring-2 ring-sky-400' : '',
+                isTraceHit(id) ? 'ring-2 ring-emerald-500 shadow-md' : '',
+                isDimmed(id) ? 'opacity-25' : '',
                 graph.nodes[id].kind === 'agent' ? 'cursor-grab active:cursor-grabbing' : '',
                 dragId === id ? 'opacity-40' : '']"
               @pointerdown="onNodePointerDown($event, id, graph.nodes[id].kind)"
