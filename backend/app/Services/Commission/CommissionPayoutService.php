@@ -1,0 +1,334 @@
+<?php
+
+declare(strict_types=1);
+
+namespace App\Services\Commission;
+
+use App\Models\AuditEntry;
+use App\Models\CommissionPayoutAdjustment;
+use App\Models\CommissionPayoutBatch;
+use App\Models\CommissionPayoutBatchItem;
+use App\Models\PolicyRebate;
+use Carbon\CarbonImmutable;
+use Illuminate\Support\Facades\DB;
+use RuntimeException;
+
+/**
+ * Agent commission payout batches (DEV Spec ชุดที่ 2). Builds a payout run from
+ * the eligible policies in a วันแจ้งงาน range, snapshots the agent-commission
+ * amounts (source of truth), and marks the batch paid in one transaction —
+ * reflecting the paid state into policy_rebates.agent_rebate_status /
+ * agent_receive_date (the legacy Rebate_Status_AG / Rebate_Rec_Date_AG fields).
+ */
+class CommissionPayoutService
+{
+    /** Statuses that count a policy as "approved" for payout eligibility. */
+    private const APPROVED_STATUSES = ['active', 'issued'];
+
+    /** Value written to policy_rebates.agent_rebate_status when a batch is paid. */
+    public const PAID_STATUS = 'paid';
+
+    /**
+     * Eligible-item query, shared by preview() and createBatch() so the
+     * snapshot always matches what was previewed. Returns a query builder over
+     * policies joined to the amount sources; caller selects/aggregates.
+     *
+     * Eligibility (mapped from the Access VBA filter):
+     *  - has a writing agent
+     *  - created_at (วันแจ้งงาน) within [from, to] Bangkok, half-open on the end
+     *  - not cancelled
+     *  - status approved (active/issued)
+     *  - freelook cleared (freelook_active — life; non-life has none)
+     *  - agent commission not already paid (no paid rebate row)
+     *  - not already sitting in a non-cancelled batch
+     */
+    private function eligibleQuery(int $tenantId, string $from, string $to)
+    {
+        $fromDt = CarbonImmutable::parse($from, 'Asia/Bangkok')->startOfDay();
+        $toDtExclusive = CarbonImmutable::parse($to, 'Asia/Bangkok')->addDay()->startOfDay();
+
+        return DB::table('policies as p')
+            ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
+            ->leftJoin('policy_rebates as r', 'r.policy_id', '=', 'p.id')
+            ->where('p.tenant_id', $tenantId)
+            ->whereNull('p.deleted_at')
+            ->whereNotNull('p.writing_agent_id')
+            ->where('p.created_at', '>=', $fromDt)
+            ->where('p.created_at', '<', $toDtExclusive)
+            ->where('p.status', '!=', 'cancelled')
+            ->whereIn('p.status', self::APPROVED_STATUSES)
+            // Not already marked paid on the agent leg.
+            ->where(function ($w): void {
+                $w->whereNull('r.agent_rebate_status')
+                    ->orWhere('r.agent_rebate_status', '')
+                    ->orWhere('r.agent_rebate_status', '!=', self::PAID_STATUS);
+            })
+            // Not already in a live batch.
+            ->whereNotExists(function ($q) use ($tenantId): void {
+                $q->select(DB::raw(1))
+                    ->from('commission_payout_batch_items as bi')
+                    ->join('commission_payout_batches as b', 'b.id', '=', 'bi.batch_id')
+                    ->whereColumn('bi.policy_id', 'p.id')
+                    ->where('bi.tenant_id', $tenantId)
+                    ->where('b.status', '!=', CommissionPayoutBatch::STATUS_CANCELLED);
+            });
+    }
+
+    /**
+     * Resolve one policy's frozen agent-commission amount + its source.
+     * Precedence: actual rebate → calculated rebate → policy comm column.
+     *
+     * @return array{main: float, rider: float, base: float, source: string}
+     */
+    private function resolveAmount(object $row): array
+    {
+        $rider = (float) ($row->rider_com_ag ?? 0);
+        $base = (float) ($row->main_premium ?? 0);
+
+        if (($row->actual_agent_amount ?? null) !== null && (float) $row->actual_agent_amount > 0) {
+            return ['main' => (float) $row->actual_agent_amount, 'rider' => 0.0, 'base' => $base, 'source' => 'rebate_actual'];
+        }
+        if (($row->calculated_agent_amount ?? null) !== null && (float) $row->calculated_agent_amount > 0) {
+            return ['main' => (float) $row->calculated_agent_amount, 'rider' => 0.0, 'base' => $base, 'source' => 'rebate_calculated'];
+        }
+        if (($row->comm_hub_to_agent_amount ?? null) !== null && (float) $row->comm_hub_to_agent_amount > 0) {
+            return ['main' => (float) $row->comm_hub_to_agent_amount, 'rider' => $rider, 'base' => $base, 'source' => 'policy_comm'];
+        }
+
+        return ['main' => 0.0, 'rider' => $rider, 'base' => $base, 'source' => 'none'];
+    }
+
+    private function rows(int $tenantId, string $from, string $to)
+    {
+        return $this->eligibleQuery($tenantId, $from, $to)
+            ->select([
+                'p.id as policy_id', 'p.policy_no', 'p.application_no', 'p.main_premium',
+                'p.comm_hub_to_agent_amount',
+                'p.writing_agent_id as agent_id',
+                'a.agent_code', 'a.vat_type',
+                DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
+                'r.calculated_agent_amount', 'r.actual_agent_amount', 'r.agent_rebate_status',
+                DB::raw('(SELECT COALESCE(SUM(pr.com_amt_ag),0) FROM policy_riders pr WHERE pr.policy_id = p.id) as rider_com_ag'),
+            ])
+            ->orderBy('a.agent_code')
+            ->get();
+    }
+
+    /**
+     * Preview eligible items grouped by agent — no persistence.
+     *
+     * @return array{agents: array<int, array<string, mixed>>, totals: array<string, mixed>, warnings: array<int, string>}
+     */
+    public function preview(int $tenantId, string $from, string $to): array
+    {
+        $rows = $this->rows($tenantId, $from, $to);
+        $byAgent = [];
+        $warnings = [];
+        $grandTotal = 0.0;
+        $itemCount = 0;
+
+        foreach ($rows as $row) {
+            $amt = $this->resolveAmount($row);
+            $total = $amt['main'] + $amt['rider'];
+            $key = $row->agent_id ?? 0;
+            if (! isset($byAgent[$key])) {
+                $byAgent[$key] = [
+                    'agentId' => $row->agent_id ? (string) $row->agent_id : null,
+                    'agentCode' => $row->agent_code,
+                    'agentName' => $row->agent_name,
+                    'vatType' => $row->vat_type,
+                    'itemCount' => 0,
+                    'amount' => 0.0,
+                ];
+            }
+            $byAgent[$key]['itemCount']++;
+            $byAgent[$key]['amount'] += $total;
+            $grandTotal += $total;
+            $itemCount++;
+
+            if ($amt['source'] === 'none') {
+                $warnings[] = "กรมธรรม์ {$row->policy_no} ({$row->agent_code}) ไม่มียอดค่าคอมตัวแทน";
+            }
+            if (! $row->agent_code) {
+                $warnings[] = "กรมธรรม์ {$row->policy_no} ไม่มีรหัสตัวแทน";
+            }
+        }
+
+        $agents = array_values($byAgent);
+        foreach ($agents as &$a) {
+            $a['amount'] = round($a['amount'], 2);
+        }
+
+        return [
+            'agents' => $agents,
+            'totals' => [
+                'totalAgents' => count($agents),
+                'totalItems' => $itemCount,
+                'totalAmount' => round($grandTotal, 2),
+            ],
+            'warnings' => array_values(array_unique($warnings)),
+        ];
+    }
+
+    /**
+     * Snapshot the eligible items into a new DRAFT batch.
+     */
+    public function createBatch(int $tenantId, string $from, string $to, ?int $userId, ?string $note = null): CommissionPayoutBatch
+    {
+        $rows = $this->rows($tenantId, $from, $to);
+        if ($rows->isEmpty()) {
+            throw new RuntimeException('ไม่พบรายการค่าคอมที่เข้าเงื่อนไขในช่วงวันที่ที่ระบุ');
+        }
+
+        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows): CommissionPayoutBatch {
+            $batch = CommissionPayoutBatch::create([
+                'tenant_id' => $tenantId,
+                'from_date' => $from,
+                'to_date' => $to,
+                'status' => CommissionPayoutBatch::STATUS_DRAFT,
+                'created_by_user_id' => $userId,
+                'note' => $note,
+            ]);
+
+            $agents = [];
+            $total = 0.0;
+            foreach ($rows as $row) {
+                $amt = $this->resolveAmount($row);
+                CommissionPayoutBatchItem::create([
+                    'batch_id' => $batch->id,
+                    'tenant_id' => $tenantId,
+                    'policy_id' => $row->policy_id,
+                    'agent_id' => $row->agent_id,
+                    'agent_code' => $row->agent_code,
+                    'vat_type' => $row->vat_type,
+                    'snapshot_base_premium' => $amt['base'],
+                    'snapshot_agent_commission' => $amt['main'],
+                    'snapshot_rider_commission' => $amt['rider'],
+                    'amount_source' => $amt['source'],
+                    'item_status' => CommissionPayoutBatchItem::ITEM_PENDING,
+                    'original_agent_rebate_status' => $row->agent_rebate_status,
+                ]);
+                $agents[$row->agent_id ?? 0] = true;
+                $total += $amt['main'] + $amt['rider'];
+            }
+
+            $batch->update([
+                'total_agents' => count($agents),
+                'total_items' => $rows->count(),
+                'total_amount' => round($total, 2),
+            ]);
+
+            $this->audit($tenantId, $userId, 'commission_payout.create', "batch:{$batch->id}", [
+                'from' => $from, 'to' => $to, 'items' => $rows->count(), 'amount' => round($total, 2),
+            ]);
+
+            return $batch->fresh();
+        });
+    }
+
+    public function addAdjustment(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode, float $amount, string $reason, ?int $userId): CommissionPayoutAdjustment
+    {
+        if (! $batch->isEditable()) {
+            throw new RuntimeException('ไม่สามารถแก้ไข batch ที่จ่ายแล้วหรือยกเลิกแล้ว');
+        }
+        if ($amount < 0) {
+            throw new RuntimeException('ยอดหักต้องไม่ติดลบ');
+        }
+        $adj = CommissionPayoutAdjustment::create([
+            'batch_id' => $batch->id,
+            'tenant_id' => $batch->tenant_id,
+            'agent_id' => $agentId,
+            'agent_code' => $agentCode,
+            'type' => CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT,
+            'amount' => $amount,
+            'reason' => $reason,
+            'created_by_user_id' => $userId,
+        ]);
+        $this->audit($batch->tenant_id, $userId, 'commission_payout.adjust', "batch:{$batch->id}", [
+            'agent' => $agentCode, 'amount' => $amount, 'reason' => $reason,
+        ]);
+
+        return $adj;
+    }
+
+    /**
+     * Mark the whole batch paid — atomic. Writes the paid marker + date into
+     * policy_rebates for every item's policy (updateOrCreate, since the rebate
+     * row may not exist yet), flips items + batch to paid, and audits.
+     */
+    public function markPaid(CommissionPayoutBatch $batch, string $paymentDate, ?string $reference, ?int $userId): CommissionPayoutBatch
+    {
+        if ($batch->status === CommissionPayoutBatch::STATUS_PAID) {
+            throw new RuntimeException('Batch นี้ถูกจ่ายแล้ว');
+        }
+        if ($batch->status === CommissionPayoutBatch::STATUS_CANCELLED) {
+            throw new RuntimeException('Batch นี้ถูกยกเลิกแล้ว');
+        }
+
+        return DB::transaction(function () use ($batch, $paymentDate, $reference, $userId): CommissionPayoutBatch {
+            $items = $batch->items()->where('item_status', CommissionPayoutBatchItem::ITEM_PENDING)->get();
+
+            foreach ($items as $item) {
+                // Guard: the policy must not have been paid by another live batch.
+                $paidElsewhere = CommissionPayoutBatchItem::query()
+                    ->where('policy_id', $item->policy_id)
+                    ->where('batch_id', '!=', $batch->id)
+                    ->where('item_status', CommissionPayoutBatchItem::ITEM_PAID)
+                    ->exists();
+                if ($paidElsewhere) {
+                    throw new RuntimeException("กรมธรรม์ #{$item->policy_id} ถูกจ่ายค่าคอมไปแล้วโดย batch อื่น");
+                }
+
+                PolicyRebate::updateOrCreate(
+                    ['policy_id' => $item->policy_id],
+                    [
+                        'tenant_id' => $batch->tenant_id,
+                        'agent_rebate_status' => self::PAID_STATUS,
+                        'agent_receive_date' => $paymentDate,
+                    ],
+                );
+
+                $item->update(['item_status' => CommissionPayoutBatchItem::ITEM_PAID]);
+            }
+
+            $batch->update([
+                'status' => CommissionPayoutBatch::STATUS_PAID,
+                'paid_by_user_id' => $userId,
+                'paid_at' => now(),
+                'payment_date' => $paymentDate,
+                'payment_reference' => $reference,
+            ]);
+
+            $this->audit($batch->tenant_id, $userId, 'commission_payout.mark_paid', "batch:{$batch->id}", [
+                'items' => $items->count(), 'payment_date' => $paymentDate, 'reference' => $reference,
+            ]);
+
+            return $batch->fresh();
+        });
+    }
+
+    public function cancelBatch(CommissionPayoutBatch $batch, ?int $userId): CommissionPayoutBatch
+    {
+        if ($batch->status === CommissionPayoutBatch::STATUS_PAID) {
+            throw new RuntimeException('ไม่สามารถยกเลิก batch ที่จ่ายแล้ว (ต้องทำ reversal)');
+        }
+        $batch->update(['status' => CommissionPayoutBatch::STATUS_CANCELLED]);
+        $this->audit($batch->tenant_id, $userId, 'commission_payout.cancel', "batch:{$batch->id}", []);
+
+        return $batch->fresh();
+    }
+
+    private function audit(int $tenantId, ?int $userId, string $action, string $target, array $metadata): void
+    {
+        AuditEntry::create([
+            'tenant_id' => $tenantId,
+            'user_id' => $userId,
+            'occurred_at' => now(),
+            'actor' => $userId ? (string) $userId : 'system',
+            'action' => $action,
+            'target' => $target,
+            'result' => 'success',
+            'metadata' => $metadata,
+        ]);
+    }
+}

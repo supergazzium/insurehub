@@ -222,6 +222,20 @@ export const MODULES: ModuleDef[] = [
   // with the MGM rewrite. New MGM-based equivalents will be added when their
   // pages ship (PR-D and later).
   {
+    key: 'commission-payout',
+    number: 9,
+    routePath: '/commissions/payouts',
+    routeName: 'commission-payouts',
+    icon: 'pi pi-money-bill',
+    i18nKey: 'commissionPayout',
+    group: 'commission',
+    functions: [
+      'สร้างรอบจ่ายค่าคอมประจำเดือน (snapshot รายการ)',
+      'หักพิเศษต่อตัวแทน + audit',
+      'ยืนยันการจ่าย (mark paid) ป้องกันจ่ายซ้ำ',
+    ],
+  },
+  {
     key: 'rebate-reconciliation',
     number: 10,
     routePath: '/commissions/rebates',

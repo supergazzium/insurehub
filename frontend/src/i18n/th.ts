@@ -133,6 +133,11 @@ export default {
       short: 'Rebate',
       description: 'ตรวจสอบ Calculated vs Actual บนสามขา (InH / OV / Agent) พร้อมไฮไลต์ Δ ที่ไม่ตรงกัน',
     },
+    commissionPayout: {
+      name: 'ทำจ่ายค่าคอม — ตัวแทน',
+      short: 'ทำจ่ายค่าคอม',
+      description: 'สร้างรอบจ่ายค่าคอมประจำเดือน snapshot รายการ หักพิเศษ และยืนยันการจ่ายแบบป้องกันจ่ายซ้ำ',
+    },
     payouts: {
       name: 'การจ่ายเงิน',
       short: 'จ่ายเงิน',

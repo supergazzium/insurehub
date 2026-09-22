@@ -22,6 +22,7 @@ use App\Http\Controllers\Api\CarrierContactGroupController;
 use App\Http\Controllers\Api\CarrierController;
 use App\Http\Controllers\Api\CarrierCredentialController;
 use App\Http\Controllers\Api\CarrierProductTypeRateController;
+use App\Http\Controllers\Api\CommissionPayoutController;
 use App\Http\Controllers\Api\CommissionTierController;
 use App\Http\Controllers\Api\ContractController;
 use App\Http\Controllers\Api\CustomerAssignmentController;
@@ -134,6 +135,15 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-tiers', [CommissionTierController::class, 'index']);
     Route::patch('commission-tiers/{commissionTier}', [CommissionTierController::class, 'update']);
     Route::patch('commission-tiers/{commissionTier}/rates/{rate}', [CommissionTierController::class, 'updateRate']);
+
+    // Agent commission payout batches — ทำจ่ายค่าคอมประจำเดือน (ตัวแทน).
+    Route::post('commission-payout-batches/preview', [CommissionPayoutController::class, 'preview']);
+    Route::get('commission-payout-batches', [CommissionPayoutController::class, 'index']);
+    Route::post('commission-payout-batches', [CommissionPayoutController::class, 'store']);
+    Route::get('commission-payout-batches/{batch}', [CommissionPayoutController::class, 'show']);
+    Route::post('commission-payout-batches/{batch}/adjustments', [CommissionPayoutController::class, 'addAdjustment']);
+    Route::post('commission-payout-batches/{batch}/mark-paid', [CommissionPayoutController::class, 'markPaid']);
+    Route::post('commission-payout-batches/{batch}/cancel', [CommissionPayoutController::class, 'cancel']);
 
     // MGM product-types — full CRUD (unlike tiers which are fixed at 3).
     Route::apiResource('product-types', ProductTypeController::class)->except(['show']);
