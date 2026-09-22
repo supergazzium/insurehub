@@ -59,61 +59,72 @@ const HQ_ID = '__hq__'
 const ORPHAN_ID = '__orphan__'
 const showOrphans = ref(false)
 
+// Two distinct hierarchies live in this data; show ONE at a time to avoid
+// mixing team-boxes and people on the same tree (the old confusion).
+//   'upline' = สายงาน MLM (parent_agent_id) — who recruited whom; drives commission
+//   'team'   = ทีม grouping (team_id + parent_team_id) — org reporting units
+type OrgMode = 'upline' | 'team'
+const mode = ref<OrgMode>('team')
+
 const graph = computed(() => {
   const nodes: Record<string, OrgNode> = {}
   const agents = store.agents
   const byId = new Map(agents.map((a) => [a.id, a]))
 
-  // HQ root.
   nodes[HQ_ID] = { id: HQ_ID, parentId: null, children: [], kind: 'hq', label: 'InsureHub', sub: 'สำนักงานใหญ่' }
 
-  // Team nodes — parent team link forms the team tree; top teams hang off HQ.
-  const teamById = new Map(teams.value.map((t) => [t.id, t]))
-  for (const t of teams.value) {
-    nodes[`team:${t.id}`] = {
-      id: `team:${t.id}`, parentId: null, children: [], kind: 'team',
-      label: t.code, sub: `${t.memberCount} คน`,
-    }
-  }
-  for (const t of teams.value) {
-    const parent = t.parentTeamId && teamById.has(t.parentTeamId) ? `team:${t.parentTeamId}` : HQ_ID
-    nodes[`team:${t.id}`].parentId = parent
-    nodes[parent]?.children.push(`team:${t.id}`)
-  }
+  const agentNode = (a: typeof agents[number]): OrgNode => ({
+    id: `agent:${a.id}`, parentId: null, children: [], kind: 'agent',
+    label: `${a.firstName} ${a.lastName}`.trim() || a.agentCode,
+    sub: a.agentCode,
+    level: a.level,
+    premium: rollup.value[a.id]?.ownPremium ?? 0,
+    active: a.active,
+  })
 
-  // Agent nodes. An agent nests under its upline if that upline is also an
-  // agent node in this graph; otherwise under its team; otherwise orphan.
   const orphanIds: string[] = []
-  for (const a of agents) {
-    if (!a.active && false) continue
-    nodes[`agent:${a.id}`] = {
-      id: `agent:${a.id}`, parentId: null, children: [], kind: 'agent',
-      label: `${a.firstName} ${a.lastName}`.trim() || a.agentCode,
-      sub: a.agentCode,
-      level: a.level,
-      premium: rollup.value[a.id]?.ownPremium ?? 0,
-      active: a.active,
+
+  if (mode.value === 'team') {
+    // ── Team hierarchy: HQ → teams (parent_team_id) → members (team_id) ──
+    const teamById = new Map(teams.value.map((t) => [t.id, t]))
+    for (const t of teams.value) {
+      nodes[`team:${t.id}`] = {
+        id: `team:${t.id}`, parentId: null, children: [], kind: 'team',
+        label: t.name || t.code, sub: `${t.memberCount ?? 0} คน`,
+      }
     }
-  }
-  for (const a of agents) {
-    const self = `agent:${a.id}`
-    let parent: string | null = null
-    if (a.parentAgentId && byId.has(a.parentAgentId)) {
-      parent = `agent:${a.parentAgentId}`
-    } else {
-      // Fall back to the agent's team (need teamId — read from store agent).
-      const tId = a.teamId
-      if (tId && nodes[`team:${tId}`]) parent = `team:${tId}`
+    for (const t of teams.value) {
+      const parent = t.parentTeamId && teamById.has(t.parentTeamId) ? `team:${t.parentTeamId}` : HQ_ID
+      nodes[`team:${t.id}`].parentId = parent
+      nodes[parent]?.children.push(`team:${t.id}`)
     }
-    if (parent) {
-      nodes[self].parentId = parent
-      nodes[parent].children.push(self)
-    } else {
-      orphanIds.push(self)
+    for (const a of agents) {
+      nodes[`agent:${a.id}`] = agentNode(a)
+      const self = `agent:${a.id}`
+      if (a.teamId && nodes[`team:${a.teamId}`]) {
+        nodes[self].parentId = `team:${a.teamId}`
+        nodes[`team:${a.teamId}`].children.push(self)
+      } else {
+        orphanIds.push(self)
+      }
+    }
+  } else {
+    // ── Upline hierarchy: HQ → top agents (no upline) → downline chain ──
+    for (const a of agents) nodes[`agent:${a.id}`] = agentNode(a)
+    for (const a of agents) {
+      const self = `agent:${a.id}`
+      if (a.parentAgentId && byId.has(a.parentAgentId)) {
+        nodes[self].parentId = `agent:${a.parentAgentId}`
+        nodes[`agent:${a.parentAgentId}`].children.push(self)
+      } else {
+        // Top-of-chain agents hang directly off HQ (they ARE the tree roots).
+        nodes[self].parentId = HQ_ID
+        nodes[HQ_ID].children.push(self)
+      }
     }
   }
 
-  // Orphan cluster (agents with no upline and no team).
+  // Orphan cluster — only meaningful in team mode (no team assigned).
   if (orphanIds.length) {
     nodes[ORPHAN_ID] = {
       id: ORPHAN_ID, parentId: HQ_ID, children: showOrphans.value ? orphanIds : [],
@@ -226,7 +237,9 @@ async function onDrop(e: PointerEvent) {
 
 function nodeClass(kind: NodeKind, active?: boolean): string {
   if (kind === 'hq') return 'bg-slate-800 text-white border-slate-800'
-  if (kind === 'team') return 'bg-indigo-50 text-indigo-800 border-indigo-200'
+  // Team boxes: heavier 2px indigo border + tinted fill so they clearly read
+  // as *containers/groups*, distinct from the flat white person cards.
+  if (kind === 'team') return 'bg-indigo-50 text-indigo-800 border-2 border-indigo-300 border-dashed'
   return active === false ? 'bg-slate-50 text-slate-400 border-slate-200' : 'bg-white text-slate-800 border-slate-200'
 }
 const LEVEL_DOT: Record<string, string> = {
@@ -247,17 +260,51 @@ onMounted(loadAll)
       <div class="mb-2 flex flex-wrap items-center justify-between gap-2">
         <div>
           <h1 class="text-lg font-semibold text-slate-800">ผังสายงาน (Org Chart)</h1>
-          <p class="text-[11px] text-slate-400">ลากการ์ดตัวแทนไปวางบนทีมหรือต้นสายเพื่อย้ายสายงาน · เลื่อนล้อเพื่อซูม · ลากพื้นหลังเพื่อเลื่อน</p>
+          <p class="text-[11px] text-slate-400">
+            {{ mode === 'team'
+              ? 'แสดงโครงสร้าง “ทีม” — จัดกลุ่มตัวแทนตามทีม (ลากการ์ดวางบนทีมเพื่อย้ายทีม)'
+              : 'แสดงโครงสร้าง “สายงาน” — ใครแนะนำใคร ใช้คำนวณค่าคอม (ลากการ์ดวางบนคนเพื่อย้ายต้นสาย)' }}
+          </p>
         </div>
         <div class="flex items-center gap-2">
-          <label class="flex items-center gap-1 text-[11px] text-slate-500">
-            <input type="checkbox" v-model="showOrphans" class="h-3.5 w-3.5" /> แสดงคนยังไม่มีทีม ({{ graph.orphanCount }})
-          </label>
           <button type="button" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" @click="zoomBy(1.1)">＋</button>
           <button type="button" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" @click="zoomBy(0.9)">－</button>
           <button type="button" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" @click="resetView">รีเซ็ต</button>
           <RouterLink to="/agents/hierarchy" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50"><i class="pi pi-list text-[10px]" /> ดูแบบต้นไม้</RouterLink>
         </div>
+      </div>
+
+      <!-- Mode toggle: one hierarchy at a time -->
+      <div class="mb-2 flex flex-wrap items-center gap-3">
+        <div class="inline-flex rounded-lg border border-slate-200 bg-white p-0.5 text-xs">
+          <button type="button"
+            :class="['rounded-md px-3 py-1 font-medium transition', mode === 'team' ? 'bg-indigo-600 text-white' : 'text-slate-600 hover:bg-slate-50']"
+            @click="mode = 'team'"><i class="pi pi-users text-[10px]" /> ทีม</button>
+          <button type="button"
+            :class="['rounded-md px-3 py-1 font-medium transition', mode === 'upline' ? 'bg-emerald-600 text-white' : 'text-slate-600 hover:bg-slate-50']"
+            @click="mode = 'upline'"><i class="pi pi-sitemap text-[10px]" /> สายงาน (ต้นสาย)</button>
+        </div>
+
+        <!-- Legend -->
+        <div class="flex flex-wrap items-center gap-3 text-[11px] text-slate-500">
+          <span class="flex items-center gap-1"><span class="inline-block h-3 w-3 rounded border border-indigo-200 bg-indigo-50"></span> กล่องทีม (กลุ่ม)</span>
+          <span class="flex items-center gap-1"><span class="inline-block h-3 w-3 rounded border border-slate-200 bg-white"></span> ตัวแทน (บุคคล)</span>
+          <span class="flex items-center gap-1"><span class="inline-block h-2 w-2 rounded-full bg-rose-400"></span> จุดสี = ระดับ (Lv)</span>
+        </div>
+
+        <label v-if="mode === 'team'" class="ml-auto flex items-center gap-1 text-[11px] text-slate-500">
+          <input type="checkbox" v-model="showOrphans" class="h-3.5 w-3.5" /> แสดงคนยังไม่มีทีม ({{ graph.orphanCount }})
+        </label>
+      </div>
+
+      <!-- Orphan call-to-action (M-audit follow-up): surface the real data gap -->
+      <div v-if="mode === 'team' && graph.orphanCount > 0"
+        class="mb-2 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <i class="pi pi-exclamation-triangle"></i>
+        <span><b>{{ graph.orphanCount }}</b> ตัวแทนยังไม่ได้กำหนดทีม — ลากการ์ดวางบนกล่องทีม หรือแก้ไขที่หน้ารายละเอียดตัวแทนเพื่อกำหนดทีม</span>
+        <button type="button" class="ml-1 rounded border border-amber-300 px-2 py-0.5 font-medium hover:bg-amber-100" @click="showOrphans = !showOrphans">
+          {{ showOrphans ? 'ซ่อนรายชื่อ' : 'แสดงรายชื่อ' }}
+        </button>
       </div>
 
       <transition name="fade">
