@@ -62,6 +62,7 @@ class CommissionReceiptController extends Controller
             ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
             ->leftJoin('carriers as ca', 'ca.id', '=', 'cr.insurer_id')
             ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
+            ->leftJoin('products as pr', 'pr.id', '=', 'p.product_id')
             ->where('cr.tenant_id', $tenantId);
 
         if (! empty($data['policyYear'])) {
@@ -99,6 +100,9 @@ class CommissionReceiptController extends Controller
             'cr.policy_id', 'p.policy_no', 'p.application_no', 'p.policy_year',
             DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
             'ca.name as insurer_name', 'a.agent_code',
+            DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
+            'pr.name as product_name', 'p.effective_date', 'p.main_premium',
+            'c.customer_code',
         ])
             ->orderByDesc('cr.id')
             ->limit(1000)
@@ -112,7 +116,13 @@ class CommissionReceiptController extends Controller
     public function show(Request $request, CommissionReceivable $receivable): JsonResponse
     {
         $this->authorizeTenant($request, $receivable);
-        $receivable->load(['policy:id,policy_no,application_no,customer_id,policy_year', 'insurer:id,name']);
+        $receivable->load([
+            'policy:id,policy_no,application_no,customer_id,product_id,writing_agent_id,policy_year,effective_date,main_premium',
+            'policy.customer:id,customer_code,first_name,last_name',
+            'policy.product:id,name',
+            'policy.writingAgent:id,agent_code,first_name,last_name',
+            'insurer:id,name',
+        ]);
 
         // Sibling row (MAIN↔OV) so the detail screen can record both (spec §5.1).
         $sibling = CommissionReceivable::where('policy_id', $receivable->policy_id)
@@ -346,8 +356,13 @@ class CommissionReceiptController extends Controller
             'applicationNo' => $r->application_no,
             'policyYear' => $r->policy_year,
             'customerName' => $r->customer_name,
+            'customerCode' => $r->customer_code ?? null,
             'insurerName' => $r->insurer_name,
             'agentCode' => $r->agent_code,
+            'agentName' => $r->agent_name ?? null,
+            'productName' => $r->product_name ?? null,
+            'effectiveDate' => $r->effective_date ?? null,
+            'mainPremium' => $r->main_premium !== null ? (float) $r->main_premium : null,
             'expectedAmount' => round((float) $r->expected_amount, 2),
             'statementAmount' => $r->statement_amount !== null ? round((float) $r->statement_amount, 2) : null,
             'receivedAmount' => $r->received_amount !== null ? round((float) $r->received_amount, 2) : null,
@@ -368,6 +383,13 @@ class CommissionReceiptController extends Controller
             'applicationNo' => $rec->policy?->application_no,
             'policyYear' => $rec->policy_year,
             'insurerName' => $rec->insurer?->name,
+            'customerName' => $rec->policy?->customer ? trim(($rec->policy->customer->first_name ?? '') . ' ' . ($rec->policy->customer->last_name ?? '')) : null,
+            'customerCode' => $rec->policy?->customer?->customer_code,
+            'productName' => $rec->policy?->product?->name,
+            'agentCode' => $rec->policy?->writingAgent?->agent_code,
+            'agentName' => $rec->policy?->writingAgent ? trim(($rec->policy->writingAgent->first_name ?? '') . ' ' . ($rec->policy->writingAgent->last_name ?? '')) : null,
+            'effectiveDate' => $rec->policy?->effective_date?->toDateString(),
+            'mainPremium' => $rec->policy?->main_premium !== null ? (float) $rec->policy->main_premium : null,
             'expectedAmount' => round((float) $rec->expected_amount, 2),
             'statementAmount' => $rec->statement_amount !== null ? round((float) $rec->statement_amount, 2) : null,
             'receivedAmount' => $rec->received_amount !== null ? round((float) $rec->received_amount, 2) : null,

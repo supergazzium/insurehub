@@ -12,8 +12,13 @@ export interface ReceivableRow {
   applicationNo: string | null
   policyYear: number | null
   customerName: string
+  customerCode: string | null
   insurerName: string | null
   agentCode: string | null
+  agentName: string | null
+  productName: string | null
+  effectiveDate: string | null
+  mainPremium: number | null
   expectedAmount: number
   statementAmount: number | null
   receivedAmount: number | null
@@ -31,6 +36,13 @@ export interface ReceivableDetail {
   applicationNo: string | null
   policyYear: number | null
   insurerName: string | null
+  customerName: string | null
+  customerCode: string | null
+  productName: string | null
+  agentCode: string | null
+  agentName: string | null
+  effectiveDate: string | null
+  mainPremium: number | null
   expectedAmount: number
   statementAmount: number | null
   receivedAmount: number | null

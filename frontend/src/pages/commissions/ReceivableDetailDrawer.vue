@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, computed } from 'vue'
 import {
   fetchReceivable, reviewReceivable, confirmReceived, markNoCommission, reopenReceivable,
   fetchReceivableAudit, type ReceivableDetail, type AuditRow,
@@ -15,6 +15,7 @@ const money = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 
 const main = ref<ReceivableDetail | null>(null)
 const ov = ref<ReceivableDetail | null>(null)
 const audit = ref<AuditRow[]>([])
+const ref0 = computed(() => main.value ?? ov.value)
 const loading = ref(true)
 const error = ref<string | null>(null)
 
@@ -82,10 +83,21 @@ onMounted(load)
       <div v-else class="p-5">
         <div v-if="error" class="mb-3 rounded-lg bg-rose-50 px-4 py-2 text-sm text-rose-700">{{ error }}</div>
 
-        <!-- Reference -->
+        <!-- Reference — ข้อมูลสำหรับตรวจสอบการรับค่าคอม -->
         <div class="mb-4 rounded-lg bg-slate-50 p-3 text-sm">
-          <div class="font-medium text-slate-800">{{ main?.policyNo || ov?.policyNo || main?.applicationNo || '—' }}</div>
-          <div class="text-xs text-slate-500">{{ main?.insurerName || ov?.insurerName }} · ปีที่ {{ main?.policyYear ?? ov?.policyYear }}</div>
+          <div class="flex items-center justify-between">
+            <div class="font-medium text-slate-800">{{ ref0?.policyNo || ref0?.applicationNo || '—' }}</div>
+            <div class="text-xs text-slate-400">{{ ref0?.applicationNo && ref0?.policyNo ? ref0.applicationNo : '' }}</div>
+          </div>
+          <div class="mt-1 grid grid-cols-2 gap-x-4 gap-y-1 text-xs text-slate-500">
+            <div><span class="text-slate-400">ลูกค้า:</span> {{ ref0?.customerName || '—' }}<span v-if="ref0?.customerCode" class="text-slate-400"> ({{ ref0.customerCode }})</span></div>
+            <div><span class="text-slate-400">บริษัทประกัน:</span> {{ ref0?.insurerName || '—' }}</div>
+            <div><span class="text-slate-400">แบบประกัน:</span> {{ ref0?.productName || '—' }}</div>
+            <div><span class="text-slate-400">ปีกรมธรรม์:</span> ปีที่ {{ ref0?.policyYear ?? '—' }}</div>
+            <div><span class="text-slate-400">วันเริ่มคุ้มครอง:</span> {{ ref0?.effectiveDate ? fmtDate(ref0.effectiveDate) : '—' }}</div>
+            <div><span class="text-slate-400">เบี้ยหลัก:</span> {{ ref0?.mainPremium != null ? '฿' + money(ref0.mainPremium) : '—' }}</div>
+            <div class="col-span-2"><span class="text-slate-400">ตัวแทน:</span> {{ ref0?.agentName || '—' }}<span v-if="ref0?.agentCode" class="text-slate-400"> ({{ ref0.agentCode }})</span></div>
+          </div>
         </div>
 
         <!-- MAIN + OV legs -->

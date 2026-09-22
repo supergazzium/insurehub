@@ -172,9 +172,13 @@ onMounted(async () => {
         <table class="min-w-full divide-y divide-slate-200 text-sm">
           <thead class="bg-slate-50 text-left text-xs uppercase tracking-wide text-slate-500">
             <tr>
-              <th class="px-4 py-3">กรมธรรม์ / ลูกค้า</th>
+              <th class="px-4 py-3">เลขกรมธรรม์ / ใบคำขอ</th>
+              <th class="px-4 py-3">ลูกค้า</th>
+              <th class="px-4 py-3">แบบประกัน</th>
+              <th class="px-4 py-3">วันเริ่ม</th>
+              <th class="px-4 py-3 text-right">เบี้ย</th>
               <th v-if="isHistory" class="px-4 py-3">ประเภท</th>
-              <th class="px-4 py-3 text-right">ควรได้</th>
+              <th class="px-4 py-3 text-right">ควรได้รับ</th>
               <th class="px-4 py-3 text-right">บริษัทแจ้ง</th>
               <th class="px-4 py-3 text-right">ผลต่าง</th>
               <th class="px-4 py-3">สถานะ</th>
@@ -183,9 +187,9 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-if="loading"><td colspan="8" class="px-4 py-10 text-center text-slate-400">กำลังโหลด…</td></tr>
+            <tr v-if="loading"><td colspan="12" class="px-4 py-10 text-center text-slate-400">กำลังโหลด…</td></tr>
             <tr v-else-if="rows.length === 0">
-              <td colspan="8" class="px-4 py-12 text-center">
+              <td colspan="12" class="px-4 py-12 text-center">
                 <div class="text-slate-400">ไม่มีรายการ</div>
                 <div v-if="isHistory && !q && !statusFilter" class="mx-auto mt-2 max-w-md text-xs text-slate-400">
                   รายการรับค่าคอมจะปรากฏที่นี่หลังจากเริ่มตรวจรับที่แท็บ "ค่าคอมหลัก" หรือ "ค่าคอม OV"
@@ -195,11 +199,21 @@ onMounted(async () => {
             </tr>
             <tr v-for="r in rows" :key="r.id" class="cursor-pointer hover:bg-slate-50" @click="openRow(r)">
               <td class="px-4 py-3">
-                <div class="font-medium text-slate-800">{{ r.policyNo || r.applicationNo || '—' }}</div>
-                <div class="text-xs text-slate-400">{{ r.customerName }}</div>
+                <div class="font-medium text-slate-800">{{ r.policyNo || '—' }}</div>
+                <div class="text-xs text-slate-400">{{ r.applicationNo || '' }}</div>
               </td>
+              <td class="px-4 py-3">
+                <div class="text-slate-700">{{ r.customerName || '—' }}</div>
+                <div class="text-xs text-slate-400">{{ r.customerCode || '' }}</div>
+              </td>
+              <td class="px-4 py-3">
+                <div class="max-w-[180px] truncate text-slate-600" :title="r.productName || ''">{{ r.productName || '—' }}</div>
+                <div class="text-xs text-slate-400">{{ r.agentName || r.agentCode || '' }}</div>
+              </td>
+              <td class="px-4 py-3 text-slate-500">{{ r.effectiveDate ? fmtDate(r.effectiveDate) : '—' }}</td>
+              <td class="px-4 py-3 text-right text-slate-500">{{ r.mainPremium !== null ? '฿' + money(r.mainPremium) : '—' }}</td>
               <td v-if="isHistory" class="px-4 py-3 text-xs text-slate-500">{{ r.commissionType }}</td>
-              <td class="px-4 py-3 text-right text-slate-700">฿{{ money(r.expectedAmount) }}</td>
+              <td class="px-4 py-3 text-right font-medium text-slate-800">฿{{ money(r.expectedAmount) }}</td>
               <td class="px-4 py-3 text-right text-slate-600">{{ r.statementAmount !== null ? '฿' + money(r.statementAmount) : '—' }}</td>
               <td class="px-4 py-3 text-right" :class="(r.differenceAmount ?? 0) !== 0 ? 'text-rose-600' : 'text-slate-400'">
                 {{ r.differenceAmount !== null ? (r.differenceAmount > 0 ? '+' : '') + '฿' + money(r.differenceAmount) : '—' }}
