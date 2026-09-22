@@ -55,7 +55,7 @@ import { MODULES } from '../types/modules'
 const IMPLEMENTED_MODULES = new Set([
   'tenant-settings', 'carriers', 'products', 'contracts',
   'agents', 'customers', 'policies', 'renewal-pipeline', 'collections', 'follow-ups',
-  'rebate-reconciliation', 'commission-payout',
+  'rebate-reconciliation', 'commission-payout', 'commission-receipt',
   'import-failures',
   'agent-support', 'agent-operation-support',
   // Phase 2 (agent portal)
@@ -164,6 +164,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'commissions/rebates', name: 'commission-rebates', component: RebateReconciliation, meta: { moduleKey: 'rebate-reconciliation' } },
       { path: 'commissions/payouts', name: 'commission-payouts', component: () => import('../pages/commissions/CommissionPayouts.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/payouts/:id', name: 'commission-payout-detail', component: () => import('../pages/commissions/CommissionPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
+      { path: 'commissions/receipts', name: 'commission-receipts', component: () => import('../pages/commissions/CommissionReceipts.vue'), meta: { moduleKey: 'commission-receipt' } },
       { path: 'settings/import-failures', name: 'settings-import-failures', component: ImportFailures, meta: { moduleKey: 'import-failures' } },
       { path: 'support', name: 'agent-support', component: AgentSupport, meta: { moduleKey: 'agent-support' } },
       { path: 'ops', name: 'agent-operation-support', component: AgentOperationSupport, meta: { moduleKey: 'agent-operation-support' } },

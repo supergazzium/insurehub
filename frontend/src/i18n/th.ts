@@ -138,6 +138,11 @@ export default {
       short: 'ทำจ่ายค่าคอม',
       description: 'สร้างรอบจ่ายค่าคอมประจำเดือน snapshot รายการ หักพิเศษ และยืนยันการจ่ายแบบป้องกันจ่ายซ้ำ',
     },
+    commissionReceipt: {
+      name: 'รับค่าคอมจากบริษัทประกัน',
+      short: 'รับค่าคอม',
+      description: 'บันทึกรับค่าคอม Main/OV เทียบยอดที่บริษัทประกันแจ้ง ตรวจ Matched/Mismatch แนบไฟล์ Statement และ audit',
+    },
     payouts: {
       name: 'การจ่ายเงิน',
       short: 'จ่ายเงิน',

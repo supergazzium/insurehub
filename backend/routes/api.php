@@ -23,6 +23,7 @@ use App\Http\Controllers\Api\CarrierController;
 use App\Http\Controllers\Api\CarrierCredentialController;
 use App\Http\Controllers\Api\CarrierProductTypeRateController;
 use App\Http\Controllers\Api\CommissionPayoutController;
+use App\Http\Controllers\Api\CommissionReceiptController;
 use App\Http\Controllers\Api\CommissionTierController;
 use App\Http\Controllers\Api\ContractController;
 use App\Http\Controllers\Api\CustomerAssignmentController;
@@ -144,6 +145,21 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('commission-payout-batches/{batch}/adjustments', [CommissionPayoutController::class, 'addAdjustment']);
     Route::post('commission-payout-batches/{batch}/mark-paid', [CommissionPayoutController::class, 'markPaid']);
     Route::post('commission-payout-batches/{batch}/cancel', [CommissionPayoutController::class, 'cancel']);
+
+    // รับค่าคอมจากบริษัทประกัน (insurer commission receipt — Phase 1 manual).
+    Route::get('commission-receivables', [CommissionReceiptController::class, 'index']);
+    Route::get('commission-receivables/{receivable}', [CommissionReceiptController::class, 'show']);
+    Route::patch('commission-receivables/{receivable}/review', [CommissionReceiptController::class, 'review']);
+    Route::post('commission-receivables/{receivable}/confirm-received', [CommissionReceiptController::class, 'confirmReceived']);
+    Route::post('commission-receivables/{receivable}/mark-no-commission', [CommissionReceiptController::class, 'markNoCommission']);
+    Route::post('commission-receivables/{receivable}/reopen', [CommissionReceiptController::class, 'reopen']);
+    Route::get('commission-receivables/{receivable}/audit-log', [CommissionReceiptController::class, 'auditLog']);
+    Route::get('commission-reconciliation/summary', [CommissionReceiptController::class, 'summary']);
+    Route::get('commission-receipt-batches', [CommissionReceiptController::class, 'indexBatches']);
+    Route::post('commission-receipt-batches', [CommissionReceiptController::class, 'storeBatch']);
+    Route::get('commission-receipt-batches/{batch}', [CommissionReceiptController::class, 'showBatch']);
+    Route::post('commission-receipt-batches/{batch}/files', [CommissionReceiptController::class, 'uploadFile']);
+    Route::get('commission-receipt-files/{file}/download', [CommissionReceiptController::class, 'downloadFile']);
 
     // MGM product-types — full CRUD (unlike tiers which are fixed at 3).
     Route::apiResource('product-types', ProductTypeController::class)->except(['show']);

@@ -236,6 +236,20 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
+    key: 'commission-receipt',
+    number: 8,
+    routePath: '/commissions/receipts',
+    routeName: 'commission-receipts',
+    icon: 'pi pi-inbox',
+    i18nKey: 'commissionReceipt',
+    group: 'commission',
+    functions: [
+      'บันทึกรับค่าคอมจากบริษัทประกัน (Main / OV)',
+      'ตรวจยอด Matched / Mismatch + Reopen พร้อม audit',
+      'แนบไฟล์ Statement (Excel / PDF) เป็นรอบรับเอกสาร',
+    ],
+  },
+  {
     key: 'rebate-reconciliation',
     number: 10,
     routePath: '/commissions/rebates',
