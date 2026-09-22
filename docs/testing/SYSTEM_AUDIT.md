@@ -54,14 +54,16 @@ current data 458 of ~475 policies match because commission amounts are mostly 0.
 
 ## 🟠 Medium
 
-### M1. Team assignment is invisible / unguided
+### M1. Team assignment is invisible / unguided  ✅ FIXED
+> **Fixed:** the create form now persists teamId + level (was silently dropped); the hub shows an amber "ไม่มีสายงาน" warning badge; the form nudges to assign one.
 Every TST agent shows **TEAM = —**. The agent create/edit form has a สายงาน/team
 field, but nothing prompts the operator to assign a team, and the MGM/team-volume
 logic depends on it. New agents silently have no team.
 - **Suggestion:** surface team on the create form prominently; consider a default
   or a "no team assigned" warning badge on the hub.
 
-### M2. Commission amounts are ฿0 across most of the UI on seed/real data
+### M2. Commission amounts are ฿0 across most of the UI on seed/real data  ✅ FIXED
+> **Fixed:** payout preview and receipt/dashboard now show an explanatory hint when items exist but the total is ฿0 (commission not yet recorded), pointing to where to enter it.
 Payout preview, receipt expected amounts, and dashboard KPIs show ฿0 for most
 policies because `comm_hub_to_agent_amount` / `comm_carrier_to_hub_amount` /
 `policy_rebates` are unpopulated. The features are correct, but a first-time user
@@ -69,7 +71,8 @@ sees "฿0 everywhere" and may think it's broken.
 - **Suggestion:** an empty-state hint ("ยังไม่มีการบันทึกค่าคอมสำหรับกรมธรรม์เหล่านี้")
   and/or a way to bulk-set/compute commission from the product rate.
 
-### M3. Payout eligibility ignores approval/freelook nuance vs the spec's original filter
+### M3. Payout eligibility ignores approval/freelook nuance vs the spec's original filter  ✅ DOCUMENTED
+> **Resolved (documented divergence):** the legacy freelook + insurer-payment gates are intentionally omitted — freelook doesn't apply to non-life, and insurer-payment state now lives in the receivables module. A detailed code comment records this so finance can re-add per-product-type gates if ever required. No behaviour change.
 The Access spec filtered on `Freelook_Status = TRUE` and
 `Payment_InsComp_Status NOT IN ('2','5')`. The web payout eligibility uses
 status ∈ (active,issued) + not-already-paid + not-in-live-batch, but does **not**
@@ -78,7 +81,8 @@ may include policies the old system would have excluded.
 - **Suggestion:** confirm with finance whether freelook / insurer-payment gating
   is still required; document the intentional divergence if not.
 
-### M4. Receivables are created lazily and invisibly
+### M4. Receivables are created lazily and invisibly  ✅ FIXED
+> **Fixed:** the dashboard now returns potentialExpected (from policies' carrier→hub commission) + receivablesMaterialised count. A manager opening a fresh scope sees real "ยอดคาดการณ์" figures and a banner explaining nothing's been reconciled yet.
 Insurer-receipt rows only exist after someone opens a Main/OV tab for a given
 Year+Insurer. Before that, History and Dashboard are empty even though there are
 hundreds of eligible policies. A manager opening the Dashboard first sees nothing.

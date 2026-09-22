@@ -38,9 +38,20 @@ class CommissionPayoutService
      *  - created_at (วันแจ้งงาน) within [from, to] Bangkok, half-open on the end
      *  - not cancelled
      *  - status approved (active/issued)
-     *  - freelook cleared (freelook_active — life; non-life has none)
      *  - agent commission not already paid (no paid rebate row)
      *  - not already sitting in a non-cancelled batch
+     *
+     * DIVERGENCE FROM THE ACCESS SPEC (documented decision, M3 audit):
+     * The legacy VBA also gated on `Freelook_Status = TRUE` and
+     * `Payment_InsComp_Status NOT IN ('2','5')`. Both are intentionally OMITTED
+     * here:
+     *   - Freelook only applies to life products; gating on it would wrongly
+     *     exclude every non-life payout. The web model tracks freelook per-life
+     *     policy (freelook_end_date) for the follow-up list, not as a payout gate.
+     *   - There is no clean web equivalent of Payment_InsComp_Status; the
+     *     insurer-payment state now lives in the separate receivables module.
+     * If finance requires either gate, add it here per product-type — do not
+     * re-introduce a blanket freelook check.
      */
     private function eligibleQuery(int $tenantId, string $from, string $to)
     {

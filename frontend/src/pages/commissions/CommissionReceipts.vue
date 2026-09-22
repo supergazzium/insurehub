@@ -160,6 +160,9 @@ onMounted(async () => {
           <div class="text-xs text-slate-500">ไม่ตรง / ไม่มีค่าคอม</div><div class="text-lg font-semibold text-rose-700">{{ summary.mismatchCount }} / {{ summary.noCommissionCount }}</div>
         </div>
       </div>
+      <p v-if="summary && summary.expected === 0" class="mb-4 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+        <i class="pi pi-info-circle" /> ยอดที่ควรได้รับเป็น ฿0 — กรมธรรม์ในกลุ่มนี้ยังไม่ได้บันทึกค่าคอมที่รับจากบริษัทประกัน (comm บ.ประกัน→ฮับ) ที่หน้าแก้ไขกรมธรรม์
+      </p>
 
       <div v-if="error" class="mb-3 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</div>
       <div v-if="needsFilter && !canQuery" class="rounded-lg bg-sky-50 px-4 py-3 text-sm text-sky-700">กรุณาเลือกปีกรมธรรม์และบริษัทประกันเพื่อแสดงรายการ</div>

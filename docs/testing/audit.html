@@ -125,7 +125,7 @@
     <div class="chip t-med"><span class="n">5</span> Medium</div>
     <div class="chip t-low"><span class="n">5</span> Low</div>
     <div class="chip t-ok"><span class="n">6</span> Verified working</div>
-    <div class="chip t-ok"><span class="n">3</span> Fixed (H1·H2·M5)</div>
+    <div class="chip t-ok"><span class="n">7</span> Fixed / documented</div>
   </div>
 
   <h2>What works well</h2>
@@ -162,28 +162,28 @@
   <h2>Medium severity</h2>
 
   <article class="finding med">
-    <div class="fhead"><span class="fid">M1</span><span class="badge med">Medium</span></div>
+    <div class="fhead"><span class="fid">M1</span><span class="badge med">Medium</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Fixed</span></div>
     <div class="ftitle">Team assignment is invisible and unguided</div>
     <p>Every seeded agent shows <b>TEAM = —</b>. The create/edit form has a สายงาน/team field, but nothing prompts assignment, and MGM team-volume logic depends on it. New agents silently have no team.</p>
     <p class="fix"><b>Suggestion →</b> surface team on the create form; add a "no team assigned" badge on the hub.</p>
   </article>
 
   <article class="finding med">
-    <div class="fhead"><span class="fid">M2</span><span class="badge med">Medium</span></div>
+    <div class="fhead"><span class="fid">M2</span><span class="badge med">Medium</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Fixed</span></div>
     <div class="ftitle">Commission shows ฿0 across most of the UI</div>
     <p>Payout preview, receipt expected amounts, and dashboard KPIs read ฿0 for most policies because the commission columns and <code>policy_rebates</code> are unpopulated. The features are correct, but a first-time user sees "฿0 everywhere" and assumes it's broken.</p>
     <p class="fix"><b>Suggestion →</b> an empty-state hint, and/or a way to compute commission from the product rate in bulk.</p>
   </article>
 
   <article class="finding med">
-    <div class="fhead"><span class="fid">M3</span><span class="badge med">Medium</span></div>
+    <div class="fhead"><span class="fid">M3</span><span class="badge med">Medium</span><span class="badge" style="color:var(--accent);background:var(--accent-soft);border-color:var(--accent)">✓ Documented</span></div>
     <div class="ftitle">Payout eligibility diverges from the Access spec's filter</div>
     <p>The legacy spec gated on <code>Freelook_Status = TRUE</code> and <code>Payment_InsComp_Status NOT IN ('2','5')</code>. The web payout uses status ∈ (active, issued) + not-paid + not-in-live-batch, but skips the freelook and insurer-payment gates.</p>
     <p class="fix"><b>Suggestion →</b> confirm with finance whether those gates still apply; document the divergence if intentional.</p>
   </article>
 
   <article class="finding med">
-    <div class="fhead"><span class="fid">M4</span><span class="badge med">Medium</span></div>
+    <div class="fhead"><span class="fid">M4</span><span class="badge med">Medium</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Fixed</span></div>
     <div class="ftitle">Receivables are created lazily and invisibly</div>
     <p>Insurer-receipt rows exist only after someone opens a Main/OV tab for a Year+Insurer. Before that, History and the Dashboard are empty despite hundreds of eligible policies — a manager opening the Dashboard first sees nothing.</p>
     <p class="fix"><b>Suggestion →</b> materialise receivables on a schedule, or show Dashboard "potential" figures from the underlying policies before rows exist.</p>

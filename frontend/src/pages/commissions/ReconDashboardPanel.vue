@@ -52,7 +52,8 @@ onMounted(load)
       <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
         <div class="rounded-xl border border-slate-200 bg-white p-4">
           <div class="text-xs text-slate-500">ควรได้รับ (บริษัทประกัน)</div>
-          <div class="mt-1 text-xl font-semibold text-slate-800">฿{{ money(data.kpi.expectedInsurer) }}</div>
+          <div class="mt-1 text-xl font-semibold text-slate-800">฿{{ money(data.kpi.expectedInsurer || data.kpi.potentialExpected) }}</div>
+          <div v-if="data.kpi.expectedInsurer === 0 && data.kpi.potentialExpected > 0" class="mt-0.5 text-[10px] text-sky-600">ยอดคาดการณ์</div>
         </div>
         <div class="rounded-xl border border-slate-200 bg-white p-4">
           <div class="text-xs text-slate-500">รับแล้ว</div>
@@ -83,6 +84,13 @@ onMounted(load)
           <div class="mt-1 text-xl font-semibold text-emerald-700">฿{{ money(data.kpi.realizedMargin) }}</div>
         </div>
       </div>
+
+      <p v-if="data.kpi.receivablesMaterialised === 0 && data.kpi.potentialExpected > 0"
+        class="mb-4 rounded-lg bg-sky-50 px-4 py-3 text-sm text-sky-800">
+        <i class="pi pi-info-circle" /> ยังไม่มีการบันทึกรับค่าคอมในกลุ่มนี้ — ตัวเลข "ควรได้รับ" ด้านล่างเป็น
+        <b>ยอดคาดการณ์</b> จากค่าคอมที่ตั้งไว้บนกรมธรรม์ (฿{{ money(data.kpi.potentialExpected) }}).
+        เริ่มบันทึกได้ที่แท็บ "ค่าคอมหลัก" / "ค่าคอม OV"
+      </p>
 
       <div class="grid grid-cols-1 gap-4 lg:grid-cols-2">
         <!-- Chart 1: Expected vs Received by month -->

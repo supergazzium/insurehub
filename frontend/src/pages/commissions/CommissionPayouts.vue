@@ -144,6 +144,9 @@ onMounted(load)
           <div><span class="text-slate-500">ยอดรวม</span> <b>฿{{ money(preview.totals.totalAmount) }}</b></div>
         </div>
         <p v-if="preview.totals.totalItems === 0" class="mt-2 text-sm text-amber-700">ไม่พบรายการที่เข้าเงื่อนไขในช่วงวันที่นี้</p>
+        <p v-else-if="preview.totals.totalAmount === 0" class="mt-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-700">
+          <i class="pi pi-info-circle" /> พบ {{ preview.totals.totalItems }} รายการ แต่ยอดค่าคอมรวมเป็น ฿0 — เนื่องจากกรมธรรม์เหล่านี้ยังไม่ได้บันทึกค่าคอมตัวแทน (ตรวจสอบที่หน้าแก้ไขกรมธรรม์ หรือดูรายการใน "งานค้าง → ยังไม่บันทึกค่าคอม")
+        </p>
         <details v-if="preview.warnings.length" class="mt-2 text-xs text-amber-700">
           <summary class="cursor-pointer">คำเตือน {{ preview.warnings.length }} รายการ</summary>
           <ul class="mt-1 list-disc pl-5">

@@ -146,6 +146,8 @@ export function receiptFileDownloadUrl(fileId: string): string {
 
 export interface DashboardKpi {
   expectedInsurer: number
+  potentialExpected: number
+  receivablesMaterialised: number
   receivedInsurer: number
   outstanding: number
   mismatchCount: number

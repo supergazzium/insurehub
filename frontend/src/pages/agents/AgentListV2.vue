@@ -254,7 +254,12 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
                 </div>
                 <span v-else class="text-xs text-slate-400">—</span>
               </td>
-              <td class="px-4 py-2 text-slate-700">{{ a.team || a.teamNo || '—' }}</td>
+              <td class="px-4 py-2">
+                <span v-if="a.team || a.teamNo" class="text-slate-700">{{ a.team || a.teamNo }}</span>
+                <span v-else class="inline-flex items-center gap-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200" title="ตัวแทนนี้ยังไม่มีสายงาน — มีผลต่อการคำนวณยอดทีม">
+                  <i class="pi pi-exclamation-triangle text-[9px]" /> ไม่มีสายงาน
+                </span>
+              </td>
               <td class="px-4 py-2">
                 <div class="font-mono text-xs text-slate-700">{{ a.licenseLifeNo || '—' }}</div>
                 <span :class="['inline-flex px-2 py-0.5 rounded-md text-[10px] mt-0.5', licenseStatus(a.licenseLifeExpiry).cls]">

@@ -155,6 +155,8 @@ const payload = computed<Record<string, unknown>>(() => {
     licenseNonLifeNo: form.licenseNonLifeNo || null,
     licenseNonLifeExpiry: form.licenseNonLifeExpiry || null,
     parentAgentId: form.parentAgentId || null,
+    teamId: form.teamId || null,
+    level: form.level || null,
     joinedAt: form.joinedAt || null,
     notes: form.notes || null,
     active: form.active,
@@ -373,8 +375,8 @@ onMounted(load)
               <AgentPicker v-model="form.parentAgentId" placeholder="ค้นหาตัวแทนต้นสาย" />
             </FormField>
           </div>
-          <p v-if="!isEdit && (form.teamId || form.level)" class="mt-1 text-[10px] text-amber-600">
-            <i class="pi pi-info-circle text-[9px]" /> สายงาน/ระดับ จะตั้งค่าในหน้ารายละเอียดหลังสร้างตัวแทน
+          <p v-if="!form.teamId" class="mt-1 text-[10px] text-amber-600">
+            <i class="pi pi-info-circle text-[9px]" /> แนะนำให้กำหนดสายงาน — มีผลต่อการคำนวณค่าคอมและยอดทีม
           </p>
         </section>
 

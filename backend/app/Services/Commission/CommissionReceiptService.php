@@ -255,6 +255,17 @@ class CommissionReceiptService
         }
         $agentPayable = (float) (clone $payQ)->sum('p.comm_hub_to_agent_amount');
 
+        // Potential insurer-expected from the underlying policies (carrier→hub),
+        // so the Dashboard shows real figures even before receivable rows are
+        // materialised (M4). `receivablesMaterialised` tells the UI how many of
+        // these have actually been reconciled into commission_receivables.
+        $potentialExpected = (float) (clone $payQ)->sum('p.comm_carrier_to_hub_amount');
+        $materialised = (int) DB::table('commission_receivables')
+            ->where('tenant_id', $tenantId)
+            ->when($policyYear, fn ($q) => $q->where('policy_year', $policyYear))
+            ->when($insurerId, fn ($q) => $q->where('insurer_id', $insurerId))
+            ->count();
+
         $paidQ = DB::table('commission_payout_batch_items as bi')
             ->join('policies as p', 'p.id', '=', 'bi.policy_id')
             ->where('bi.tenant_id', $tenantId)
@@ -311,6 +322,8 @@ class CommissionReceiptService
         return [
             'kpi' => [
                 'expectedInsurer' => $ins['expected'],
+                'potentialExpected' => round($potentialExpected, 2),
+                'receivablesMaterialised' => $materialised,
                 'receivedInsurer' => $ins['received'],
                 'outstanding' => $ins['outstanding'],
                 'mismatchCount' => $ins['mismatchCount'],
