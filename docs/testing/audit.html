@@ -1,0 +1,263 @@
+<title>Commission System Audit</title>
+<meta name="description" content="Findings, severity, and test-scenario map for InsureHub's commission, follow-up, and collections modules.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap">
+<style>
+  :root{
+    --bg:#f5f7fa; --surface:#ffffff; --surface-2:#eef2f7;
+    --ink:#141a22; --ink-soft:#4a5568; --ink-faint:#7a879a;
+    --line:#dde4ec; --line-soft:#e8edf3;
+    --accent:#0e74e8; --accent-soft:#e6f0fd;
+    --hi:#dc2626; --hi-bg:#fdecec; --hi-line:#f5c6c6;
+    --med:#d97706; --med-bg:#fdf3e6; --med-line:#f2d9ad;
+    --low:#ca8a04; --low-bg:#fbf6e3; --low-line:#ecdca0;
+    --ok:#15803d; --ok-bg:#e7f5ec; --ok-line:#bfe2cb;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+    --sans:'IBM Plex Sans',system-ui,sans-serif;
+  }
+  :root:not([data-theme="light"]){
+    @media (prefers-color-scheme:dark){
+      --bg:#0e1319; --surface:#161d26; --surface-2:#1d2733;
+      --ink:#e6ecf3; --ink-soft:#a4b1c2; --ink-faint:#6f7d90;
+      --line:#26303c; --line-soft:#1f2833;
+      --accent:#4f9df5; --accent-soft:#132638;
+      --hi:#f87171; --hi-bg:#2a1719; --hi-line:#4a2427;
+      --med:#fbbf24; --med-bg:#291f10; --med-line:#48360f;
+      --low:#eab308; --low-bg:#241f0d; --low-line:#3f350f;
+      --ok:#4ade80; --ok-bg:#13251a; --ok-line:#22432e;
+    }
+  }
+  :root[data-theme="dark"]{
+    --bg:#0e1319; --surface:#161d26; --surface-2:#1d2733;
+    --ink:#e6ecf3; --ink-soft:#a4b1c2; --ink-faint:#6f7d90;
+    --line:#26303c; --line-soft:#1f2833;
+    --accent:#4f9df5; --accent-soft:#132638;
+    --hi:#f87171; --hi-bg:#2a1719; --hi-line:#4a2427;
+    --med:#fbbf24; --med-bg:#291f10; --med-line:#48360f;
+    --low:#eab308; --low-bg:#241f0d; --low-line:#3f350f;
+    --ok:#4ade80; --ok-bg:#13251a; --ok-line:#22432e;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);
+    line-height:1.6;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:920px;margin:0 auto;padding:56px 24px 96px}
+  .prose{max-width:70ch}
+
+  header{border-bottom:2px solid var(--accent);padding-bottom:22px;margin-bottom:14px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;
+    color:var(--accent);font-weight:600;margin:0 0 10px}
+  h1{font-size:clamp(28px,5vw,40px);line-height:1.1;margin:0;font-weight:700;text-wrap:balance;letter-spacing:-.01em}
+  .sub{color:var(--ink-soft);margin:14px 0 0;font-size:16px;max-width:64ch}
+  .meta{display:flex;flex-wrap:wrap;gap:8px 20px;margin-top:18px;font-family:var(--mono);
+    font-size:12.5px;color:var(--ink-faint)}
+  .meta b{color:var(--ink-soft);font-weight:500}
+
+  h2{font-size:13px;font-family:var(--mono);text-transform:uppercase;letter-spacing:.12em;
+    color:var(--ink-faint);font-weight:600;margin:54px 0 18px;
+    padding-bottom:8px;border-bottom:1px solid var(--line)}
+
+  /* severity summary bar */
+  .tally{display:flex;flex-wrap:wrap;gap:10px;margin:26px 0 6px}
+  .tally .chip{display:flex;align-items:baseline;gap:8px;padding:10px 16px;border-radius:10px;
+    border:1px solid var(--line);background:var(--surface);font-size:13px}
+  .tally .n{font-family:var(--mono);font-weight:600;font-size:19px}
+  .tally .t-hi .n{color:var(--hi)} .tally .t-med .n{color:var(--med)}
+  .tally .t-low .n{color:var(--low)} .tally .t-ok .n{color:var(--ok)}
+
+  /* works-well panel */
+  .ok-panel{background:var(--ok-bg);border:1px solid var(--ok-line);border-radius:14px;
+    padding:22px 24px;margin-top:8px}
+  .ok-panel h3{margin:0 0 12px;font-size:15px;color:var(--ok);display:flex;align-items:center;gap:9px}
+  .ok-panel ul{margin:0;padding-left:20px;color:var(--ink-soft);font-size:14.5px;display:grid;gap:7px}
+  .ok-panel b{color:var(--ink);font-weight:600}
+
+  /* finding cards */
+  .finding{background:var(--surface);border:1px solid var(--line);border-left-width:4px;
+    border-radius:12px;padding:20px 22px;margin-bottom:16px}
+  .finding.hi{border-left-color:var(--hi)}
+  .finding.med{border-left-color:var(--med)}
+  .finding.low{border-left-color:var(--low)}
+  .fhead{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:6px}
+  .fid{font-family:var(--mono);font-weight:600;font-size:13px;color:var(--ink-faint)}
+  .badge{font-family:var(--mono);font-size:11px;font-weight:600;letter-spacing:.06em;
+    text-transform:uppercase;padding:3px 9px;border-radius:999px;border:1px solid}
+  .badge.hi{color:var(--hi);background:var(--hi-bg);border-color:var(--hi-line)}
+  .badge.med{color:var(--med);background:var(--med-bg);border-color:var(--med-line)}
+  .badge.low{color:var(--low);background:var(--low-bg);border-color:var(--low-line)}
+  .ftitle{font-size:16.5px;font-weight:600;margin:2px 0 10px;letter-spacing:-.005em}
+  .finding p{margin:8px 0;color:var(--ink-soft);font-size:14.5px;max-width:72ch}
+  .finding p b{color:var(--ink);font-weight:600}
+  .fix{margin-top:12px;padding-top:12px;border-top:1px dashed var(--line);font-size:14px}
+  .fix b{color:var(--accent);font-weight:600}
+  code{font-family:var(--mono);font-size:.88em;background:var(--surface-2);
+    padding:1.5px 6px;border-radius:5px;color:var(--ink)}
+
+  /* scenario table */
+  .tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:12px;margin-top:6px}
+  table{width:100%;border-collapse:collapse;font-size:13.5px;min-width:560px}
+  th{text-align:left;font-family:var(--mono);font-size:11px;letter-spacing:.06em;text-transform:uppercase;
+    color:var(--ink-faint);font-weight:600;padding:12px 16px;background:var(--surface-2);
+    border-bottom:1px solid var(--line)}
+  td{padding:11px 16px;border-bottom:1px solid var(--line-soft);color:var(--ink-soft);vertical-align:top}
+  tr:last-child td{border-bottom:none}
+  td.code{font-family:var(--mono);font-size:12.5px;color:var(--ink);white-space:nowrap}
+  .tag{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:6px;
+    background:var(--accent-soft);color:var(--accent);font-weight:500;white-space:nowrap}
+  .foot{margin-top:60px;padding-top:20px;border-top:1px solid var(--line);
+    font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">InsureHub · QA Audit</p>
+    <h1>Commission System Audit</h1>
+    <p class="sub">Findings across the commission payout, insurer receipt, follow-up (ติดตามงาน) and collections (ติดตามเงิน) modules — exercised end-to-end with a labelled <code>TST</code> scenario cohort.</p>
+    <div class="meta">
+      <span><b>Method</b> UI + API walk-through</span>
+      <span><b>Dataset</b> TST cohort, Thai names</span>
+      <span><b>Modules</b> 4</span>
+    </div>
+  </header>
+
+  <div class="tally">
+    <div class="chip t-hi"><span class="n">2</span> High</div>
+    <div class="chip t-med"><span class="n">5</span> Medium</div>
+    <div class="chip t-low"><span class="n">5</span> Low</div>
+    <div class="chip t-ok"><span class="n">6</span> Verified working</div>
+  </div>
+
+  <h2>What works well</h2>
+  <div class="ok-panel">
+    <h3>✓ Verified end-to-end</h3>
+    <ul>
+      <li><b>MGM commission cascade</b> — DIRECT + REFERRAL + MANAGEMENT_DIFFERENTIAL fire correctly up the upline chain on payment (8 ledger rows: ฿4,800 / ฿360 / ฿1,800), honoring tier + rank rates.</li>
+      <li><b>Agent registration → approval</b> — pending banner, one-click อนุมัติ/ปฏิเสธ, status flips to active. Upline tree renders Thai names correctly.</li>
+      <li><b>Follow-up (ติดตามงาน)</b> — all 6 categories classify policies correctly; cancelled/expired excluded.</li>
+      <li><b>Collections (ติดตามเงิน)</b> — cash / installment / split classification + งวด schedule + partial-payment netting.</li>
+      <li><b>Commission payout</b> — preview → snapshot → approve → mark-paid, with double-pay guard, VAT PDFs (1/2/3), CSV export, audit trail.</li>
+      <li><b>Insurer receipt</b> — Main/OV, all 5 statuses, reopen, receipt batch + files, reconciliation dashboard with margin.</li>
+    </ul>
+  </div>
+
+  <h2>High severity</h2>
+
+  <article class="finding hi">
+    <div class="fhead"><span class="fid">H1</span><span class="badge hi">High</span></div>
+    <div class="ftitle">One policy appears in many worklists at once</div>
+    <p>A single active, unpaid policy shows simultaneously in <b>Collections</b> (unpaid), <b>Follow-up → no_commission / not_delivered</b>, and — if life — <b>Freelook</b>. The <code>TST-RC*</code> receipt-test policies even surface in Collections as "cash unpaid ฿10,000".</p>
+    <p><b>Why it matters:</b> staff can't tell which worklist owns a policy; the same item gets chased by several people. There's no cross-list dedup or "handled elsewhere" signal.</p>
+    <p class="fix"><b>Suggestion →</b> a per-policy worklist state that suppresses a row once actioned, or at minimum show which other lists a policy is currently in.</p>
+  </article>
+
+  <article class="finding hi">
+    <div class="fhead"><span class="fid">H2</span><span class="badge hi">High</span></div>
+    <div class="ftitle">"no_commission" fires on ~458 of ~475 policies</div>
+    <p>The rule is <code>active AND (carrier→hub OR hub→agent amount is null/0)</code>. Because commission amounts are mostly 0 in real data, almost every policy matches.</p>
+    <p><b>Why it matters:</b> a worklist containing "nearly everything" isn't actionable — it's noise that buries the genuinely-missing ones.</p>
+    <p class="fix"><b>Suggestion →</b> scope it (only policies past an age, or where the product <em>should</em> carry commission), or split "never had commission" from "commission not yet entered".</p>
+  </article>
+
+  <h2>Medium severity</h2>
+
+  <article class="finding med">
+    <div class="fhead"><span class="fid">M1</span><span class="badge med">Medium</span></div>
+    <div class="ftitle">Team assignment is invisible and unguided</div>
+    <p>Every seeded agent shows <b>TEAM = —</b>. The create/edit form has a สายงาน/team field, but nothing prompts assignment, and MGM team-volume logic depends on it. New agents silently have no team.</p>
+    <p class="fix"><b>Suggestion →</b> surface team on the create form; add a "no team assigned" badge on the hub.</p>
+  </article>
+
+  <article class="finding med">
+    <div class="fhead"><span class="fid">M2</span><span class="badge med">Medium</span></div>
+    <div class="ftitle">Commission shows ฿0 across most of the UI</div>
+    <p>Payout preview, receipt expected amounts, and dashboard KPIs read ฿0 for most policies because the commission columns and <code>policy_rebates</code> are unpopulated. The features are correct, but a first-time user sees "฿0 everywhere" and assumes it's broken.</p>
+    <p class="fix"><b>Suggestion →</b> an empty-state hint, and/or a way to compute commission from the product rate in bulk.</p>
+  </article>
+
+  <article class="finding med">
+    <div class="fhead"><span class="fid">M3</span><span class="badge med">Medium</span></div>
+    <div class="ftitle">Payout eligibility diverges from the Access spec's filter</div>
+    <p>The legacy spec gated on <code>Freelook_Status = TRUE</code> and <code>Payment_InsComp_Status NOT IN ('2','5')</code>. The web payout uses status ∈ (active, issued) + not-paid + not-in-live-batch, but skips the freelook and insurer-payment gates.</p>
+    <p class="fix"><b>Suggestion →</b> confirm with finance whether those gates still apply; document the divergence if intentional.</p>
+  </article>
+
+  <article class="finding med">
+    <div class="fhead"><span class="fid">M4</span><span class="badge med">Medium</span></div>
+    <div class="ftitle">Receivables are created lazily and invisibly</div>
+    <p>Insurer-receipt rows exist only after someone opens a Main/OV tab for a Year+Insurer. Before that, History and the Dashboard are empty despite hundreds of eligible policies — a manager opening the Dashboard first sees nothing.</p>
+    <p class="fix"><b>Suggestion →</b> materialise receivables on a schedule, or show Dashboard "potential" figures from the underlying policies before rows exist.</p>
+  </article>
+
+  <article class="finding med">
+    <div class="fhead"><span class="fid">M5</span><span class="badge med">Medium</span></div>
+    <div class="ftitle">Two different meanings of <code>vat_type</code></div>
+    <p><code>agents.vat_type</code> is <code>''|none|vat7|wht*</code> in the agent form, but the payout engine reads it as numeric <code>'1'|'2'|'3'</code>. An agent created through the form carries no numeric value, so its VAT PDF defaults to "no VAT" regardless of <code>has_vat</code>/<code>vat_mode</code>.</p>
+    <p><b>Empirical:</b> 324 agents have numeric <code>vat_type='1'</code> (legacy import) but 52 have empty <code>''</code> — those are the ones at risk.</p>
+    <p class="fix"><b>Suggestion →</b> make the payout read <code>has_vat</code> + <code>vat_mode</code> instead of the legacy numeric field, or map between them explicitly.</p>
+  </article>
+
+  <h2>Low / polish</h2>
+
+  <article class="finding low">
+    <div class="fhead"><span class="fid">L1</span><span class="badge low">Low</span></div>
+    <div class="ftitle">Cancelled exclusion — verified OK</div>
+    <p>Confirmed cancelled policies are excluded from no_commission and not_delivered (queries scope to <code>status='active'</code>). No action needed.</p>
+  </article>
+
+  <article class="finding low">
+    <div class="fhead"><span class="fid">L2</span><span class="badge low">Low</span></div>
+    <div class="ftitle">Collections <code>paid</code> fallback can double-count</div>
+    <p><code>paid = SUM(policy_payments)</code>, with a <code>total_premium_paid</code> fallback only when zero rows. If both are populated on a real policy, verify there's no double count. <em>(A non-idempotent seeder insert exposed this during testing — fixed in the seeder.)</em></p>
+  </article>
+
+  <article class="finding low">
+    <div class="fhead"><span class="fid">L3</span><span class="badge low">Low</span></div>
+    <div class="ftitle">Freelook follow-up has no inline date entry</div>
+    <p>Correct per spec, but you must open the full policy editor to set the freelook date. An inline date field on the follow-up row would speed the chase.</p>
+  </article>
+
+  <article class="finding low">
+    <div class="fhead"><span class="fid">L4</span><span class="badge low">Low</span></div>
+    <div class="ftitle">Receipt page History is empty on a fresh DB</div>
+    <p>The page now defaults to History (good), but History stays empty until Main/OV seed rows. A first-run hint would explain the emptiness.</p>
+  </article>
+
+  <article class="finding low">
+    <div class="fhead"><span class="fid">L5</span><span class="badge low">Low</span></div>
+    <div class="ftitle">Payout PDF filename collisions</div>
+    <p>Filenames use the agent's display name, truncated at 120 chars. The ZIP path dedups duplicates; the single-download path does not — verify no collision for agents sharing a code prefix.</p>
+  </article>
+
+  <h2>Test scenario cohort</h2>
+  <p class="sub" style="margin:0 0 18px">Seeded by <code>php artisan db:seed --class=TestScenarioSeeder</code> — idempotent, all rows prefixed <code>TST</code>, existing production data untouched.</p>
+  <div class="tablewrap">
+    <table>
+      <thead><tr><th>Area</th><th>Record</th><th>Scenario</th></tr></thead>
+      <tbody>
+        <tr><td rowspan="5" class="code">Agents</td><td class="code">TST-A01</td><td>สมชาย ใจดีมั่นคง · Lv5 · head · VAT type&nbsp;1</td></tr>
+        <tr><td class="code">TST-A02</td><td>สมหญิง รักการขาย · Lv3 · VAT exclude</td></tr>
+        <tr><td class="code">TST-A03</td><td>อนุชา พากเพียรยิ่ง · Lv1 · the seller · VAT include</td></tr>
+        <tr><td class="code">TST-A04</td><td>วิภาดา ตั้งมั่นเสมอ · Lv2</td></tr>
+        <tr><td class="code">TST-A05</td><td>ธนพล รอการอนุมัติ · <span class="tag">pending approval</span></td></tr>
+        <tr><td rowspan="2" class="code">MGM</td><td class="code">TST01-mgm-motor</td><td>fires DIRECT + REFERRAL + DIFFERENTIAL up A03→A02→A01</td></tr>
+        <tr><td class="code">TST02-mgm-life</td><td>life-carrier commission path</td></tr>
+        <tr><td rowspan="6" class="code">ติดตามงาน</td><td class="code">TST-FU1</td><td>สถานะรออนุมัติ (submitted)</td></tr>
+        <tr><td class="code">TST-FU2</td><td>ยังไม่บันทึกเลขกรมธรรม์</td></tr>
+        <tr><td class="code">TST-FU3</td><td>ยังไม่จัดส่ง</td></tr>
+        <tr><td class="code">TST-FU4</td><td>Freelook (life, no end date)</td></tr>
+        <tr><td class="code">TST-FU5</td><td>ยังไม่บันทึกค่าคอม</td></tr>
+        <tr><td class="code">TST-FU6</td><td>ยกเลิก</td></tr>
+        <tr><td rowspan="3" class="code">ติดตามเงิน</td><td class="code">TST-COL1</td><td>cash · unpaid ฿10,000</td></tr>
+        <tr><td class="code">TST-COL2</td><td>cash · paid ฿4,000 / outstanding ฿6,000</td></tr>
+        <tr><td class="code">TST-COL3</td><td>installment · 6 งวด · overdue + 1 reminder</td></tr>
+        <tr><td rowspan="5" class="code">รับค่าคอม</td><td class="code">TST-RC1</td><td>Pending</td></tr>
+        <tr><td class="code">TST-RC2</td><td>Matched</td></tr>
+        <tr><td class="code">TST-RC3</td><td>Mismatch</td></tr>
+        <tr><td class="code">TST-RC4</td><td>Received</td></tr>
+        <tr><td class="code">TST-RC5</td><td>No Commission · + batch TST-REC-0001</td></tr>
+      </tbody>
+    </table>
+  </div>
+
+  <p class="foot">Generated from the TST scenario cohort · cleanup: delete rows where code/application_no/reference/batch_no LIKE 'TST%'</p>
+</div>
