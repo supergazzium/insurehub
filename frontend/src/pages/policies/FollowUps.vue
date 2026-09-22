@@ -2,6 +2,7 @@
 import { onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { fetchFollowUps, type FollowUpRow, type FollowUpCategory } from '../../api/followups'
+import { updatePolicy } from '../../api/policies'
 import { ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
 
@@ -13,6 +14,23 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const category = ref<FollowUpCategory>('approval')
 const q = ref('')
+
+// L3 — inline Free Look date entry on freelook rows (no need to open the editor).
+const flDraft = ref<Record<string, string>>({})
+const flSaving = ref<string | null>(null)
+async function saveFreelook(r: FollowUpRow): Promise<void> {
+  const val = flDraft.value[r.policyId]
+  if (!val) return
+  flSaving.value = r.policyId
+  try {
+    await updatePolicy(r.policyId, { freelookEndDate: val })
+    await load()
+  } catch (e: unknown) {
+    error.value = e instanceof ApiError ? e.message : 'บันทึกไม่สำเร็จ'
+  } finally {
+    flSaving.value = null
+  }
+}
 
 interface CatDef {
   key: FollowUpCategory
@@ -176,7 +194,20 @@ onMounted(load)
             </td>
             <td class="px-4 py-3 text-slate-600">
               <template v-if="category === 'freelook'">
-                <span class="rounded-full bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">ยังไม่บันทึกวัน Free Look</span>
+                <div class="flex items-center gap-1" @click.stop>
+                  <input
+                    v-model="flDraft[r.policyId]" type="date"
+                    class="rounded border border-slate-200 px-2 py-1 text-xs focus:border-brand-400 focus:outline-none"
+                  />
+                  <button
+                    type="button" :disabled="!flDraft[r.policyId] || flSaving === r.policyId"
+                    class="rounded bg-brand-600 px-2 py-1 text-xs font-medium text-white hover:bg-brand-700 disabled:opacity-40"
+                    @click="saveFreelook(r)"
+                  >
+                    <i v-if="flSaving === r.policyId" class="pi pi-spin pi-spinner" />
+                    <span v-else>บันทึก</span>
+                  </button>
+                </div>
               </template>
               <template v-else-if="category === 'cancelled'">ยกเลิก {{ fmtDate(r.cancelDate) }}</template>
               <template v-else-if="category === 'not_delivered'">รับเมื่อ {{ fmtDate(r.receivedDate) || '—' }}</template>

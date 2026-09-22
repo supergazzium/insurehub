@@ -332,6 +332,10 @@ class CommissionPayoutController extends Controller
         $tag = $this->service->vatTag($data['vatType']);
         $name = trim(($data['agent']['name'] ?? '') ?: ($data['agent']['code'] ?? 'agent'));
         $code = $data['agent']['code'] ?? 'agent';
+        // The agent code leads the filename and is unique per tenant, so two
+        // different agents can never collide even if the display name is
+        // truncated (codes are <=16 chars, well within the 120-char cap). The
+        // ZIP path additionally dedups identical strings within one archive.
         $raw = "{$code}_{$name}_{$mmyyyy}{$tag}";
         // Strip filesystem-unsafe chars (spec §5.1 File Name Safety):
         // \ / : * ? " < > | plus control chars → underscore.

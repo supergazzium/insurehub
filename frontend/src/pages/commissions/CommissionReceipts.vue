@@ -184,7 +184,15 @@ onMounted(async () => {
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-if="loading"><td colspan="8" class="px-4 py-10 text-center text-slate-400">กำลังโหลด…</td></tr>
-            <tr v-else-if="rows.length === 0"><td colspan="8" class="px-4 py-10 text-center text-slate-400">ไม่มีรายการ</td></tr>
+            <tr v-else-if="rows.length === 0">
+              <td colspan="8" class="px-4 py-12 text-center">
+                <div class="text-slate-400">ไม่มีรายการ</div>
+                <div v-if="isHistory && !q && !statusFilter" class="mx-auto mt-2 max-w-md text-xs text-slate-400">
+                  รายการรับค่าคอมจะปรากฏที่นี่หลังจากเริ่มตรวจรับที่แท็บ "ค่าคอมหลัก" หรือ "ค่าคอม OV"
+                  (เลือกปีกรมธรรม์ + บริษัทประกัน แล้วระบบจะสร้างรายการให้อัตโนมัติ)
+                </div>
+              </td>
+            </tr>
             <tr v-for="r in rows" :key="r.id" class="cursor-pointer hover:bg-slate-50" @click="openRow(r)">
               <td class="px-4 py-3">
                 <div class="font-medium text-slate-800">{{ r.policyNo || r.applicationNo || '—' }}</div>

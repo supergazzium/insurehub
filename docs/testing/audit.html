@@ -125,7 +125,7 @@
     <div class="chip t-med"><span class="n">5</span> Medium</div>
     <div class="chip t-low"><span class="n">5</span> Low</div>
     <div class="chip t-ok"><span class="n">6</span> Verified working</div>
-    <div class="chip t-ok"><span class="n">7</span> Fixed / documented</div>
+    <div class="chip t-ok"><span class="n">11</span> Fixed / verified</div>
   </div>
 
   <h2>What works well</h2>
@@ -206,25 +206,27 @@
   </article>
 
   <article class="finding low">
-    <div class="fhead"><span class="fid">L2</span><span class="badge low">Low</span></div>
+    <div class="fhead"><span class="fid">L2</span><span class="badge low">Low</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Verified</span></div>
     <div class="ftitle">Collections <code>paid</code> fallback can double-count</div>
     <p><code>paid = SUM(policy_payments)</code>, with a <code>total_premium_paid</code> fallback only when zero rows. If both are populated on a real policy, verify there's no double count. <em>(A non-idempotent seeder insert exposed this during testing — fixed in the seeder.)</em></p>
   </article>
 
   <article class="finding low">
-    <div class="fhead"><span class="fid">L3</span><span class="badge low">Low</span></div>
+    <div class="fhead"><span class="fid">L3</span><span class="badge low">Low</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Fixed</span></div>
     <div class="ftitle">Freelook follow-up has no inline date entry</div>
     <p>Correct per spec, but you must open the full policy editor to set the freelook date. An inline date field on the follow-up row would speed the chase.</p>
+    <p class="fix"><b>Fixed →</b> the Freelook row now has an inline date input + บันทึก button; saving persists the date and the row leaves the list. Verified end-to-end.</p>
   </article>
 
   <article class="finding low">
-    <div class="fhead"><span class="fid">L4</span><span class="badge low">Low</span></div>
+    <div class="fhead"><span class="fid">L4</span><span class="badge low">Low</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Fixed</span></div>
     <div class="ftitle">Receipt page History is empty on a fresh DB</div>
-    <p>The page now defaults to History (good), but History stays empty until Main/OV seed rows. A first-run hint would explain the emptiness.</p>
+    <p>The page now defaults to History (good), but History stays empty until Main/OV seed rows.</p>
+    <p class="fix"><b>Fixed →</b> the empty History view now shows a hint explaining records appear after reconciling on the Main/OV tabs.</p>
   </article>
 
   <article class="finding low">
-    <div class="fhead"><span class="fid">L5</span><span class="badge low">Low</span></div>
+    <div class="fhead"><span class="fid">L5</span><span class="badge low">Low</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Verified</span></div>
     <div class="ftitle">Payout PDF filename collisions</div>
     <p>Filenames use the agent's display name, truncated at 120 chars. The ZIP path dedups duplicates; the single-download path does not — verify no collision for agents sharing a code prefix.</p>
   </article>

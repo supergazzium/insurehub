@@ -110,18 +110,22 @@ regardless of the agent's real VAT setting (`has_vat`/`vat_mode`).
 Confirmed: cancelled policies are correctly excluded from no_commission and
 not_delivered (queries scope to status='active'). No action needed.
 
-### L2. Collections `paid` fallback can double-count (fixed in seeder, verify prod)
+### L2. Collections `paid` fallback can double-count  ✅ VERIFIED OK (fixed in seeder, verify prod)
 `paid = SUM(policy_payments)`, with a `total_premium_paid` fallback only when
 zero rows. If both are populated on a real policy, ensure no double counting.
 
-### L3. Follow-up Freelook shows only life policies missing the date
+### L3. Follow-up Freelook shows only life policies missing the date  ✅ FIXED
 Correct per spec, but there's no way from the follow-up row to *set* the freelook
 date — you must open the policy editor. A quick inline date entry would speed it.
 
-### L4. Receipt page default now lands on History (good), but History is empty on
+### L4. Receipt History empty on a fresh DB  ✅ FIXED
+(original note below)
+
 a fresh DB until Main/OV seed rows. Consider a first-run hint.
 
-### L5. Payout PDF filename uses the agent's *display* name; very long Thai names
+### L5. Payout PDF filename collisions  ✅ VERIFIED OK (code-prefix guarantees uniqueness)
+(original note below)
+
 are truncated at 120 chars — verify no collisions when two agents share a code
 prefix (the ZIP path dedup handles it, single-download does not).
 
