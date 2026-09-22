@@ -23,6 +23,7 @@ export interface FollowUpRow {
   freelookEndDate: string | null
   cancelDate: string | null
   cancelStatus: string | null
+  alsoIn: string[]
 }
 
 export function fetchFollowUps(params: { category?: FollowUpCategory; q?: string } = {}) {

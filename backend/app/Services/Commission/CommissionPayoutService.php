@@ -75,6 +75,29 @@ class CommissionPayoutService
     }
 
     /**
+     * Canonical VAT type for payout math + PDF template: '1' none, '2' exclude
+     * (add VAT on top), '3' include (VAT inside). Prefers the current agent
+     * fields has_vat + vat_mode; falls back to the legacy numeric vat_type.
+     *
+     * @param object $agent  row/model exposing has_vat, vat_mode, vat_type
+     */
+    private function resolveVatType(object $agent): string
+    {
+        $hasVat = (bool) ($agent->has_vat ?? false);
+        if ($hasVat) {
+            $mode = (string) ($agent->vat_mode ?? '');
+            return $mode === 'include' ? '3' : '2'; // default VAT agents to exclude
+        }
+        // Not flagged has_vat — honor a legacy numeric vat_type if present.
+        $legacy = (string) ($agent->vat_type ?? '');
+        if (in_array($legacy, ['1', '2', '3'], true)) {
+            return $legacy;
+        }
+
+        return '1';
+    }
+
+    /**
      * Resolve one policy's frozen agent-commission amount + its source.
      * Precedence: actual rebate → calculated rebate → policy comm column.
      *
@@ -105,7 +128,7 @@ class CommissionPayoutService
                 'p.id as policy_id', 'p.policy_no', 'p.application_no', 'p.main_premium',
                 'p.comm_hub_to_agent_amount',
                 'p.writing_agent_id as agent_id',
-                'a.agent_code', 'a.vat_type',
+                'a.agent_code', 'a.vat_type', 'a.has_vat', 'a.vat_mode',
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
                 'r.calculated_agent_amount', 'r.actual_agent_amount', 'r.agent_rebate_status',
                 DB::raw('(SELECT COALESCE(SUM(pr.com_amt_ag),0) FROM policy_riders pr WHERE pr.policy_id = p.id) as rider_com_ag'),
@@ -136,7 +159,7 @@ class CommissionPayoutService
                     'agentId' => $row->agent_id ? (string) $row->agent_id : null,
                     'agentCode' => $row->agent_code,
                     'agentName' => $row->agent_name,
-                    'vatType' => $row->vat_type,
+                    'vatType' => $this->resolveVatType($row),
                     'itemCount' => 0,
                     'amount' => 0.0,
                 ];
@@ -200,7 +223,7 @@ class CommissionPayoutService
                     'policy_id' => $row->policy_id,
                     'agent_id' => $row->agent_id,
                     'agent_code' => $row->agent_code,
-                    'vat_type' => $row->vat_type,
+                    'vat_type' => $this->resolveVatType($row),
                     'snapshot_base_premium' => $amt['base'],
                     'snapshot_agent_commission' => $amt['main'],
                     'snapshot_rider_commission' => $amt['rider'],
@@ -366,7 +389,7 @@ class CommissionPayoutService
     public function buildAgentPdfData(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode): ?array
     {
         $items = $batch->items()
-            ->with(['policy:id,policy_no,application_no,customer_id', 'policy.customer:id,first_name,last_name', 'agent:id,agent_code,first_name,last_name,vat_type'])
+            ->with(['policy:id,policy_no,application_no,customer_id', 'policy.customer:id,first_name,last_name', 'agent:id,agent_code,first_name,last_name,vat_type,has_vat,vat_mode'])
             ->when($agentId !== null, fn ($q) => $q->where('agent_id', $agentId))
             ->when($agentId === null && $agentCode !== null, fn ($q) => $q->where('agent_code', $agentCode))
             ->get();
@@ -376,7 +399,9 @@ class CommissionPayoutService
         }
 
         $first = $items->first();
-        $vatType = (string) ($first->vat_type ?: '1');
+        // The item's vat_type was resolved at batch creation; use it, else re-resolve
+        // from the agent's current has_vat/vat_mode.
+        $vatType = $first->vat_type ?: ($first->agent ? $this->resolveVatType($first->agent) : '1');
 
         $rows = [];
         $commission = 0.0;

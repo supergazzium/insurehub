@@ -42,6 +42,10 @@ const countBadge = (c: CatDef, active: boolean): string => {
   return `ml-auto inline-flex min-w-[1.5rem] justify-center rounded-full px-2 py-0.5 text-xs font-semibold ${on}`
 }
 
+const ALSO_LABEL: Record<string, string> = {
+  approval: 'รออนุมัติ', no_policy_no: 'ไม่มีเลขกรมธรรม์', not_delivered: 'ยังไม่จัดส่ง',
+  freelook: 'Freelook', no_commission: 'ไม่มีค่าคอม', cancelled: 'ยกเลิก',
+}
 const STATUS_LABEL: Record<string, string> = {
   submitted: 'รออนุมัติ', active: 'มีผลบังคับ', issued: 'ออกกรมธรรม์แล้ว',
   cancelled: 'ยกเลิก', draft: 'ร่าง', expired: 'หมดอายุ',
@@ -145,6 +149,13 @@ onMounted(load)
             <td class="px-4 py-3">
               <div class="font-medium text-slate-800">{{ r.policyNo || '—' }}</div>
               <div class="text-xs text-slate-400">{{ r.applicationNo || '—' }}</div>
+              <div v-if="r.alsoIn && r.alsoIn.length" class="mt-1 flex flex-wrap gap-1">
+                <span
+                  v-for="k in r.alsoIn" :key="k"
+                  class="inline-flex items-center rounded bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700 ring-1 ring-amber-200"
+                  :title="'กรมธรรม์นี้อยู่ในรายการติดตามอื่นด้วย'"
+                >+ {{ ALSO_LABEL[k] || k }}</span>
+              </div>
             </td>
             <td class="px-4 py-3">
               <div class="text-slate-700">{{ r.customerName || '—' }}</div>

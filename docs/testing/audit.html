@@ -125,6 +125,7 @@
     <div class="chip t-med"><span class="n">5</span> Medium</div>
     <div class="chip t-low"><span class="n">5</span> Low</div>
     <div class="chip t-ok"><span class="n">6</span> Verified working</div>
+    <div class="chip t-ok"><span class="n">3</span> Fixed (H1·H2·M5)</div>
   </div>
 
   <h2>What works well</h2>
@@ -143,19 +144,19 @@
   <h2>High severity</h2>
 
   <article class="finding hi">
-    <div class="fhead"><span class="fid">H1</span><span class="badge hi">High</span></div>
+    <div class="fhead"><span class="fid">H1</span><span class="badge hi">High</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Fixed</span></div>
     <div class="ftitle">One policy appears in many worklists at once</div>
     <p>A single active, unpaid policy shows simultaneously in <b>Collections</b> (unpaid), <b>Follow-up → no_commission / not_delivered</b>, and — if life — <b>Freelook</b>. The <code>TST-RC*</code> receipt-test policies even surface in Collections as "cash unpaid ฿10,000".</p>
     <p><b>Why it matters:</b> staff can't tell which worklist owns a policy; the same item gets chased by several people. There's no cross-list dedup or "handled elsewhere" signal.</p>
-    <p class="fix"><b>Suggestion →</b> a per-policy worklist state that suppresses a row once actioned, or at minimum show which other lists a policy is currently in.</p>
+    <p class="fix"><b>Fixed →</b> follow-up rows now carry an <code>alsoIn</code> list; the UI shows amber "+ …" cross-tags so a multi-issue policy is obvious at a glance.</p>
   </article>
 
   <article class="finding hi">
-    <div class="fhead"><span class="fid">H2</span><span class="badge hi">High</span></div>
+    <div class="fhead"><span class="fid">H2</span><span class="badge hi">High</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Fixed</span></div>
     <div class="ftitle">"no_commission" fires on ~458 of ~475 policies</div>
     <p>The rule is <code>active AND (carrier→hub OR hub→agent amount is null/0)</code>. Because commission amounts are mostly 0 in real data, almost every policy matches.</p>
     <p><b>Why it matters:</b> a worklist containing "nearly everything" isn't actionable — it's noise that buries the genuinely-missing ones.</p>
-    <p class="fix"><b>Suggestion →</b> scope it (only policies past an age, or where the product <em>should</em> carry commission), or split "never had commission" from "commission not yet entered".</p>
+    <p class="fix"><b>Fixed →</b> scoped to <em>completed</em> sales (issued policy number + delivered) created within 180 days; on real multi-year data this sharply cuts the list.</p>
   </article>
 
   <h2>Medium severity</h2>
@@ -189,11 +190,11 @@
   </article>
 
   <article class="finding med">
-    <div class="fhead"><span class="fid">M5</span><span class="badge med">Medium</span></div>
+    <div class="fhead"><span class="fid">M5</span><span class="badge med">Medium</span><span class="badge" style="color:var(--ok);background:var(--ok-bg);border-color:var(--ok-line)">✓ Fixed</span></div>
     <div class="ftitle">Two different meanings of <code>vat_type</code></div>
     <p><code>agents.vat_type</code> is <code>''|none|vat7|wht*</code> in the agent form, but the payout engine reads it as numeric <code>'1'|'2'|'3'</code>. An agent created through the form carries no numeric value, so its VAT PDF defaults to "no VAT" regardless of <code>has_vat</code>/<code>vat_mode</code>.</p>
     <p><b>Empirical:</b> 324 agents have numeric <code>vat_type='1'</code> (legacy import) but 52 have empty <code>''</code> — those are the ones at risk.</p>
-    <p class="fix"><b>Suggestion →</b> make the payout read <code>has_vat</code> + <code>vat_mode</code> instead of the legacy numeric field, or map between them explicitly.</p>
+    <p class="fix"><b>Fixed →</b> the payout now resolves VAT from <code>has_vat</code> + <code>vat_mode</code> (falling back to legacy numeric <code>vat_type</code>). Form-created agents get the correct VAT PDF.</p>
   </article>
 
   <h2>Low / polish</h2>

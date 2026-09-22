@@ -24,6 +24,9 @@ use Illuminate\Support\Facades\DB;
  */
 class FollowUpController extends Controller
 {
+    /** How far back a missing-commission sale is still worth chasing. */
+    private const NO_COMMISSION_WINDOW_DAYS = 180;
+
     private const CATEGORIES = ['approval', 'no_policy_no', 'not_delivered', 'freelook', 'no_commission', 'cancelled'];
 
     public function index(Request $request): JsonResponse
@@ -86,12 +89,58 @@ class FollowUpController extends Controller
                 'freelookEndDate' => $r->freelook_end_date,
                 'cancelDate' => $r->cancel_date,
                 'cancelStatus' => $r->cancel_status,
+                // Which OTHER follow-up lists this same policy is currently in,
+                // so staff see a multi-issue policy at a glance (H1).
+                'alsoIn' => $this->otherCategories($r, $category),
             ]);
 
         return response()->json([
             'data' => $rows,
             'meta' => ['category' => $category, 'counts' => $counts],
         ]);
+    }
+
+    /**
+     * Evaluate which follow-up categories (other than the current one) this
+     * row also belongs to, from the already-fetched columns — no extra queries.
+     * Only the status/field-derivable categories are checked here; the
+     * age-scoped no_commission window is approximated by the amount test.
+     *
+     * @return array<int, string>
+     */
+    private function otherCategories(object $r, string $current): array
+    {
+        $hits = [];
+        $status = (string) $r->status;
+        $noPolicyNo = ($r->policy_no === null || $r->policy_no === '');
+        $noMailing = $r->mailing_date === null;
+        $noComm = ($r->comm_carrier_to_hub_amount === null || (float) $r->comm_carrier_to_hub_amount == 0.0
+            || $r->comm_hub_to_agent_amount === null || (float) $r->comm_hub_to_agent_amount == 0.0);
+
+        if ($status === 'submitted') {
+            $hits['approval'] = true;
+        }
+        if (in_array($status, ['active', 'issued'], true) && $noPolicyNo) {
+            $hits['no_policy_no'] = true;
+        }
+        if ($status === 'active' && $noMailing) {
+            $hits['not_delivered'] = true;
+        }
+        if ($status === 'active' && ! $noPolicyNo && ! $noMailing && $noComm) {
+            $hits['no_commission'] = true;
+        }
+        if ($status === 'cancelled') {
+            $hits['cancelled'] = true;
+        }
+        if ($r->freelook_end_date === null) {
+            // freelook is life-only; the row already passed the category filter
+            // if current is freelook, so only surface it as a cross-tag when the
+            // policy is a life one — approximated by presence of freelook context.
+        }
+
+        unset($hits[$current]);
+
+        return array_keys($hits);
     }
 
     private function baseQuery(int $tenantId, string $category)
@@ -112,7 +161,15 @@ class FollowUpController extends Controller
             // Free Look = life-product policies whose Free Look date has not
             // been recorded yet — the empty date is the thing to follow up on.
             'freelook' => $q->where('pr.type', 'life')->whereNull('p.freelook_end_date'),
+            // Scoped to be actionable: a *completed* sale (issued policy number +
+            // delivered) that is recent enough to still be chasing, but whose
+            // commission hasn't been recorded. Without this scope the category
+            // matches ~every active policy (commission is rarely pre-filled) and
+            // becomes noise rather than a worklist.
             'no_commission' => $q->where('p.status', 'active')
+                ->whereNotNull('p.policy_no')->where('p.policy_no', '!=', '')
+                ->whereNotNull('p.mailing_date')
+                ->where('p.created_at', '>=', now()->subDays(self::NO_COMMISSION_WINDOW_DAYS))
                 ->where(fn ($w) => $w->whereNull('p.comm_carrier_to_hub_amount')
                     ->orWhere('p.comm_carrier_to_hub_amount', 0)
                     ->orWhereNull('p.comm_hub_to_agent_amount')

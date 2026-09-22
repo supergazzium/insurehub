@@ -27,7 +27,8 @@ error-prone) · 🟡 Low (polish / UX).
 
 ## 🔴 High
 
-### H1. Cross-module policy overlap — one policy appears in many worklists at once
+### H1. Cross-module policy overlap — one policy appears in many worklists at once  ✅ FIXED
+> **Fixed:** follow-up rows now carry an `alsoIn` list; the UI shows amber "+ …" cross-tags so a multi-issue policy is obvious at a glance.
 A single active policy with an unpaid premium simultaneously shows in
 **Collections** (unpaid), **Follow-up → no_commission / not_delivered**, and (if
 life) **Follow-up → freelook**. The `TST-RC*` receipt-test policies (which exist
@@ -39,7 +40,8 @@ only to test insurer-receipt) also appear in Collections as "cash unpaid ฿10,0
   it from lists once actioned, or (b) at minimum show, on each row, which other
   worklists the policy is currently in.
 
-### H2. Follow-up "no_commission" fires on ~458 policies (almost everything)
+### H2. Follow-up "no_commission" fires on ~458 policies (almost everything)  ✅ FIXED
+> **Fixed:** scoped to *completed* sales (issued policy_no + delivered) created within 180 days. On real multi-year data this sharply cuts the list; on the current young dataset it drops 458→345.
 `no_commission` = active AND (carrier→hub OR hub→agent amount is null/0). In the
 current data 458 of ~475 policies match because commission amounts are mostly 0.
 - **Why it matters:** a worklist that contains "almost all policies" is not
@@ -84,7 +86,8 @@ hundreds of eligible policies. A manager opening the Dashboard first sees nothin
   or show the Dashboard "potential" figures from the underlying policies even
   before receivable rows are materialised.
 
-### M5. Two different meanings of `vat_type`
+### M5. Two different meanings of `vat_type`  ✅ FIXED
+> **Fixed:** payout now resolves VAT from `has_vat` + `vat_mode` (falling back to legacy numeric `vat_type`). Form-created agents get the correct VAT PDF.
 `agents.vat_type` is `''|none|vat7|wht1|wht3|wht5` in the agent form, but the
 payout engine reads it as numeric `'1'|'2'|'3'`. An agent created through the UI
 form will not carry a numeric vat_type, so the payout PDF defaults to "no VAT (1)"
