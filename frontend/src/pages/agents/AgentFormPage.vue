@@ -1,6 +1,6 @@
 <script setup lang="ts">
 // สร้าง / แก้ไข ตัวแทน — full-page form (mirrors the customer create/edit style).
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
@@ -11,8 +11,8 @@ import AgentsSubnav from './AgentsSubnav.vue'
 import {
   fetchAgent, createAgentFull, updateAgentFull, fetchTeams, fetchRanks,
   fetchLevelProgress, fetchRankPromotions, approveAgent, rejectAgent, setAgentActive,
-  fetchAgentNotes, createAgentNote,
-  type TeamRow, type RankRow, type LevelProgress, type RankPromotionRow, type AgentNoteRow,
+  fetchAgentNotes, createAgentNote, fetchAgentRelations,
+  type TeamRow, type RankRow, type LevelProgress, type RankPromotionRow, type AgentNoteRow, type AgentRelations,
 } from '../../api/agents'
 import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
@@ -37,6 +37,11 @@ const error = ref<string | null>(null)
 const teams = ref<TeamRow[]>([])
 const ranks = ref<RankRow[]>([])
 const progress = ref<LevelProgress | null>(null)
+const relations = ref<AgentRelations | null>(null)
+const REL_LEVEL_DOT: Record<string, string> = {
+  l1: 'bg-slate-400', l2: 'bg-sky-400', l3: 'bg-violet-400', l4: 'bg-amber-400', l5: 'bg-rose-400',
+  l6: 'bg-orange-400', l7: 'bg-emerald-400', l8: 'bg-teal-400', l9: 'bg-indigo-400', l10: 'bg-fuchsia-500',
+}
 const promotions = ref<RankPromotionRow[]>([])
 const notes = ref<AgentNoteRow[]>([])
 const newNote = ref('')
@@ -117,6 +122,7 @@ async function load(): Promise<void> {
       ])
       progress.value = prog.data
       promotions.value = promo.data.filter((x) => x.agentId === editId.value)
+      relations.value = (await fetchAgentRelations(editId.value!).catch(() => null))
       const nt = await fetchAgentNotes(editId.value!).catch(() => ({ data: [] as AgentNoteRow[] }))
       notes.value = nt.data
     }
@@ -185,6 +191,7 @@ async function submit(): Promise<void> {
   } finally { saving.value = false }
 }
 function cancel(): void { router.push({ name: 'agents' }) }
+function goAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
 
 // ── Status actions (approve / deactivate) — edit mode only ─────────────────
 async function doApprove(): Promise<void> {
@@ -237,6 +244,8 @@ function noteKindLabel(k: string): string {
 }
 
 onMounted(load)
+// Re-load when navigating between agent detail pages (same component instance).
+watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() })
 </script>
 
 <template>
@@ -378,6 +387,49 @@ onMounted(load)
           <p v-if="!form.teamId" class="mt-1 text-[10px] text-amber-600">
             <i class="pi pi-info-circle text-[9px]" /> แนะนำให้กำหนดสายงาน — มีผลต่อการคำนวณค่าคอมและยอดทีม
           </p>
+        </section>
+
+        <!-- สายงาน — ต้นสาย & ลูกทีม (upline / downline at a glance) -->
+        <section v-if="isEdit && relations" class="rounded-lg border border-slate-200 bg-white p-4">
+          <h2 class="mb-3 text-sm font-semibold text-slate-700">สายงาน — ต้นสาย &amp; ลูกทีม</h2>
+
+          <!-- Upline chain: this person → up to the top -->
+          <div class="mb-4">
+            <div class="mb-1.5 text-xs font-medium text-slate-500">ต้นสาย (ขึ้นไปด้านบน)</div>
+            <div v-if="relations.upline.length === 0" class="text-xs text-slate-400">— ไม่มีต้นสาย (เป็นระดับบนสุด) —</div>
+            <div v-else class="flex flex-wrap items-center gap-1.5">
+              <span class="inline-flex items-center gap-1.5 rounded-lg bg-emerald-600 px-2.5 py-1 text-xs font-medium text-white">
+                <span :class="['h-2 w-2 rounded-full', REL_LEVEL_DOT[relations.self.level ?? ''] ?? 'bg-white/60']" />
+                {{ relations.self.name || relations.self.agentCode }} <span class="opacity-70">{{ relations.self.level }}</span>
+              </span>
+              <template v-for="u in relations.upline" :key="u.id">
+                <i class="pi pi-arrow-up text-[9px] text-slate-300" />
+                <button type="button"
+                  class="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1 text-xs text-slate-700 hover:border-emerald-300 hover:bg-emerald-50"
+                  @click="goAgent(u.id)">
+                  <span :class="['h-2 w-2 rounded-full', REL_LEVEL_DOT[u.level ?? ''] ?? 'bg-slate-300']" />
+                  {{ u.name || u.agentCode }} <span class="opacity-60">{{ u.level }}</span>
+                </button>
+              </template>
+            </div>
+          </div>
+
+          <!-- Direct downline -->
+          <div>
+            <div class="mb-1.5 text-xs font-medium text-slate-500">ลูกทีมโดยตรง ({{ relations.downline.length }} คน)</div>
+            <div v-if="relations.downline.length === 0" class="text-xs text-slate-400">— ยังไม่มีลูกทีม —</div>
+            <div v-else class="grid grid-cols-1 gap-1.5 sm:grid-cols-2 lg:grid-cols-3">
+              <button v-for="d in relations.downline" :key="d.id" type="button"
+                :class="['flex items-center gap-2 rounded-lg border px-2.5 py-1.5 text-left text-xs transition hover:border-emerald-300 hover:bg-emerald-50',
+                  d.active ? 'border-slate-200 bg-white text-slate-700' : 'border-slate-200 bg-slate-50 text-slate-400']"
+                @click="goAgent(d.id)">
+                <span :class="['h-2 w-2 shrink-0 rounded-full', REL_LEVEL_DOT[d.level ?? ''] ?? 'bg-slate-300']" />
+                <span class="min-w-0 flex-1 truncate">{{ d.name || d.agentCode }}</span>
+                <span class="shrink-0 font-mono text-[10px] opacity-60">{{ d.agentCode }}</span>
+                <span class="shrink-0 text-[10px] uppercase opacity-50">{{ d.level }}</span>
+              </button>
+            </div>
+          </div>
         </section>
 
         <!-- หมายเหตุ + สถานะ -->

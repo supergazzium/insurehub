@@ -104,6 +104,57 @@ class AgentHierarchyController extends Controller
     }
 
     /**
+     * GET /agents/{agent}/relations — the agent's upline chain (self → top) and
+     * direct downline, for the detail page's สายงาน panel.
+     */
+    public function relations(Request $request, Agent $agent): JsonResponse
+    {
+        $tenantId = (int) $request->attributes->get('tenant_id', $request->user()->tenant_id);
+        abort_unless((int) $agent->tenant_id === $tenantId, 404);
+
+        $fields = ['id', 'agent_code', 'first_name', 'last_name', 'level', 'active', 'parent_agent_id'];
+
+        // Upline chain: walk parent_agent_id up to the top (cycle-guarded).
+        $upline = [];
+        $seen = [];
+        $cur = $agent->parent_agent_id;
+        while ($cur !== null && ! isset($seen[$cur])) {
+            $seen[$cur] = true;
+            $up = Agent::query()->where('tenant_id', $tenantId)->whereKey($cur)->first($fields);
+            if ($up === null) {
+                break;
+            }
+            $upline[] = $this->relRow($up);
+            $cur = $up->parent_agent_id;
+        }
+
+        $downline = Agent::query()
+            ->where('tenant_id', $tenantId)
+            ->where('parent_agent_id', $agent->id)
+            ->orderBy('agent_code')
+            ->get($fields)
+            ->map(fn (Agent $a): array => $this->relRow($a));
+
+        return response()->json([
+            'self' => $this->relRow($agent),
+            'upline' => $upline,
+            'downline' => $downline,
+        ]);
+    }
+
+    /** @return array<string, mixed> */
+    private function relRow(Agent $a): array
+    {
+        return [
+            'id' => (string) $a->id,
+            'agentCode' => $a->agent_code,
+            'name' => trim(($a->first_name ?? '') . ' ' . ($a->last_name ?? '')),
+            'level' => $a->level,
+            'active' => (bool) $a->active,
+        ];
+    }
+
+    /**
      * GET /agents/hierarchy-rollup
      * Per-agent สายงาน rollup for the tree view: team code, own written
      * premium + policy count, and the subtree (self + all downline) premium +

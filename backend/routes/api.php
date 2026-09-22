@@ -196,6 +196,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // สายงาน (agent hierarchy) + level management + promotion approval queue
     Route::patch('agents/{agent}/hierarchy', [AgentHierarchyController::class, 'update']);
+    Route::get('agents/{agent}/relations', [AgentHierarchyController::class, 'relations']);
     Route::get('agents/{agent}/notes', [AgentNoteController::class, 'index']);
     Route::post('agents/{agent}/notes', [AgentNoteController::class, 'store']);
     Route::get('agents/{agent}/level-progress', [LevelProgressController::class, 'show']);

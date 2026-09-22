@@ -207,3 +207,20 @@ export function fetchAgentNotes(agentId: string) {
 export function createAgentNote(agentId: string, note: string, kind = 'general') {
   return api.post<{ data: { id: string } }>(`agents/${agentId}/notes`, { note, kind })
 }
+
+export interface AgentRelation {
+  id: string
+  agentCode: string | null
+  name: string
+  level: string | null
+  active: boolean
+}
+export interface AgentRelations {
+  self: AgentRelation
+  upline: AgentRelation[]    // nearest first → top last
+  downline: AgentRelation[]
+}
+export function fetchAgentRelations(agentId: string) {
+  return api.get<AgentRelations>(`agents/${agentId}/relations`)
+}
+
