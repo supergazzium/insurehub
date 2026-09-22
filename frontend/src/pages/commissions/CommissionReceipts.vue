@@ -9,16 +9,18 @@ import { ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
 import ReceivableDetailDrawer from './ReceivableDetailDrawer.vue'
 import ReceiptBatchesPanel from './ReceiptBatchesPanel.vue'
+import ReconDashboardPanel from './ReconDashboardPanel.vue'
 
 const money = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
-type Tab = 'MAIN' | 'OV' | 'HISTORY' | 'BATCHES'
+type Tab = 'MAIN' | 'OV' | 'HISTORY' | 'BATCHES' | 'DASHBOARD'
 const tab = ref<Tab>('MAIN')
 const TABS: { key: Tab; label: string }[] = [
   { key: 'MAIN', label: 'ค่าคอมหลัก' },
   { key: 'OV', label: 'ค่าคอม OV' },
   { key: 'HISTORY', label: 'ประวัติ' },
   { key: 'BATCHES', label: 'รอบรับเอกสาร' },
+  { key: 'DASHBOARD', label: 'Dashboard' },
 ]
 
 const carriers = ref<CarrierListRow[]>([])
@@ -53,7 +55,7 @@ const yearOptions = computed(() => {
 })
 
 async function load(): Promise<void> {
-  if (tab.value === 'BATCHES') return
+  if (tab.value === 'BATCHES' || tab.value === 'DASHBOARD') return
   if (needsFilter.value && !canQuery.value) { rows.value = []; return }
   loading.value = true
   error.value = null
@@ -79,7 +81,7 @@ async function load(): Promise<void> {
   }
 }
 
-function switchTab(t: Tab): void { tab.value = t; if (t !== 'BATCHES') load() }
+function switchTab(t: Tab): void { tab.value = t; if (t !== 'BATCHES' && t !== 'DASHBOARD') load() }
 
 // ── detail drawer ───────────────────────────────────────────────────────
 const openId = ref<string | null>(null)
@@ -109,6 +111,7 @@ onMounted(async () => {
     </div>
 
     <ReceiptBatchesPanel v-if="tab === 'BATCHES'" :carriers="carriers" />
+    <ReconDashboardPanel v-else-if="tab === 'DASHBOARD'" :carriers="carriers" :policy-year="policyYear" :insurer-id="insurerId" />
 
     <template v-else>
       <!-- Filter bar -->

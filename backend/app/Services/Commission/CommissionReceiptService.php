@@ -228,6 +228,180 @@ class CommissionReceiptService
         ];
     }
 
+    /**
+     * Full reconciliation dashboard (spec §12): insurer-side KPIs from the
+     * receivables plus agent-side payable/paid from the payout module, monthly
+     * expected-vs-received, outstanding-by-insurer, and a policy-level table.
+     * Reuses existing commission data — nothing recomputed.
+     *
+     * @return array<string, mixed>
+     */
+    public function dashboard(int $tenantId, ?int $policyYear, ?int $insurerId): array
+    {
+        // Insurer-side KPIs (reuse summary()).
+        $ins = $this->summary($tenantId, $policyYear, $insurerId);
+
+        // ── Agent-side: payable (policies.comm_hub_to_agent_amount + riders)
+        //    and paid (paid payout batch items). Scoped to the same filter. ──
+        $payQ = DB::table('policies as p')
+            ->where('p.tenant_id', $tenantId)
+            ->whereNull('p.deleted_at')
+            ->whereIn('p.status', ['active', 'issued']);
+        if ($policyYear) {
+            $payQ->where('p.policy_year', $policyYear);
+        }
+        if ($insurerId) {
+            $payQ->where('p.carrier_id', $insurerId);
+        }
+        $agentPayable = (float) (clone $payQ)->sum('p.comm_hub_to_agent_amount');
+
+        $paidQ = DB::table('commission_payout_batch_items as bi')
+            ->join('policies as p', 'p.id', '=', 'bi.policy_id')
+            ->where('bi.tenant_id', $tenantId)
+            ->where('bi.item_status', 'paid');
+        if ($policyYear) {
+            $paidQ->where('p.policy_year', $policyYear);
+        }
+        if ($insurerId) {
+            $paidQ->where('p.carrier_id', $insurerId);
+        }
+        $agentPaid = (float) (clone $paidQ)->sum(DB::raw('bi.snapshot_agent_commission + bi.snapshot_rider_commission'));
+
+        // ── Monthly Expected vs Received (by policy effective_date). ──
+        $monthlyQ = DB::table('commission_receivables as cr')
+            ->join('policies as p', 'p.id', '=', 'cr.policy_id')
+            ->where('cr.tenant_id', $tenantId)
+            ->whereNotNull('p.effective_date');
+        if ($policyYear) {
+            $monthlyQ->where('cr.policy_year', $policyYear);
+        }
+        if ($insurerId) {
+            $monthlyQ->where('cr.insurer_id', $insurerId);
+        }
+        $monthly = (clone $monthlyQ)
+            ->selectRaw("DATE_FORMAT(p.effective_date, '%Y-%m') as ym")
+            ->selectRaw('SUM(cr.expected_amount) as expected')
+            ->selectRaw("SUM(CASE WHEN cr.status = 'Received' THEN cr.received_amount ELSE 0 END) as received")
+            ->groupBy('ym')->orderBy('ym')
+            ->get()
+            ->map(fn ($r): array => [
+                'month' => $r->ym,
+                'expected' => round((float) $r->expected, 2),
+                'received' => round((float) $r->received, 2),
+            ]);
+
+        // ── Outstanding by insurer (Pending/Matched/Mismatch). ──
+        $outByInsurerQ = DB::table('commission_receivables as cr')
+            ->leftJoin('carriers as ca', 'ca.id', '=', 'cr.insurer_id')
+            ->where('cr.tenant_id', $tenantId)
+            ->whereIn('cr.status', ['Pending', 'Matched', 'Mismatch']);
+        if ($policyYear) {
+            $outByInsurerQ->where('cr.policy_year', $policyYear);
+        }
+        $outstandingByInsurer = (clone $outByInsurerQ)
+            ->selectRaw('ca.name as insurer')
+            ->selectRaw('SUM(cr.expected_amount) as amount')
+            ->groupBy('ca.name')->orderByDesc('amount')
+            ->limit(15)->get()
+            ->map(fn ($r): array => ['insurer' => $r->insurer ?? '—', 'amount' => round((float) $r->amount, 2)]);
+
+        // ── Policy-level reconciliation table (spec §12.3). ──
+        $policyRows = $this->policyLevel($tenantId, $policyYear, $insurerId);
+
+        return [
+            'kpi' => [
+                'expectedInsurer' => $ins['expected'],
+                'receivedInsurer' => $ins['received'],
+                'outstanding' => $ins['outstanding'],
+                'mismatchCount' => $ins['mismatchCount'],
+                'mismatchAmount' => $ins['mismatchAmount'],
+                'noCommissionCount' => $ins['noCommissionCount'],
+                'agentPayable' => round($agentPayable, 2),
+                'agentPaid' => round($agentPaid, 2),
+                'expectedMargin' => round($ins['expected'] - $agentPayable, 2),
+                'realizedMargin' => round($ins['received'] - $agentPaid, 2),
+            ],
+            'monthly' => $monthly,
+            'outstandingByInsurer' => $outstandingByInsurer,
+            'policyLevel' => $policyRows,
+        ];
+    }
+
+    /**
+     * Policy-level rows: insurer expected/received (MAIN+OV), Main/OV status,
+     * agent payable/paid, and both margins. Capped for the dashboard table.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    private function policyLevel(int $tenantId, ?int $policyYear, ?int $insurerId): array
+    {
+        $q = DB::table('commission_receivables as cr')
+            ->join('policies as p', 'p.id', '=', 'cr.policy_id')
+            ->where('cr.tenant_id', $tenantId);
+        if ($policyYear) {
+            $q->where('cr.policy_year', $policyYear);
+        }
+        if ($insurerId) {
+            $q->where('cr.insurer_id', $insurerId);
+        }
+
+        // Aggregate MAIN/OV per policy.
+        $recs = $q->select([
+            'cr.policy_id', 'cr.commission_type', 'cr.expected_amount', 'cr.received_amount', 'cr.status',
+            'p.policy_no', 'p.application_no', 'p.comm_hub_to_agent_amount',
+        ])->limit(3000)->get();
+
+        $byPolicy = [];
+        foreach ($recs as $r) {
+            $pid = $r->policy_id;
+            if (! isset($byPolicy[$pid])) {
+                $byPolicy[$pid] = [
+                    'policyId' => (string) $pid,
+                    'policyNo' => $r->policy_no ?: $r->application_no,
+                    'insurerExpected' => 0.0,
+                    'insurerReceived' => 0.0,
+                    'mainStatus' => null,
+                    'ovStatus' => null,
+                    'agentPayable' => round((float) ($r->comm_hub_to_agent_amount ?? 0), 2),
+                    'agentPaid' => 0.0,
+                ];
+            }
+            $byPolicy[$pid]['insurerExpected'] += (float) $r->expected_amount;
+            if ($r->status === 'Received') {
+                $byPolicy[$pid]['insurerReceived'] += (float) ($r->received_amount ?? 0);
+            }
+            if ($r->commission_type === 'MAIN') {
+                $byPolicy[$pid]['mainStatus'] = $r->status;
+            } else {
+                $byPolicy[$pid]['ovStatus'] = $r->status;
+            }
+        }
+
+        // Agent paid per policy (paid batch items).
+        $pids = array_keys($byPolicy);
+        if (! empty($pids)) {
+            $paid = DB::table('commission_payout_batch_items')
+                ->whereIn('policy_id', $pids)
+                ->where('item_status', 'paid')
+                ->selectRaw('policy_id, SUM(snapshot_agent_commission + snapshot_rider_commission) as paid')
+                ->groupBy('policy_id')->get();
+            foreach ($paid as $p) {
+                if (isset($byPolicy[$p->policy_id])) {
+                    $byPolicy[$p->policy_id]['agentPaid'] = round((float) $p->paid, 2);
+                }
+            }
+        }
+
+        return array_map(function (array $r): array {
+            $r['insurerExpected'] = round($r['insurerExpected'], 2);
+            $r['insurerReceived'] = round($r['insurerReceived'], 2);
+            $r['expectedMargin'] = round($r['insurerExpected'] - $r['agentPayable'], 2);
+            $r['cashMargin'] = round($r['insurerReceived'] - $r['agentPaid'], 2);
+
+            return $r;
+        }, array_slice(array_values($byPolicy), 0, 500));
+    }
+
     private function guardVersion(CommissionReceivable $rec, ?int $expectedVersion): void
     {
         if ($expectedVersion !== null && (int) $rec->version !== $expectedVersion) {

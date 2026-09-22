@@ -223,6 +223,23 @@ class CommissionReceiptController extends Controller
         ]);
     }
 
+    /** GET /commission-reconciliation/dashboard */
+    public function dashboard(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'policyYear' => ['nullable', 'integer'],
+            'insurerId' => ['nullable', 'integer'],
+        ]);
+
+        return response()->json([
+            'data' => $this->service->dashboard(
+                $this->tenantId($request),
+                isset($data['policyYear']) ? (int) $data['policyYear'] : null,
+                isset($data['insurerId']) ? (int) $data['insurerId'] : null,
+            ),
+        ]);
+    }
+
     // ── Receipt batches + files ──────────────────────────────────────────
 
     /** POST /commission-receipt-batches */

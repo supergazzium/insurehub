@@ -143,3 +143,41 @@ export async function uploadReceiptFile(batchId: string, file: File): Promise<Re
 export function receiptFileDownloadUrl(fileId: string): string {
   return `${API_BASE_URL}/commission-receipt-files/${fileId}/download`
 }
+
+export interface DashboardKpi {
+  expectedInsurer: number
+  receivedInsurer: number
+  outstanding: number
+  mismatchCount: number
+  mismatchAmount: number
+  noCommissionCount: number
+  agentPayable: number
+  agentPaid: number
+  expectedMargin: number
+  realizedMargin: number
+}
+export interface MonthlyPoint { month: string; expected: number; received: number }
+export interface InsurerOutstanding { insurer: string; amount: number }
+export interface PolicyReconRow {
+  policyId: string
+  policyNo: string | null
+  insurerExpected: number
+  insurerReceived: number
+  mainStatus: ReceivableStatus | null
+  ovStatus: ReceivableStatus | null
+  agentPayable: number
+  agentPaid: number
+  expectedMargin: number
+  cashMargin: number
+}
+export interface ReconDashboard {
+  kpi: DashboardKpi
+  monthly: MonthlyPoint[]
+  outstandingByInsurer: InsurerOutstanding[]
+  policyLevel: PolicyReconRow[]
+}
+
+export function fetchReconDashboard(policyYear?: number, insurerId?: number) {
+  return api.get<{ data: ReconDashboard }>(`commission-reconciliation/dashboard${buildQuery({ policyYear, insurerId })}`)
+}
+
