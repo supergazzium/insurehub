@@ -415,6 +415,42 @@ class CommissionReceiptService
         }, array_slice(array_values($byPolicy), 0, 500));
     }
 
+    /**
+     * Re-pull expected_amount from the live policy commission (บ.ประกัน → ฮับ
+     * for MAIN, policy_rebates.calculated_ov for OV). Use when the policy's
+     * commission was edited after the receivable was first materialised.
+     * Blocked once Received (would rewrite a confirmed figure).
+     */
+    public function resyncExpected(CommissionReceivable $rec, ?int $userId): CommissionReceivable
+    {
+        if ($rec->status === CommissionReceivable::STATUS_RECEIVED) {
+            throw new RuntimeException('รายการนี้รับแล้ว — Reopen ก่อนจึงจะ sync ยอดใหม่ได้');
+        }
+
+        $policy = DB::table('policies as p')
+            ->leftJoin('policy_rebates as r', 'r.policy_id', '=', 'p.id')
+            ->where('p.id', $rec->policy_id)
+            ->select('p.comm_carrier_to_hub_amount', 'r.calculated_amount', 'r.calculated_ov')
+            ->first();
+        if ($policy === null) {
+            throw new RuntimeException('ไม่พบกรมธรรม์');
+        }
+
+        $newExpected = $rec->commission_type === CommissionReceivable::TYPE_MAIN
+            ? (float) ($policy->comm_carrier_to_hub_amount ?: $policy->calculated_amount ?: 0)
+            : (float) ($policy->calculated_ov ?: 0);
+
+        $old = (float) $rec->expected_amount;
+        $rec->update([
+            'expected_amount' => $newExpected,
+            'version' => $rec->version + 1,
+            'updated_by_user_id' => $userId,
+        ]);
+        $this->audit($rec, 'receivable.resync', $userId, ['expected' => $old], ['expected' => $newExpected], null);
+
+        return $rec->fresh();
+    }
+
     private function guardVersion(CommissionReceivable $rec, ?int $expectedVersion): void
     {
         if ($expectedVersion !== null && (int) $rec->version !== $expectedVersion) {

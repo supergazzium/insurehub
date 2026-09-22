@@ -12,6 +12,12 @@ import ReceiptBatchesPanel from './ReceiptBatchesPanel.vue'
 import ReconDashboardPanel from './ReconDashboardPanel.vue'
 
 const money = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+// True when the receivable's expected differs from the live policy carrier→hub
+// commission (MAIN only) — signals the expected is stale and can be re-synced.
+function mismatchExpected(r: ReceivableRow): boolean {
+  if (r.commissionType !== 'MAIN' || r.policyCarrierAmount == null) return false
+  return Math.abs(r.policyCarrierAmount - r.expectedAmount) > 0.01
+}
 
 type Tab = 'MAIN' | 'OV' | 'HISTORY' | 'BATCHES' | 'DASHBOARD'
 const tab = ref<Tab>('HISTORY')
@@ -178,6 +184,7 @@ onMounted(async () => {
               <th class="px-4 py-3">วันเริ่ม</th>
               <th class="px-4 py-3 text-right">เบี้ย</th>
               <th v-if="isHistory" class="px-4 py-3">ประเภท</th>
+              <th class="px-4 py-3 text-right">บ.ประกัน→ฮับ<div class="text-[9px] font-normal normal-case text-slate-400">จากกรมธรรม์</div></th>
               <th class="px-4 py-3 text-right">ควรได้รับ</th>
               <th class="px-4 py-3 text-right">บริษัทแจ้ง</th>
               <th class="px-4 py-3 text-right">ผลต่าง</th>
@@ -187,9 +194,9 @@ onMounted(async () => {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-if="loading"><td colspan="12" class="px-4 py-10 text-center text-slate-400">กำลังโหลด…</td></tr>
+            <tr v-if="loading"><td colspan="13" class="px-4 py-10 text-center text-slate-400">กำลังโหลด…</td></tr>
             <tr v-else-if="rows.length === 0">
-              <td colspan="12" class="px-4 py-12 text-center">
+              <td colspan="13" class="px-4 py-12 text-center">
                 <div class="text-slate-400">ไม่มีรายการ</div>
                 <div v-if="isHistory && !q && !statusFilter" class="mx-auto mt-2 max-w-md text-xs text-slate-400">
                   รายการรับค่าคอมจะปรากฏที่นี่หลังจากเริ่มตรวจรับที่แท็บ "ค่าคอมหลัก" หรือ "ค่าคอม OV"
@@ -213,7 +220,19 @@ onMounted(async () => {
               <td class="px-4 py-3 text-slate-500">{{ r.effectiveDate ? fmtDate(r.effectiveDate) : '—' }}</td>
               <td class="px-4 py-3 text-right text-slate-500">{{ r.mainPremium !== null ? '฿' + money(r.mainPremium) : '—' }}</td>
               <td v-if="isHistory" class="px-4 py-3 text-xs text-slate-500">{{ r.commissionType }}</td>
-              <td class="px-4 py-3 text-right font-medium text-slate-800">฿{{ money(r.expectedAmount) }}</td>
+              <td class="px-4 py-3 text-right">
+                <template v-if="r.commissionType === 'MAIN' && r.policyCarrierAmount != null">
+                  <div class="text-slate-700">฿{{ money(r.policyCarrierAmount) }}</div>
+                  <div v-if="r.policyCarrierRate" class="text-[10px] text-slate-400">{{ (r.policyCarrierRate * 100).toFixed(2) }}%</div>
+                </template>
+                <span v-else class="text-slate-300">—</span>
+              </td>
+              <td class="px-4 py-3 text-right font-medium"
+                :class="mismatchExpected(r) ? 'text-amber-600' : 'text-slate-800'"
+                :title="mismatchExpected(r) ? 'ยอดที่ควรได้รับไม่ตรงกับค่าคอมบนกรมธรรม์ — กด sync ในหน้ารายละเอียด' : ''">
+                ฿{{ money(r.expectedAmount) }}
+                <i v-if="mismatchExpected(r)" class="pi pi-exclamation-triangle ml-0.5 text-[10px]" />
+              </td>
               <td class="px-4 py-3 text-right text-slate-600">{{ r.statementAmount !== null ? '฿' + money(r.statementAmount) : '—' }}</td>
               <td class="px-4 py-3 text-right" :class="(r.differenceAmount ?? 0) !== 0 ? 'text-rose-600' : 'text-slate-400'">
                 {{ r.differenceAmount !== null ? (r.differenceAmount > 0 ? '+' : '') + '฿' + money(r.differenceAmount) : '—' }}

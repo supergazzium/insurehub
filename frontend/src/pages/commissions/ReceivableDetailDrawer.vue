@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import {
-  fetchReceivable, reviewReceivable, confirmReceived, markNoCommission, reopenReceivable,
+  fetchReceivable, reviewReceivable, confirmReceived, markNoCommission, reopenReceivable, resyncExpected,
   fetchReceivableAudit, type ReceivableDetail, type AuditRow,
 } from '../../api/commissionReceipts'
 import { ApiError } from '../../api/client'
@@ -63,6 +63,10 @@ async function act(fn: () => Promise<unknown>): Promise<void> {
   finally { busy.value = false }
 }
 
+function legMismatch(d: ReceivableDetail | null): boolean {
+  if (!d || d.policyCarrierAmount == null) return false
+  return Math.abs(d.policyCarrierAmount - d.expectedAmount) > 0.01
+}
 function diff(leg: LegState, d: ReceivableDetail | null): number | null {
   if (!d || leg.statement === null) return null
   return Math.round((leg.statement - d.expectedAmount) * 100) / 100
@@ -96,6 +100,11 @@ onMounted(load)
             <div><span class="text-slate-400">ปีกรมธรรม์:</span> ปีที่ {{ ref0?.policyYear ?? '—' }}</div>
             <div><span class="text-slate-400">วันเริ่มคุ้มครอง:</span> {{ ref0?.effectiveDate ? fmtDate(ref0.effectiveDate) : '—' }}</div>
             <div><span class="text-slate-400">เบี้ยหลัก:</span> {{ ref0?.mainPremium != null ? '฿' + money(ref0.mainPremium) : '—' }}</div>
+            <div class="col-span-2 rounded bg-white px-2 py-1 ring-1 ring-slate-200">
+              <span class="text-slate-400">ค่าคอม บ.ประกัน → ฮับ (จากกรมธรรม์):</span>
+              <b class="text-slate-700">{{ ref0?.policyCarrierAmount != null ? '฿' + money(ref0.policyCarrierAmount) : '—' }}</b>
+              <span v-if="ref0?.policyCarrierRate" class="text-slate-400"> ({{ (ref0.policyCarrierRate * 100).toFixed(2) }}%)</span>
+            </div>
             <div class="col-span-2"><span class="text-slate-400">ตัวแทน:</span> {{ ref0?.agentName || '—' }}<span v-if="ref0?.agentCode" class="text-slate-400"> ({{ ref0.agentCode }})</span></div>
           </div>
         </div>
@@ -111,6 +120,12 @@ onMounted(load)
               <div>
                 <label class="mb-1 block text-xs text-slate-500">ควรได้รับ</label>
                 <div class="rounded-lg bg-slate-50 px-3 py-2 text-slate-700">฿{{ money((leg === 'MAIN' ? main! : ov!).expectedAmount) }}</div>
+                <button
+                  v-if="leg === 'MAIN' && legMismatch(main)" type="button" :disabled="busy"
+                  class="mt-1 text-[11px] font-medium text-amber-700 hover:text-amber-800 disabled:opacity-50"
+                  @click="act(() => resyncExpected(main!.id))">
+                  <i class="pi pi-sync text-[9px]" /> sync จากกรมธรรม์ (฿{{ money(main!.policyCarrierAmount ?? 0) }})
+                </button>
               </div>
               <div>
                 <label class="mb-1 block text-xs text-slate-500">บริษัทแจ้ง</label>

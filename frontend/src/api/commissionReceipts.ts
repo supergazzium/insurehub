@@ -19,6 +19,8 @@ export interface ReceivableRow {
   productName: string | null
   effectiveDate: string | null
   mainPremium: number | null
+  policyCarrierAmount: number | null
+  policyCarrierRate: number | null
   expectedAmount: number
   statementAmount: number | null
   receivedAmount: number | null
@@ -43,6 +45,8 @@ export interface ReceivableDetail {
   agentName: string | null
   effectiveDate: string | null
   mainPremium: number | null
+  policyCarrierAmount: number | null
+  policyCarrierRate: number | null
   expectedAmount: number
   statementAmount: number | null
   receivedAmount: number | null
@@ -117,6 +121,9 @@ export function markNoCommission(id: string, reason: string, version: number) {
 }
 export function reopenReceivable(id: string, reason: string, version: number) {
   return api.post<{ data: ReceivableDetail }>(`commission-receivables/${id}/reopen`, { reason, version })
+}
+export function resyncExpected(id: string) {
+  return api.post<{ data: ReceivableDetail }>(`commission-receivables/${id}/resync-expected`, {})
 }
 export function fetchReceivableAudit(id: string) {
   return api.get<{ data: AuditRow[] }>(`commission-receivables/${id}/audit-log`)

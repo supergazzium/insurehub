@@ -157,6 +157,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('commission-receivables/{receivable}/confirm-received', [CommissionReceiptController::class, 'confirmReceived']);
     Route::post('commission-receivables/{receivable}/mark-no-commission', [CommissionReceiptController::class, 'markNoCommission']);
     Route::post('commission-receivables/{receivable}/reopen', [CommissionReceiptController::class, 'reopen']);
+    Route::post('commission-receivables/{receivable}/resync-expected', [CommissionReceiptController::class, 'resyncExpected']);
     Route::get('commission-receivables/{receivable}/audit-log', [CommissionReceiptController::class, 'auditLog']);
     Route::get('commission-reconciliation/summary', [CommissionReceiptController::class, 'summary']);
     Route::get('commission-reconciliation/dashboard', [CommissionReceiptController::class, 'dashboard']);

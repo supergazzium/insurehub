@@ -102,6 +102,7 @@ class CommissionReceiptController extends Controller
             'ca.name as insurer_name', 'a.agent_code',
             DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
             'pr.name as product_name', 'p.effective_date', 'p.main_premium',
+            'p.comm_carrier_to_hub_amount', 'p.comm_carrier_to_hub_rate',
             'c.customer_code',
         ])
             ->orderByDesc('cr.id')
@@ -117,7 +118,7 @@ class CommissionReceiptController extends Controller
     {
         $this->authorizeTenant($request, $receivable);
         $receivable->load([
-            'policy:id,policy_no,application_no,customer_id,product_id,writing_agent_id,policy_year,effective_date,main_premium',
+            'policy:id,policy_no,application_no,customer_id,product_id,writing_agent_id,policy_year,effective_date,main_premium,comm_carrier_to_hub_amount,comm_carrier_to_hub_rate',
             'policy.customer:id,customer_code,first_name,last_name',
             'policy.product:id,name',
             'policy.writingAgent:id,agent_code,first_name,last_name',
@@ -194,6 +195,14 @@ class CommissionReceiptController extends Controller
         return $this->run(fn () => $this->service->reopen(
             $receivable, $data['reason'], $request->user()?->id, $data['version'] ?? null,
         ));
+    }
+
+    /** POST /commission-receivables/{receivable}/resync-expected */
+    public function resyncExpected(Request $request, CommissionReceivable $receivable): JsonResponse
+    {
+        $this->authorizeTenant($request, $receivable);
+
+        return $this->run(fn () => $this->service->resyncExpected($receivable, $request->user()?->id));
     }
 
     /** GET /commission-receivables/{receivable}/audit-log */
@@ -363,6 +372,10 @@ class CommissionReceiptController extends Controller
             'productName' => $r->product_name ?? null,
             'effectiveDate' => $r->effective_date ?? null,
             'mainPremium' => $r->main_premium !== null ? (float) $r->main_premium : null,
+            // Live carrier→hub commission on the policy (what InsureHub should get
+            // from the insurer). Only meaningful on the MAIN row.
+            'policyCarrierAmount' => $r->comm_carrier_to_hub_amount !== null ? (float) $r->comm_carrier_to_hub_amount : null,
+            'policyCarrierRate' => $r->comm_carrier_to_hub_rate !== null ? (float) $r->comm_carrier_to_hub_rate : null,
             'expectedAmount' => round((float) $r->expected_amount, 2),
             'statementAmount' => $r->statement_amount !== null ? round((float) $r->statement_amount, 2) : null,
             'receivedAmount' => $r->received_amount !== null ? round((float) $r->received_amount, 2) : null,
@@ -390,6 +403,8 @@ class CommissionReceiptController extends Controller
             'agentName' => $rec->policy?->writingAgent ? trim(($rec->policy->writingAgent->first_name ?? '') . ' ' . ($rec->policy->writingAgent->last_name ?? '')) : null,
             'effectiveDate' => $rec->policy?->effective_date?->toDateString(),
             'mainPremium' => $rec->policy?->main_premium !== null ? (float) $rec->policy->main_premium : null,
+            'policyCarrierAmount' => $rec->policy?->comm_carrier_to_hub_amount !== null ? (float) $rec->policy->comm_carrier_to_hub_amount : null,
+            'policyCarrierRate' => $rec->policy?->comm_carrier_to_hub_rate !== null ? (float) $rec->policy->comm_carrier_to_hub_rate : null,
             'expectedAmount' => round((float) $rec->expected_amount, 2),
             'statementAmount' => $rec->statement_amount !== null ? round((float) $rec->statement_amount, 2) : null,
             'receivedAmount' => $rec->received_amount !== null ? round((float) $rec->received_amount, 2) : null,
