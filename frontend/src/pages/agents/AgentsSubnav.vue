@@ -5,7 +5,6 @@ import { fetchPendingAgents, fetchRankPromotions } from '../../api/agents'
 const tabs = [
   { name: 'agents', to: '/agents', label: 'รายชื่อ', icon: 'pi pi-users' },
   { name: 'agents-approvals', to: '/agents/approvals', label: 'รออนุมัติ', icon: 'pi pi-verified', badge: true },
-  { name: 'agents-org-chart', to: '/agents/org-chart', label: 'สายงาน', icon: 'pi pi-sitemap' },
   { name: 'agents-recruitment', to: '/agents/recruitment', label: 'การรับสมัคร', icon: 'pi pi-share-alt' },
   { name: 'agents-level-progress', to: '/agents/level-progress', label: 'เลื่อนระดับ', icon: 'pi pi-chart-line' },
 ]

@@ -126,7 +126,6 @@ function levelBadgeClass(lv: Agent['level']): string {
         <h1 class="text-2xl font-semibold text-slate-900">{{ t('agents.hierarchy.title') }}</h1>
         <p class="text-slate-500 text-sm mt-1">{{ t('agents.hierarchy.subtitle') }}</p>
       </div>
-      <RouterLink to="/agents/org-chart" class="shrink-0 rounded border border-slate-300 px-2.5 py-1.5 text-xs text-slate-600 hover:bg-slate-50"><i class="pi pi-share-alt text-[10px]" /> ดูแบบผังสายงาน</RouterLink>
     </header>
 
     <AgentsSubnav />

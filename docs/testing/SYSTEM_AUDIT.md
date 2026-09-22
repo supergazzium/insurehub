@@ -54,7 +54,10 @@ current data 458 of ~475 policies match because commission amounts are mostly 0.
 
 ## 🟠 Medium
 
-### M1. Team assignment is invisible / unguided  ✅ FIXED
+### M1. Team assignment is invisible / unguided  ✅ RESOLVED (team feature removed)
+> **Superseded:** the team grouping was found to be unused and to have no effect
+> on commission (which uses the upline `parent_agent_id` hierarchy). It has been
+> removed from the UI + API entirely; the earlier badge/persist fix is moot.
 > **Fixed:** the create form now persists teamId + level (was silently dropped); the hub shows an amber "ไม่มีสายงาน" warning badge; the form nudges to assign one.
 Every TST agent shows **TEAM = —**. The agent create/edit form has a สายงาน/team
 field, but nothing prompts the operator to assign a team, and the MGM/team-volume

@@ -26,7 +26,7 @@ use Illuminate\Support\Facades\DB;
  *           or delete rows where code/reference LIKE 'TST%'.
  *
  * Structure:
- *   A. Agent hierarchy (Thai names, MGM tree, teams, a pending-approval agent)
+ *   A. Agent hierarchy (Thai names, MGM upline tree, a pending-approval agent)
  *   B. Products (motor / non-life / life) on the right carriers
  *   C. Policies — status × premium-mode × commission matrix (fires MGM engine)
  *   D. ติดตามงาน — one policy per follow-up category

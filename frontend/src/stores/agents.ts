@@ -71,7 +71,6 @@ export interface Agent {
   licenseNonLifeExpiry: string | null
 
   parentAgentId: string | null
-  teamId: string | null
   level: AgentLevel
   commissionPct: number
   joinedAt: string

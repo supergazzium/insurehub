@@ -4,7 +4,6 @@ import { useAgentStore, type Agent } from '../../stores/agents'
 
 /** Per-agent rollup entry (from GET /agents/hierarchy-rollup). */
 export interface RollupEntry {
-  teamCode: string | null
   ownPremium: number
   ownPolicyCount: number
   subtreePremium: number
@@ -71,7 +70,6 @@ const levelShort = computed(() => (props.agent.level ? props.agent.level.toUpper
           </div>
           <div class="text-xs text-slate-500 font-mono flex items-center gap-1.5">
             {{ agent.agentCode }}
-            <span v-if="roll?.teamCode" class="rounded bg-slate-100 px-1 py-0.5 text-[10px] text-slate-500">{{ roll.teamCode }}</span>
           </div>
         </div>
 

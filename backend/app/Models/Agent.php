@@ -55,11 +55,6 @@ class Agent extends Model
         return $this->belongsTo(Rank::class);
     }
 
-    public function team(): BelongsTo
-    {
-        return $this->belongsTo(Team::class);
-    }
-
     public function parent(): BelongsTo
     {
         return $this->belongsTo(self::class, 'parent_agent_id');

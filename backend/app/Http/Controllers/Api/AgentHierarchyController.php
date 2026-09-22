@@ -7,7 +7,6 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\Agent;
 use App\Models\Rank;
-use App\Models\Team;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -22,7 +21,7 @@ class AgentHierarchyController extends Controller
 {
     /**
      * PATCH /agents/{agent}/hierarchy
-     * Body (all optional): teamId, parentAgentId, level (l1..l10).
+     * Body (all optional): parentAgentId, level (l1..l10).
      */
     public function update(Request $request, Agent $agent): JsonResponse
     {
@@ -30,25 +29,12 @@ class AgentHierarchyController extends Controller
         abort_unless((int) $agent->tenant_id === $tenantId, 404);
 
         $data = $request->validate([
-            'teamId' => ['sometimes', 'nullable', 'integer'],
             'parentAgentId' => ['sometimes', 'nullable', 'integer'],
             'level' => ['sometimes', 'nullable', 'string', 'regex:/^l([1-9]|10)$/'],
         ]);
 
         $changes = [];
 
-        // ── Team ────────────────────────────────────────────────────────────
-        if (array_key_exists('teamId', $data)) {
-            if ($data['teamId'] === null) {
-                $changes['team_id'] = null;
-            } else {
-                $team = Team::query()->where('tenant_id', $tenantId)->find($data['teamId']);
-                if ($team === null) {
-                    throw ValidationException::withMessages(['teamId' => 'ไม่พบสายงานนี้']);
-                }
-                $changes['team_id'] = $team->id;
-            }
-        }
 
         // ── Upline (parent agent) with cycle prevention ─────────────────────
         if (array_key_exists('parentAgentId', $data)) {
@@ -95,7 +81,6 @@ class AgentHierarchyController extends Controller
         return response()->json([
             'data' => [
                 'id' => (string) $agent->id,
-                'teamId' => $agent->team_id !== null ? (string) $agent->team_id : null,
                 'parentAgentId' => $agent->parent_agent_id !== null ? (string) $agent->parent_agent_id : null,
                 'level' => $agent->level,
                 'rankId' => $agent->rank_id !== null ? (string) $agent->rank_id : null,
@@ -180,10 +165,9 @@ class AgentHierarchyController extends Controller
 
         // Every agent + its team code.
         $agents = DB::table('agents as a')
-            ->leftJoin('teams as t', 't.id', '=', 'a.team_id')
             ->where('a.tenant_id', $tenantId)
             ->whereNull('a.deleted_at')
-            ->select('a.id', 'a.parent_agent_id', 't.code as team_code')
+            ->select('a.id', 'a.parent_agent_id')
             ->get();
 
         // Build parent → children adjacency, then post-order sum the subtree.
@@ -228,7 +212,6 @@ class AgentHierarchyController extends Controller
         foreach ($agents as $ag) {
             $id = (int) $ag->id;
             $out[(string) $id] = [
-                'teamCode' => $ag->team_code,
                 'ownPremium' => $ownPrem[$id] ?? 0.0,
                 'ownPolicyCount' => $ownCount[$id] ?? 0,
                 'subtreePremium' => $subPrem[$id] ?? 0.0,

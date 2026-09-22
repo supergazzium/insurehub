@@ -9,10 +9,10 @@ import AgentPicker from '../../components/AgentPicker.vue'
 import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 import AgentsSubnav from './AgentsSubnav.vue'
 import {
-  fetchAgent, createAgentFull, updateAgentFull, fetchTeams, fetchRanks,
+  fetchAgent, createAgentFull, updateAgentFull, fetchRanks,
   fetchLevelProgress, fetchRankPromotions, approveAgent, rejectAgent, setAgentActive,
   fetchAgentNotes, createAgentNote, fetchAgentRelations,
-  type TeamRow, type RankRow, type LevelProgress, type RankPromotionRow, type AgentNoteRow, type AgentRelations,
+  type RankRow, type LevelProgress, type RankPromotionRow, type AgentNoteRow, type AgentRelations,
 } from '../../api/agents'
 import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
@@ -34,7 +34,6 @@ function applyAddress(field: string, value: string | null): void {
 const loading = ref(false)
 const saving = ref(false)
 const error = ref<string | null>(null)
-const teams = ref<TeamRow[]>([])
 const ranks = ref<RankRow[]>([])
 const progress = ref<LevelProgress | null>(null)
 const relations = ref<AgentRelations | null>(null)
@@ -66,16 +65,12 @@ const form = reactive({
   bankNameText: '', bankAccountNo: '', bankAccountName: '',
   licenseLifeNo: '', licenseLifeExpiry: '',
   licenseNonLifeNo: '', licenseNonLifeExpiry: '',
-  teamId: '', parentAgentId: '', level: '',
+  parentAgentId: '', level: '',
   joinedAt: '',
   notes: '',
   active: true,
 })
 
-const teamOptions = computed<SearchOption[]>(() => [
-  { value: '', label: '— ไม่มีสายงาน —' },
-  ...teams.value.map((t) => ({ value: t.id, label: `${t.code} · ${t.memberCount} คน` })),
-])
 const levelOptions = computed<SearchOption[]>(() => [
   { value: '', label: '— ไม่กำหนด —' },
   ...ranks.value.map((r) => ({ value: r.levelKey, label: `${r.nameTh} (${r.code})` })),
@@ -87,8 +82,8 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = null
   try {
-    const [t, r] = await Promise.all([fetchTeams(), fetchRanks()])
-    teams.value = t.data; ranks.value = r.data
+    const r = await fetchRanks()
+    ranks.value = r.data
     if (isEdit.value) {
       const res = await fetchAgent(editId.value!)
       const d = res.data as Record<string, unknown>
@@ -109,7 +104,7 @@ async function load(): Promise<void> {
       s('bankAccountName', bank.accountName ?? d.bankAccountName)
       s('licenseLifeNo', d.licenseLifeNo); s('licenseLifeExpiry', d.licenseLifeExpiry)
       s('licenseNonLifeNo', d.licenseNonLifeNo); s('licenseNonLifeExpiry', d.licenseNonLifeExpiry)
-      s('teamId', d.teamId); s('parentAgentId', d.parentAgentId); s('level', d.level)
+      s('parentAgentId', d.parentAgentId); s('level', d.level)
       s('joinedAt', d.joinedAt); s('notes', d.notes)
       form.active = d.active !== false
       approvalStatus.value = (d.approvalStatus as string) ?? 'approved'
@@ -161,7 +156,6 @@ const payload = computed<Record<string, unknown>>(() => {
     licenseNonLifeNo: form.licenseNonLifeNo || null,
     licenseNonLifeExpiry: form.licenseNonLifeExpiry || null,
     parentAgentId: form.parentAgentId || null,
-    teamId: form.teamId || null,
     level: form.level || null,
     joinedAt: form.joinedAt || null,
     notes: form.notes || null,
@@ -375,18 +369,14 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
 
         <!-- สายงาน & ระดับ -->
         <section class="rounded-lg border border-slate-200 bg-white p-4">
-          <h2 class="mb-3 text-sm font-semibold text-slate-700">สายงาน &amp; ระดับ</h2>
+          <h2 class="mb-3 text-sm font-semibold text-slate-700">ต้นสาย &amp; ระดับ</h2>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <FormField label="สายงาน (ทีม)"><SearchSelect v-model="form.teamId" :options="teamOptions" placeholder="เลือกทีม" /></FormField>
             <FormField label="ระดับ"><SearchSelect v-model="form.level" :options="levelOptions" placeholder="เลือกระดับ" /></FormField>
             <FormField label="วันที่เข้าร่วม"><DateInput v-model="form.joinedAt" /></FormField>
             <FormField label="ต้นสาย (Upline)" class="col-span-2 sm:col-span-3">
               <AgentPicker v-model="form.parentAgentId" placeholder="ค้นหาตัวแทนต้นสาย" />
             </FormField>
           </div>
-          <p v-if="!form.teamId" class="mt-1 text-[10px] text-amber-600">
-            <i class="pi pi-info-circle text-[9px]" /> แนะนำให้กำหนดสายงาน — มีผลต่อการคำนวณค่าคอมและยอดทีม
-          </p>
         </section>
 
         <!-- สายงาน — ต้นสาย & ลูกทีม (upline / downline at a glance) -->

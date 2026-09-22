@@ -30,7 +30,7 @@ class RankPromotionController extends Controller
         $status = (string) $request->input('status', 'pending');
 
         $q = RankPromotion::query()
-            ->with(['agent:id,tenant_id,agent_code,first_name,last_name,team_id', 'fromRank:id,level,code,name_th', 'toRank:id,level,code,name_th'])
+            ->with(['agent:id,tenant_id,agent_code,first_name,last_name', 'fromRank:id,level,code,name_th', 'toRank:id,level,code,name_th'])
             ->whereHas('agent', fn ($a) => $a->where('tenant_id', $tenantId))
             ->orderByDesc('requested_at')
             ->orderByDesc('id');

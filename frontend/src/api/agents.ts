@@ -13,9 +13,6 @@ export interface AgentListRow {
   email: string
   phone: string
   level: string
-  team: string
-  teamId: string | null
-  teamNo: string
   headStatus: string
   licenseLifeNo: string
   licenseLifeExpiry: string | null
@@ -52,23 +49,7 @@ export function fetchAgent(id: string) {
   return api.get<{ data: Record<string, unknown> }>(`agents/${id}`)
 }
 
-// ── สายงาน (teams), ranks, hierarchy editing, promotion approval (Phase 2) ──
-
-export interface TeamRow {
-  id: string
-  code: string
-  name: string | null
-  parentTeamId: string | null
-  leaderAgentId: string | null
-  active: boolean
-  memberCount: number
-}
-export function fetchTeams() {
-  return api.get<{ data: TeamRow[] }>('teams')
-}
-export function createTeam(payload: { code: string; name?: string; parentTeamId?: string | number | null }) {
-  return api.post<{ data: { id: string } }>('teams', payload)
-}
+// ── สายงาน (upline), ranks, hierarchy editing, promotion approval ──
 
 export interface RankRow {
   id: string
@@ -85,26 +66,24 @@ export function fetchRanks() {
   return api.get<{ data: RankRow[] }>('ranks')
 }
 
-/** PATCH an agent's สายงาน (team + upline) and level. All fields optional. */
+/** PATCH an agent's ต้นสาย (upline) and level. All fields optional. */
 export interface AgentHierarchyPatch {
-  teamId?: string | number | null
   parentAgentId?: string | number | null
   level?: string | null   // 'l1'..'l10'
 }
 export interface HierarchyRollupEntry {
-  teamCode: string | null
   ownPremium: number
   ownPolicyCount: number
   subtreePremium: number
   subtreePolicyCount: number
 }
-/** Per-agent team + own/subtree premium rollup for the hierarchy tree. */
+/** Per-agent own/subtree premium rollup for the hierarchy tree. */
 export function fetchHierarchyRollup() {
   return api.get<{ data: Record<string, HierarchyRollupEntry> }>('agents/hierarchy-rollup')
 }
 
 export function updateAgentHierarchy(agentId: string, patch: AgentHierarchyPatch) {
-  return api.patch<{ data: { id: string; teamId: string | null; parentAgentId: string | null; level: string | null; rankId: string | null } }>(
+  return api.patch<{ data: { id: string; parentAgentId: string | null; level: string | null; rankId: string | null } }>(
     `agents/${agentId}/hierarchy`, patch,
   )
 }
