@@ -188,6 +188,32 @@ class CommissionPayoutController extends Controller
         return response()->json(['data' => $this->batchRow($batch)]);
     }
 
+    /** POST /commission-payout-batches/{batch}/approve */
+    public function approve(Request $request, CommissionPayoutBatch $batch): JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        try {
+            $batch = $this->service->approveBatch($batch, $request->user()?->id);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->batchRow($batch)]);
+    }
+
+    /** POST /commission-payout-batches/{batch}/unapprove */
+    public function unapprove(Request $request, CommissionPayoutBatch $batch): JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        try {
+            $batch = $this->service->unapproveBatch($batch, $request->user()?->id);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->batchRow($batch)]);
+    }
+
     /** POST /commission-payout-batches/{batch}/cancel */
     public function cancel(Request $request, CommissionPayoutBatch $batch): JsonResponse
     {
@@ -329,6 +355,7 @@ class CommissionPayoutController extends Controller
             'paymentDate' => $b->payment_date?->toDateString(),
             'paymentReference' => $b->payment_reference,
             'note' => $b->note,
+            'approvedAt' => $b->approved_at?->toIso8601String(),
             'paidAt' => $b->paid_at?->toIso8601String(),
             'createdAt' => $b->created_at?->toIso8601String(),
         ];

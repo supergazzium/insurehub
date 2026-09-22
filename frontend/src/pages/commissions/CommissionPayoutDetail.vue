@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   fetchPayoutBatch, addPayoutAdjustment, markPayoutBatchPaid, cancelPayoutBatch,
+  approvePayoutBatch, unapprovePayoutBatch,
   agentPdfUrl, generatePayoutPdfs, exportCsvUrl,
   type BatchDetail, type BatchStatus, type BatchAgentRow,
 } from '../../api/commissionPayouts'
@@ -32,6 +33,8 @@ const STATUS_BADGE: Record<BatchStatus, string> = {
 const VAT_LABEL: Record<string, string> = { '1': 'ไม่มี VAT', '2': 'VAT Exclude', '3': 'VAT Include' }
 
 const isEditable = computed(() => batch.value && ['DRAFT', 'GENERATED', 'APPROVED'].includes(batch.value.status))
+const canApprove = computed(() => batch.value && ['DRAFT', 'GENERATED'].includes(batch.value.status))
+const isApproved = computed(() => batch.value?.status === 'APPROVED')
 const netTotal = computed(() =>
   (batch.value?.agents ?? []).reduce((s, a) => s + a.net, 0),
 )
@@ -148,6 +151,17 @@ async function exportCsv(): Promise<void> {
   }
 }
 
+async function doApprove(): Promise<void> {
+  error.value = null
+  try { await approvePayoutBatch(id); await load() }
+  catch (e: unknown) { error.value = e instanceof ApiError ? e.message : 'อนุมัติไม่สำเร็จ' }
+}
+async function doUnapprove(): Promise<void> {
+  error.value = null
+  try { await unapprovePayoutBatch(id); await load() }
+  catch (e: unknown) { error.value = e instanceof ApiError ? e.message : 'ยกเลิกอนุมัติไม่สำเร็จ' }
+}
+
 async function doCancel(): Promise<void> {
   if (!confirm('ยกเลิก batch นี้?')) return
   try {
@@ -200,7 +214,23 @@ onMounted(load)
             <i :class="['pi mr-1', csvBusy ? 'pi-spin pi-spinner' : 'pi-file-excel']" /> Export Excel (CSV)
           </button>
           <button
-            v-if="isEditable"
+            v-if="canApprove"
+            type="button"
+            class="rounded-lg bg-violet-600 px-4 py-2 text-sm font-medium text-white hover:bg-violet-700"
+            @click="doApprove"
+          >
+            <i class="pi pi-verified mr-1" /> อนุมัติ
+          </button>
+          <button
+            v-if="isApproved"
+            type="button"
+            class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-600 hover:bg-slate-50"
+            @click="doUnapprove"
+          >
+            ยกเลิกอนุมัติ
+          </button>
+          <button
+            v-if="isApproved"
             type="button"
             class="rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium text-white hover:bg-emerald-700"
             @click="showPay = true"

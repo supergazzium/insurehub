@@ -27,6 +27,7 @@ export interface BatchRow {
   totalAmount: number
   paymentDate: string | null
   paymentReference: string | null
+  approvedAt?: string | null
   note: string | null
   paidAt: string | null
   createdAt: string | null
@@ -87,6 +88,12 @@ export function markPayoutBatchPaid(id: string, paymentDate: string, reference?:
 }
 export function cancelPayoutBatch(id: string) {
   return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/cancel`, {})
+}
+export function approvePayoutBatch(id: string) {
+  return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/approve`, {})
+}
+export function unapprovePayoutBatch(id: string) {
+  return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/unapprove`, {})
 }
 
 /** Single-agent PDF download URL (opens/downloads directly). */

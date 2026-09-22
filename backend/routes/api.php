@@ -144,6 +144,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-payout-batches/{batch}', [CommissionPayoutController::class, 'show']);
     Route::post('commission-payout-batches/{batch}/adjustments', [CommissionPayoutController::class, 'addAdjustment']);
     Route::post('commission-payout-batches/{batch}/mark-paid', [CommissionPayoutController::class, 'markPaid']);
+    Route::post('commission-payout-batches/{batch}/approve', [CommissionPayoutController::class, 'approve']);
+    Route::post('commission-payout-batches/{batch}/unapprove', [CommissionPayoutController::class, 'unapprove']);
     Route::post('commission-payout-batches/{batch}/generate-pdfs', [CommissionPayoutController::class, 'generatePdfs']);
     Route::get('commission-payout-batches/{batch}/agents/{code}/pdf', [CommissionPayoutController::class, 'agentPdf']);
     Route::get('commission-payout-batches/{batch}/export.csv', [CommissionPayoutController::class, 'exportCsv']);

@@ -264,6 +264,9 @@ class CommissionPayoutService
         if ($batch->status === CommissionPayoutBatch::STATUS_CANCELLED) {
             throw new RuntimeException('Batch นี้ถูกยกเลิกแล้ว');
         }
+        if ($batch->status !== CommissionPayoutBatch::STATUS_APPROVED) {
+            throw new RuntimeException('ต้องอนุมัติ batch ก่อนจึงจะยืนยันการจ่ายได้');
+        }
 
         return DB::transaction(function () use ($batch, $paymentDate, $reference, $userId): CommissionPayoutBatch {
             $items = $batch->items()->where('item_status', CommissionPayoutBatchItem::ITEM_PENDING)->get();
@@ -305,6 +308,38 @@ class CommissionPayoutService
 
             return $batch->fresh();
         });
+    }
+
+    /** Approve a batch so it can be paid (spec §8.1: separate approve step). */
+    public function approveBatch(CommissionPayoutBatch $batch, ?int $userId): CommissionPayoutBatch
+    {
+        if (! in_array($batch->status, [CommissionPayoutBatch::STATUS_DRAFT, CommissionPayoutBatch::STATUS_GENERATED], true)) {
+            throw new RuntimeException('อนุมัติได้เฉพาะ batch สถานะร่าง/สร้างเอกสารแล้ว');
+        }
+        $batch->update([
+            'status' => CommissionPayoutBatch::STATUS_APPROVED,
+            'approved_by_user_id' => $userId,
+            'approved_at' => now(),
+        ]);
+        $this->audit($batch->tenant_id, $userId, 'commission_payout.approve', "batch:{$batch->id}", []);
+
+        return $batch->fresh();
+    }
+
+    /** Revoke approval, returning the batch to DRAFT (before it is paid). */
+    public function unapproveBatch(CommissionPayoutBatch $batch, ?int $userId): CommissionPayoutBatch
+    {
+        if ($batch->status !== CommissionPayoutBatch::STATUS_APPROVED) {
+            throw new RuntimeException('ยกเลิกอนุมัติได้เฉพาะ batch ที่อนุมัติแล้วและยังไม่จ่าย');
+        }
+        $batch->update([
+            'status' => CommissionPayoutBatch::STATUS_DRAFT,
+            'approved_by_user_id' => null,
+            'approved_at' => null,
+        ]);
+        $this->audit($batch->tenant_id, $userId, 'commission_payout.unapprove', "batch:{$batch->id}", []);
+
+        return $batch->fresh();
     }
 
     public function cancelBatch(CommissionPayoutBatch $batch, ?int $userId): CommissionPayoutBatch
