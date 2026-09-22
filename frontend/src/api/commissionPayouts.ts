@@ -1,5 +1,5 @@
 // ทำจ่ายค่าคอมประจำเดือน (ตัวแทน) — agent commission payout batch API client.
-import { api, buildQuery } from './client'
+import { api, buildQuery, getToken, API_BASE_URL } from './client'
 
 export type BatchStatus = 'DRAFT' | 'GENERATED' | 'APPROVED' | 'PAID' | 'CANCELLED'
 
@@ -87,4 +87,27 @@ export function markPayoutBatchPaid(id: string, paymentDate: string, reference?:
 }
 export function cancelPayoutBatch(id: string) {
   return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/cancel`, {})
+}
+
+/** Single-agent PDF download URL (opens/downloads directly). */
+export function agentPdfUrl(batchId: string, agentCode: string): string {
+  return `${API_BASE_URL}/commission-payout-batches/${batchId}/agents/${encodeURIComponent(agentCode)}/pdf`
+}
+
+/** Generate a ZIP of all (or selected) agent PDFs — returns a Blob to save. */
+export async function generatePayoutPdfs(batchId: string, agentCodes?: string[]): Promise<Blob> {
+  const res = await fetch(`${API_BASE_URL}/commission-payout-batches/${batchId}/generate-pdfs`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${getToken() ?? ''}`,
+      'Content-Type': 'application/json',
+      Accept: 'application/zip',
+    },
+    body: JSON.stringify({ agentCodes }),
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.message ?? `HTTP ${res.status}`)
+  }
+  return res.blob()
 }

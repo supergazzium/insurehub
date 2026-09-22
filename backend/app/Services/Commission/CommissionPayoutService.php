@@ -318,6 +318,101 @@ class CommissionPayoutService
         return $batch->fresh();
     }
 
+    /** VAT rate applied to agent commission when the agent carries VAT. */
+    private const VAT_RATE = 0.07;
+
+    /**
+     * Assemble the per-agent PDF payload for a batch: the agent's items plus
+     * VAT-aware totals. `$agentId` of 0 matches the "no agent" bucket.
+     * Returns null when the agent has no items in the batch.
+     *
+     * @return array<string, mixed>|null
+     */
+    public function buildAgentPdfData(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode): ?array
+    {
+        $items = $batch->items()
+            ->with(['policy:id,policy_no,application_no,customer_id', 'policy.customer:id,first_name,last_name', 'agent:id,agent_code,first_name,last_name,vat_type'])
+            ->when($agentId !== null, fn ($q) => $q->where('agent_id', $agentId))
+            ->when($agentId === null && $agentCode !== null, fn ($q) => $q->where('agent_code', $agentCode))
+            ->get();
+
+        if ($items->isEmpty()) {
+            return null;
+        }
+
+        $first = $items->first();
+        $vatType = (string) ($first->vat_type ?: '1');
+
+        $rows = [];
+        $commission = 0.0;
+        foreach ($items as $it) {
+            $amt = $it->total();
+            $commission += $amt;
+            $cust = $it->policy?->customer;
+            $rows[] = [
+                'policyNo' => $it->policy?->policy_no,
+                'applicationNo' => $it->policy?->application_no,
+                'customerName' => $cust ? trim("{$cust->first_name} {$cust->last_name}") : null,
+                'base' => (float) $it->snapshot_base_premium,
+                'commission' => round($amt, 2),
+            ];
+        }
+
+        $deduct = (float) $batch->adjustments()
+            ->when($agentId !== null, fn ($q) => $q->where('agent_id', $agentId))
+            ->when($agentId === null && $agentCode !== null, fn ($q) => $q->where('agent_code', $agentCode))
+            ->sum('amount');
+
+        $afterDeduct = round($commission - $deduct, 2);
+
+        // VAT presentation per VAT_TYPE (spec §5).
+        $vat = 0.0;
+        $net = $afterDeduct;
+        $baseExVat = $afterDeduct;
+        $payable = $afterDeduct;
+        if ($vatType === '2') {
+            // Exclude: add VAT on top.
+            $vat = round($afterDeduct * self::VAT_RATE, 2);
+            $payable = round($afterDeduct + $vat, 2);
+        } elseif ($vatType === '3') {
+            // Include: VAT already inside the amount.
+            $baseExVat = round($afterDeduct / (1 + self::VAT_RATE), 2);
+            $vat = round($afterDeduct - $baseExVat, 2);
+            $payable = $afterDeduct;
+        }
+
+        $agentName = $first->agent ? trim("{$first->agent->first_name} {$first->agent->last_name}") : '';
+
+        return [
+            'vatType' => $vatType,
+            'agent' => ['code' => $first->agent_code ?? $agentCode, 'name' => $agentName],
+            'items' => $rows,
+            'totals' => [
+                'commission' => round($commission, 2),
+                'deduct' => round($deduct, 2),
+                'net' => $net,
+                'baseExVat' => $baseExVat,
+                'vat' => $vat,
+                'payable' => $payable,
+            ],
+            'batch' => [
+                'id' => $batch->id,
+                'from' => $batch->from_date?->toDateString(),
+                'to' => $batch->to_date?->toDateString(),
+            ],
+        ];
+    }
+
+    /** VAT filename tag per spec §5.1. */
+    public function vatTag(string $vatType): string
+    {
+        return match ($vatType) {
+            '2' => '(VAT_E)',
+            '3' => '(VAT_I)',
+            default => '',
+        };
+    }
+
     private function audit(int $tenantId, ?int $userId, string $action, string $target, array $metadata): void
     {
         AuditEntry::create([

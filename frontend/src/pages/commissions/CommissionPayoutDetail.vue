@@ -3,6 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   fetchPayoutBatch, addPayoutAdjustment, markPayoutBatchPaid, cancelPayoutBatch,
+  agentPdfUrl, generatePayoutPdfs,
   type BatchDetail, type BatchStatus, type BatchAgentRow,
 } from '../../api/commissionPayouts'
 import { ApiError } from '../../api/client'
@@ -103,6 +104,28 @@ async function confirmPay(): Promise<void> {
   }
 }
 
+const genBusy = ref(false)
+async function generateAll(): Promise<void> {
+  genBusy.value = true; error.value = null
+  try {
+    const blob = await generatePayoutPdfs(id)
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `CommissionPayout-${batch.value?.fromDate ?? ''}-${batch.value?.toDate ?? ''}.zip`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'สร้าง PDF ไม่สำเร็จ'
+  } finally {
+    genBusy.value = false
+  }
+}
+function openAgentPdf(agentCode: string | null): void {
+  if (!agentCode) return
+  window.open(agentPdfUrl(id, agentCode), '_blank')
+}
+
 async function doCancel(): Promise<void> {
   if (!confirm('ยกเลิก batch นี้?')) return
   try {
@@ -138,6 +161,14 @@ onMounted(load)
           </div>
         </div>
         <div class="flex shrink-0 gap-2">
+          <button
+            type="button"
+            :disabled="genBusy"
+            class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            @click="generateAll"
+          >
+            <i :class="['pi mr-1', genBusy ? 'pi-spin pi-spinner' : 'pi-file-pdf']" /> ดาวน์โหลด PDF ทั้งหมด (ZIP)
+          </button>
           <button
             v-if="isEditable"
             type="button"
@@ -191,6 +222,7 @@ onMounted(load)
                 <td class="px-4 py-3 text-right" :class="a.deduct > 0 ? 'text-rose-600' : 'text-slate-400'">{{ a.deduct > 0 ? '-฿' + money(a.deduct) : '—' }}</td>
                 <td class="px-4 py-3 text-right font-medium text-slate-900">฿{{ money(a.net) }}</td>
                 <td class="px-4 py-3 text-right">
+                  <button type="button" class="mr-3 text-xs text-slate-500 hover:text-brand-700" @click.stop="openAgentPdf(a.agentCode)"><i class="pi pi-file-pdf" /> PDF</button>
                   <button v-if="isEditable" type="button" class="text-xs text-brand-600 hover:text-brand-700" @click="openAdj(a)">หักพิเศษ</button>
                 </td>
               </tr>

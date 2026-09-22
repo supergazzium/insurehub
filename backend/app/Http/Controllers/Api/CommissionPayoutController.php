@@ -9,8 +9,11 @@ use App\Models\CommissionPayoutBatch;
 use App\Services\Commission\CommissionPayoutService;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
-use Illuminate\Validation\Rule;
+use Barryvdh\DomPDF\Facade\Pdf;
+use Illuminate\Support\Str;
 use RuntimeException;
+use Symfony\Component\HttpFoundation\Response;
+use ZipArchive;
 
 /**
  * Agent commission payout batches — ระบบทำจ่ายค่าคอมประจำเดือน (ตัวแทน).
@@ -195,6 +198,96 @@ class CommissionPayoutController extends Controller
         }
 
         return response()->json(['data' => $this->batchRow($batch)]);
+    }
+
+    /** GET /commission-payout-batches/{batch}/agents/{code}/pdf — one agent. */
+    public function agentPdf(Request $request, CommissionPayoutBatch $batch, string $code): Response
+    {
+        $this->authorizeTenant($request, $batch);
+        $data = $this->service->buildAgentPdfData($batch, null, $code);
+        if ($data === null) {
+            abort(404, 'ไม่พบรายการของตัวแทนใน batch นี้');
+        }
+
+        $pdf = $this->renderAgentPdf($data);
+        $filename = $this->pdfFilename($batch, $data);
+
+        return $pdf->download($filename);
+    }
+
+    /** POST /commission-payout-batches/{batch}/generate-pdfs — ZIP of all (or selected) agents. */
+    public function generatePdfs(Request $request, CommissionPayoutBatch $batch): Response
+    {
+        $this->authorizeTenant($request, $batch);
+        $payload = $request->validate([
+            'agentCodes' => ['nullable', 'array'],
+            'agentCodes.*' => ['string'],
+        ]);
+        ini_set('memory_limit', '512M');
+
+        // Distinct agent codes in the batch (optionally filtered to a selection).
+        $codes = $batch->items()
+            ->when(! empty($payload['agentCodes']), fn ($q) => $q->whereIn('agent_code', $payload['agentCodes']))
+            ->whereNotNull('agent_code')
+            ->distinct()
+            ->pluck('agent_code');
+
+        if ($codes->isEmpty()) {
+            return response()->json(['message' => 'ไม่พบตัวแทนใน batch'], 422);
+        }
+
+        $tmp = tempnam(sys_get_temp_dir(), 'cpay_') . '.zip';
+        $zip = new ZipArchive();
+        $zip->open($tmp, ZipArchive::CREATE | ZipArchive::OVERWRITE);
+        $used = [];
+        foreach ($codes as $code) {
+            $data = $this->service->buildAgentPdfData($batch, null, $code);
+            if ($data === null) {
+                continue;
+            }
+            $name = $this->pdfFilename($batch, $data);
+            // Guard against duplicate names within the archive.
+            if (isset($used[$name])) {
+                $name = preg_replace('/\.pdf$/', '', $name) . '_' . (++$used[$name]) . '.pdf';
+            } else {
+                $used[$name] = 1;
+            }
+            $zip->addFromString($name, $this->renderAgentPdf($data)->output());
+        }
+        $zip->close();
+
+        $zipName = "CommissionPayout-{$batch->from_date?->format('Ymd')}-{$batch->to_date?->format('Ymd')}.zip";
+
+        return response()->download($tmp, $zipName)->deleteFileAfterSend(true);
+    }
+
+    private function renderAgentPdf(array $data)
+    {
+        return Pdf::loadView('pdf.commission-payout', [
+            'vatType' => $data['vatType'],
+            'agent' => $data['agent'],
+            'items' => $data['items'],
+            'totals' => $data['totals'],
+            'batch' => $data['batch'],
+            'generatedAt' => now()->format('Y-m-d H:i'),
+        ])->setPaper('a4', 'portrait');
+    }
+
+    /** Filename per spec §5.1: <code>_<name>_<mmyyyy><vattag>.pdf, sanitised. */
+    private function pdfFilename(CommissionPayoutBatch $batch, array $data): string
+    {
+        $mmyyyy = $batch->to_date?->format('mY') ?? now()->format('mY');
+        $tag = $this->service->vatTag($data['vatType']);
+        $name = trim(($data['agent']['name'] ?? '') ?: ($data['agent']['code'] ?? 'agent'));
+        $code = $data['agent']['code'] ?? 'agent';
+        $raw = "{$code}_{$name}_{$mmyyyy}{$tag}";
+        // Strip filesystem-unsafe chars (spec §5.1 File Name Safety):
+        // \ / : * ? " < > | plus control chars → underscore.
+        $unsafe = ['\\', '/', ':', '*', '?', '"', '<', '>', '|', "\n", "\r", "\t"];
+        $safe = str_replace($unsafe, '_', $raw);
+        $safe = Str::limit($safe, 120, '');
+
+        return $safe . '.pdf';
     }
 
     private function batchRow(CommissionPayoutBatch $b): array

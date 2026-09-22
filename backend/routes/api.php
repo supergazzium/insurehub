@@ -144,6 +144,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-payout-batches/{batch}', [CommissionPayoutController::class, 'show']);
     Route::post('commission-payout-batches/{batch}/adjustments', [CommissionPayoutController::class, 'addAdjustment']);
     Route::post('commission-payout-batches/{batch}/mark-paid', [CommissionPayoutController::class, 'markPaid']);
+    Route::post('commission-payout-batches/{batch}/generate-pdfs', [CommissionPayoutController::class, 'generatePdfs']);
+    Route::get('commission-payout-batches/{batch}/agents/{code}/pdf', [CommissionPayoutController::class, 'agentPdf']);
     Route::post('commission-payout-batches/{batch}/cancel', [CommissionPayoutController::class, 'cancel']);
 
     // รับค่าคอมจากบริษัทประกัน (insurer commission receipt — Phase 1 manual).
