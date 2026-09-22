@@ -111,3 +111,9 @@ export async function generatePayoutPdfs(batchId: string, agentCodes?: string[])
   }
   return res.blob()
 }
+
+/** Reconciliation CSV export URL (opens/downloads directly). */
+export function exportCsvUrl(batchId: string): string {
+  return `${API_BASE_URL}/commission-payout-batches/${batchId}/export.csv`
+}
+

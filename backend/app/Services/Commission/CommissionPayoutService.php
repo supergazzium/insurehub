@@ -403,6 +403,53 @@ class CommissionPayoutService
         ];
     }
 
+    /**
+     * Flat reconciliation rows for the Excel/CSV export (spec §6.1). One row
+     * per batch item with the snapshot amounts + agent + policy identifiers.
+     * Read-only evidence — reflects the frozen batch snapshot, not a re-query.
+     *
+     * @return array<int, array<string, string|float|null>>
+     */
+    public function exportRows(CommissionPayoutBatch $batch): array
+    {
+        $items = $batch->items()
+            ->with(['policy:id,policy_no,application_no,created_at,customer_id', 'policy.customer:id,first_name,last_name', 'agent:id,agent_code,first_name,last_name,vat_type'])
+            ->orderBy('agent_code')
+            ->get();
+
+        // Per-agent adjustment totals for the deduct column.
+        $adjByAgent = [];
+        foreach ($batch->adjustments as $adj) {
+            $key = $adj->agent_id ?? 0;
+            $adjByAgent[$key] = ($adjByAgent[$key] ?? 0) + (float) $adj->amount;
+        }
+
+        $rows = [];
+        foreach ($items as $it) {
+            $cust = $it->policy?->customer;
+            $agentName = $it->agent ? trim("{$it->agent->first_name} {$it->agent->last_name}") : '';
+            $rows[] = [
+                'application_no' => $it->policy?->application_no,
+                'policy_no' => $it->policy?->policy_no,
+                'create_date' => $it->policy?->created_at?->format('Y-m-d'),
+                'agent_code' => $it->agent_code,
+                'agent_name' => $agentName,
+                'vat_type' => $it->vat_type,
+                'customer_name' => $cust ? trim("{$cust->first_name} {$cust->last_name}") : null,
+                'base_premium' => round((float) $it->snapshot_base_premium, 2),
+                'main_commission' => round((float) $it->snapshot_agent_commission, 2),
+                'rider_commission' => round((float) $it->snapshot_rider_commission, 2),
+                'total_commission' => round($it->total(), 2),
+                'amount_source' => $it->amount_source,
+                'item_status' => $it->item_status,
+                'payment_date' => $batch->payment_date?->format('Y-m-d'),
+                'payment_reference' => $batch->payment_reference,
+            ];
+        }
+
+        return $rows;
+    }
+
     /** VAT filename tag per spec §5.1. */
     public function vatTag(string $vatType): string
     {

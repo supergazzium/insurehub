@@ -13,6 +13,7 @@ use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Str;
 use RuntimeException;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 use ZipArchive;
 
 /**
@@ -259,6 +260,31 @@ class CommissionPayoutController extends Controller
         $zipName = "CommissionPayout-{$batch->from_date?->format('Ymd')}-{$batch->to_date?->format('Ymd')}.zip";
 
         return response()->download($tmp, $zipName)->deleteFileAfterSend(true);
+    }
+
+    /** GET /commission-payout-batches/{batch}/export.csv — reconciliation export (§6.1). */
+    public function exportCsv(Request $request, CommissionPayoutBatch $batch): StreamedResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        $rows = $this->service->exportRows($batch);
+
+        $headers = [
+            'ใบคำขอ', 'เลขกรมธรรม์', 'วันแจ้งงาน', 'รหัสตัวแทน', 'ชื่อตัวแทน', 'VAT_TYPE',
+            'ลูกค้า', 'เบี้ยฐาน', 'ค่าคอมหลัก', 'ค่าคอมไรเดอร์', 'รวมค่าคอม',
+            'ที่มายอด', 'สถานะรายการ', 'วันที่จ่าย', 'อ้างอิงการจ่าย',
+        ];
+        $filename = "CommissionPayout-{$batch->from_date?->format('Ymd')}-{$batch->to_date?->format('Ymd')}.csv";
+
+        return response()->streamDownload(function () use ($headers, $rows): void {
+            $out = fopen('php://output', 'w');
+            // UTF-8 BOM so Excel renders Thai correctly.
+            fwrite($out, "\xEF\xBB\xBF");
+            fputcsv($out, $headers);
+            foreach ($rows as $r) {
+                fputcsv($out, array_values($r));
+            }
+            fclose($out);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
     private function renderAgentPdf(array $data)

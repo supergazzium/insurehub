@@ -3,7 +3,7 @@ import { onMounted, ref, computed } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import {
   fetchPayoutBatch, addPayoutAdjustment, markPayoutBatchPaid, cancelPayoutBatch,
-  agentPdfUrl, generatePayoutPdfs,
+  agentPdfUrl, generatePayoutPdfs, exportCsvUrl,
   type BatchDetail, type BatchStatus, type BatchAgentRow,
 } from '../../api/commissionPayouts'
 import { ApiError } from '../../api/client'
@@ -126,6 +126,28 @@ function openAgentPdf(agentCode: string | null): void {
   window.open(agentPdfUrl(id, agentCode), '_blank')
 }
 
+const csvBusy = ref(false)
+async function exportCsv(): Promise<void> {
+  csvBusy.value = true; error.value = null
+  try {
+    const res = await fetch(exportCsvUrl(id), {
+      headers: { Authorization: `Bearer ${localStorage.getItem('insurehub.token') ?? ''}`, Accept: 'text/csv' },
+    })
+    if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    const blob = await res.blob()
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `CommissionPayout-${batch.value?.fromDate ?? ''}-${batch.value?.toDate ?? ''}.csv`
+    document.body.appendChild(a); a.click(); a.remove()
+    URL.revokeObjectURL(url)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'ส่งออก CSV ไม่สำเร็จ'
+  } finally {
+    csvBusy.value = false
+  }
+}
+
 async function doCancel(): Promise<void> {
   if (!confirm('ยกเลิก batch นี้?')) return
   try {
@@ -168,6 +190,14 @@ onMounted(load)
             @click="generateAll"
           >
             <i :class="['pi mr-1', genBusy ? 'pi-spin pi-spinner' : 'pi-file-pdf']" /> ดาวน์โหลด PDF ทั้งหมด (ZIP)
+          </button>
+          <button
+            type="button"
+            :disabled="csvBusy"
+            class="rounded-lg border border-slate-300 px-4 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50"
+            @click="exportCsv"
+          >
+            <i :class="['pi mr-1', csvBusy ? 'pi-spin pi-spinner' : 'pi-file-excel']" /> Export Excel (CSV)
           </button>
           <button
             v-if="isEditable"
