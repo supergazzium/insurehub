@@ -64,3 +64,20 @@ export interface ReminderInput {
 export function createReminder(policyId: string, payload: ReminderInput) {
   return api.post<{ data: { id: string } }>(`policies/${policyId}/reminders`, payload)
 }
+
+export interface PaymentRecord {
+  id: string
+  paymentDate: string | null
+  amount: number
+  method: string | null
+  reference: string | null
+}
+export interface CollectionDetail extends CollectionRow {
+  carrierName: string | null
+  productName: string | null
+  payments: PaymentRecord[]
+}
+export function fetchCollection(policyId: string) {
+  return api.get<{ data: CollectionDetail }>(`collections/${policyId}`)
+}
+

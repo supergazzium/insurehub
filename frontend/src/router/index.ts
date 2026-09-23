@@ -158,6 +158,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'policies', name: 'policies', component: PolicyList, meta: { moduleKey: 'policies' } },
       { path: 'policies/expiring', name: 'policies-expiring', component: ExpiringSoon, meta: { moduleKey: 'renewal-pipeline' } },
       { path: 'policies/collections', name: 'policies-collections', component: () => import('../pages/policies/Collections.vue'), meta: { moduleKey: 'collections' } },
+      { path: 'policies/collections/:id', name: 'policies-collection-detail', component: () => import('../pages/policies/CollectionDetail.vue'), meta: { moduleKey: 'collections' } },
       { path: 'policies/follow-ups', name: 'policies-follow-ups', component: () => import('../pages/policies/FollowUps.vue'), meta: { moduleKey: 'follow-ups' } },
       { path: 'policies/:id/renewal', name: 'policy-renewal', component: () => import('../pages/policies/RenewalDetail.vue'), meta: { moduleKey: 'renewal-pipeline' } },
       { path: 'commissions/rebates', name: 'commission-rebates', component: RebateReconciliation, meta: { moduleKey: 'rebate-reconciliation' } },

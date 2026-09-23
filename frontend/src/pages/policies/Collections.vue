@@ -71,7 +71,7 @@ const summary = computed(() => {
   return { count: rows.value.length, totalOutstanding, overduePolicies }
 })
 
-function openPolicy(id: string) { router.push({ name: 'policy-edit-draft', params: { id } }) }
+function openPolicy(id: string) { router.push({ name: 'policies-collection-detail', params: { id } }) }
 
 // ── Reminder modal ─────────────────────────────────────────────────────────
 const reminderModal = ref<{ policy: CollectionRow; installmentNo: number | null } | null>(null)

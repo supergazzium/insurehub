@@ -190,6 +190,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // การติดตามเงิน (payment collections / dunning)
     Route::get('collections', [CollectionsController::class, 'index']);
+    Route::get('collections/{policy}', [CollectionsController::class, 'show']);
     Route::get('follow-ups', [FollowUpController::class, 'index']);
     Route::get('policies/{policy}/reminders', [CollectionsController::class, 'reminders']);
     Route::post('policies/{policy}/reminders', [CollectionsController::class, 'storeReminder']);

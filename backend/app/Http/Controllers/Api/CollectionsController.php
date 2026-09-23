@@ -141,6 +141,121 @@ class CollectionsController extends Controller
         ]);
     }
 
+    /**
+     * GET /collections/{policy} — one policy's collection detail: the same
+     * computed row as the list, plus the actual payment records and the full
+     * reminder history, for a focused money-collection view.
+     */
+    public function show(Request $request, Policy $policy): JsonResponse
+    {
+        $tenantId = (int) $request->attributes->get('tenant_id', $request->user()->tenant_id);
+        abort_unless((int) $policy->tenant_id === $tenantId, 404);
+
+        $r = DB::table('policies as p')
+            ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
+            ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
+            ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
+            ->leftJoin('products as pr', 'pr.id', '=', 'p.product_id')
+            ->where('p.id', $policy->id)
+            ->select([
+                'p.id', 'p.policy_no', 'p.application_no', 'p.status',
+                'p.main_premium', 'p.compulsory_premium', 'p.total_premium_paid',
+                'p.installment_mode', 'p.installment_term',
+                'p.effective_date', 'p.first_due_inst_date',
+                'c.customer_code', 'c.phone as customer_phone',
+                DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
+                'a.agent_code',
+                DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
+                'ca.name as carrier_name', 'pr.name as product_name',
+                DB::raw('(SELECT COALESCE(SUM(pp.amount),0) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_total'),
+                DB::raw('(SELECT COUNT(*) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_count'),
+                DB::raw('(SELECT COUNT(*) FROM payment_reminders pr WHERE pr.policy_id = p.id) as reminder_count'),
+                DB::raw('(SELECT MAX(pr.created_at) FROM payment_reminders pr WHERE pr.policy_id = p.id) as last_reminder_at'),
+            ])
+            ->first();
+        if ($r === null) {
+            abort(404);
+        }
+
+        $row = $this->buildRow($r, Carbon::today());
+
+        // Actual payment records (auditable source of truth).
+        $payments = DB::table('policy_payments')
+            ->where('policy_id', $policy->id)
+            ->orderBy('payment_date')->orderBy('id')
+            ->get(['id', 'payment_date', 'amount', 'method', 'reference'])
+            ->map(fn ($p): array => [
+                'id' => (string) $p->id,
+                'paymentDate' => $p->payment_date,
+                'amount' => (float) $p->amount,
+                'method' => $p->method,
+                'reference' => $p->reference,
+            ]);
+
+        return response()->json([
+            'data' => array_merge($row, [
+                'carrierName' => $r->carrier_name,
+                'productName' => $r->product_name,
+                'payments' => $payments,
+            ]),
+        ]);
+    }
+
+    /**
+     * Build one collection row from a policies row (shared by index + show).
+     * Returns null when the outstanding is under ฿1 (nothing to chase) — the
+     * caller decides whether to skip it; show() always returns it.
+     *
+     * @return array<string, mixed>
+     */
+    private function buildRow(object $r, Carbon $today): array
+    {
+        $main = (float) ($r->main_premium ?? 0);
+        $compulsory = (float) ($r->compulsory_premium ?? 0);
+        $totalDue = round($main + $compulsory, 2);
+        $paid = (float) $r->paid_total;
+        if ($paid <= 0 && (float) ($r->total_premium_paid ?? 0) > 0) {
+            $paid = (float) $r->total_premium_paid;
+        }
+        $paid = round($paid, 2);
+        if ($totalDue <= 0) {
+            $totalDue = $paid;
+        }
+        $outstanding = round($totalDue - $paid, 2);
+
+        $rowKind = $this->classify($r);
+        $schedule = null;
+        $overdueCount = 0;
+        if (($rowKind === 'installment' || $rowKind === 'split') && $r->installment_mode !== null) {
+            $schedule = $this->buildSchedule($r, (int) $r->paid_count, $today);
+            $overdueCount = collect($schedule)->where('overdue', true)->count();
+        }
+
+        return [
+            'policyId' => (string) $r->id,
+            'policyNo' => $r->policy_no,
+            'applicationNo' => $r->application_no,
+            'status' => $r->status,
+            'kind' => $rowKind,
+            'customerCode' => $r->customer_code,
+            'customerName' => $r->customer_name,
+            'customerPhone' => $r->customer_phone,
+            'agentCode' => $r->agent_code,
+            'agentName' => $r->agent_name,
+            'totalDue' => $totalDue,
+            'paid' => $paid,
+            'outstanding' => $outstanding,
+            'installmentMode' => $r->installment_mode,
+            'installmentCount' => $r->installment_term !== null ? (int) $r->installment_term : null,
+            'paidCount' => (int) $r->paid_count,
+            'overdueCount' => $overdueCount,
+            'schedule' => $schedule,
+            'reminderCount' => (int) $r->reminder_count,
+            'lastReminderAt' => $r->last_reminder_at ? Carbon::parse($r->last_reminder_at)->toIso8601String() : null,
+            'effectiveDate' => $r->effective_date,
+        ];
+    }
+
     /** cash | installment | split — from installment_mode + payment-event payee. */
     private function classify(object $r): string
     {
