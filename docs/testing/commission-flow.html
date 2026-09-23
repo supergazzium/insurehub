@@ -1,0 +1,228 @@
+<title>Commission Flow</title>
+<meta name="description" content="How commission moves through InsureHub — from a policy sale to money reaching each agent, with the MGM cascade explained.">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@500;600&family=Noto+Sans+Thai:wght@400;500;600;700&display=swap">
+<style>
+  :root{
+    --bg:#eef2f7; --surface:#ffffff; --surface-2:#f2f6fb;
+    --ink:#111826; --ink-soft:#48576b; --ink-faint:#8090a4;
+    --line:#d9e2ec; --line-soft:#e7eef5;
+    --brand:#0e74e8; --brand-soft:#e3effc; --brand-deep:#0b539f;
+    --insurer:#5b6b82; --insurer-soft:#eef1f6;
+    --agent:#15926b; --agent-soft:#e2f4ec;
+    --direct:#0e74e8; --direct-soft:#e3effc;
+    --referral:#7c4dd4; --referral-soft:#efe8fb;
+    --diff:#c77d0a; --diff-soft:#fbf1de;
+    --th:'Noto Sans Thai','IBM Plex Sans',system-ui,sans-serif;
+    --sans:'IBM Plex Sans','Noto Sans Thai',system-ui,sans-serif;
+    --mono:'IBM Plex Mono',ui-monospace,monospace;
+  }
+  :root:not([data-theme="light"]){ @media (prefers-color-scheme:dark){
+    --bg:#0c1119; --surface:#141b26; --surface-2:#1a2431;
+    --ink:#e7edf5; --ink-soft:#a6b4c6; --ink-faint:#6d7d92;
+    --line:#25313f; --line-soft:#1d2734;
+    --brand:#4f9df5; --brand-soft:#122840; --brand-deep:#8fc0fb;
+    --insurer:#8fa0b8; --insurer-soft:#1a222d;
+    --agent:#42c894; --agent-soft:#122a20;
+    --direct:#4f9df5; --direct-soft:#122840;
+    --referral:#b18cf0; --referral-soft:#221a35;
+    --diff:#e5a63c; --diff-soft:#2a2110;
+  }}
+  :root[data-theme="dark"]{
+    --bg:#0c1119; --surface:#141b26; --surface-2:#1a2431;
+    --ink:#e7edf5; --ink-soft:#a6b4c6; --ink-faint:#6d7d92;
+    --line:#25313f; --line-soft:#1d2734;
+    --brand:#4f9df5; --brand-soft:#122840; --brand-deep:#8fc0fb;
+    --insurer:#8fa0b8; --insurer-soft:#1a222d;
+    --agent:#42c894; --agent-soft:#122a20;
+    --direct:#4f9df5; --direct-soft:#122840;
+    --referral:#b18cf0; --referral-soft:#221a35;
+    --diff:#e5a63c; --diff-soft:#2a2110;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);font-family:var(--sans);line-height:1.6;-webkit-font-smoothing:antialiased}
+  .th{font-family:var(--th)}
+  .wrap{max-width:860px;margin:0 auto;padding:52px 22px 100px}
+  .num{font-variant-numeric:tabular-nums;font-family:var(--mono)}
+
+  header{margin-bottom:36px}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.16em;text-transform:uppercase;color:var(--brand);font-weight:600;margin:0 0 12px}
+  h1{font-size:clamp(30px,6vw,44px);line-height:1.05;margin:0;font-weight:700;letter-spacing:-.02em;font-family:var(--th)}
+  .lede{color:var(--ink-soft);margin:16px 0 0;font-size:16.5px;max-width:60ch;font-family:var(--th)}
+
+  h2{font-family:var(--mono);font-size:12px;letter-spacing:.14em;text-transform:uppercase;color:var(--ink-faint);font-weight:600;margin:52px 0 20px;padding-bottom:9px;border-bottom:1px solid var(--line)}
+
+  /* stage rail */
+  .stage{display:grid;grid-template-columns:44px 1fr;gap:18px;margin-bottom:12px}
+  .stage-rail{display:flex;flex-direction:column;align-items:center}
+  .badge{width:44px;height:44px;border-radius:12px;display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);font-weight:600;font-size:17px;color:#fff;flex-shrink:0}
+  .b1{background:var(--insurer)} .b2{background:var(--brand)} .b3{background:var(--agent)} .b4{background:var(--brand-deep)}
+  .connector{width:2px;flex:1;background:var(--line);margin:6px 0}
+  .stage:last-child .connector{display:none}
+  .card{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:18px 20px;margin-bottom:8px}
+  .card h3{margin:0 0 6px;font-size:17px;font-family:var(--th);font-weight:600}
+  .card p{margin:6px 0;color:var(--ink-soft);font-size:14.5px;font-family:var(--th)}
+  .card .where{display:inline-block;margin-top:8px;font-family:var(--mono);font-size:11px;color:var(--ink-faint);background:var(--surface-2);border:1px solid var(--line-soft);border-radius:6px;padding:3px 8px}
+  code{font-family:var(--mono);font-size:.86em;background:var(--surface-2);padding:1.5px 6px;border-radius:5px;color:var(--ink)}
+  .amt{font-family:var(--mono);font-weight:600;color:var(--brand)}
+  .amt.g{color:var(--agent)}
+
+  /* worked example banner */
+  .example{background:linear-gradient(180deg,var(--brand-soft),var(--surface));border:1px solid var(--line);border-radius:16px;padding:20px 22px;margin:8px 0 4px}
+  .example .tag{font-family:var(--mono);font-size:11px;letter-spacing:.08em;text-transform:uppercase;color:var(--brand-deep);font-weight:600}
+  .example .big{font-size:15px;margin-top:4px;font-family:var(--th)}
+  .example .big b{color:var(--ink)}
+
+  /* cascade */
+  .cascade{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:22px;margin-top:6px}
+  .payline{display:grid;grid-template-columns:150px 1fr auto;gap:14px;align-items:center;padding:12px 0;border-bottom:1px solid var(--line-soft)}
+  .payline:last-child{border-bottom:none}
+  .ptype{display:flex;flex-direction:column;gap:2px}
+  .ptype .dot{display:inline-flex;align-items:center;gap:7px;font-weight:600;font-size:13px;font-family:var(--mono)}
+  .ptype .dot i{width:10px;height:10px;border-radius:50%;display:inline-block}
+  .ptype .sub{font-size:11px;color:var(--ink-faint);font-family:var(--th);padding-left:17px}
+  .d-direct{color:var(--direct)} .d-direct i{background:var(--direct)}
+  .d-ref{color:var(--referral)} .d-ref i{background:var(--referral)}
+  .d-diff{color:var(--diff)} .d-diff i{background:var(--diff)}
+  .paywho{font-size:13.5px;color:var(--ink-soft);font-family:var(--th)}
+  .paywho b{color:var(--ink)}
+  .paycalc{font-family:var(--mono);font-size:12px;color:var(--ink-faint);text-align:right;white-space:nowrap}
+  .paycalc b{font-size:14px;color:var(--ink);display:block}
+  .cascade-foot{margin-top:14px;padding-top:14px;border-top:2px solid var(--line);display:flex;justify-content:space-between;align-items:center;font-family:var(--th)}
+  .cascade-foot .lbl{font-size:13px;color:var(--ink-soft)}
+  .cascade-foot .tot{font-family:var(--mono);font-size:18px;font-weight:600;color:var(--ink)}
+
+  /* tree */
+  .tree{background:var(--surface-2);border:1px solid var(--line-soft);border-radius:12px;padding:16px 18px;margin-top:14px;font-family:var(--mono);font-size:13px;color:var(--ink-soft);overflow-x:auto}
+  .tree .lv{color:var(--ink);font-weight:600}
+  .tree .me{color:var(--agent);font-weight:600}
+
+  /* callout */
+  .note{display:grid;grid-template-columns:22px 1fr;gap:12px;background:var(--diff-soft);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-top:18px}
+  .note .ico{color:var(--diff);font-size:16px}
+  .note p{margin:0;font-size:14px;color:var(--ink-soft);font-family:var(--th)}
+  .note b{color:var(--ink)}
+
+  .foot{margin-top:56px;padding-top:20px;border-top:1px solid var(--line);font-family:var(--mono);font-size:12px;color:var(--ink-faint)}
+</style>
+
+<div class="wrap">
+  <header>
+    <p class="eyebrow">InsureHub</p>
+    <h1 class="th">เส้นทางของค่าคอมมิชชั่น</h1>
+    <p class="lede">ตั้งแต่ตัวแทนขายกรมธรรม์ จนเงินค่าคอมถึงมือตัวแทนแต่ละคน — และระบบ MGM แบ่งเงินให้ต้นสายอย่างไร ตามตัวอย่างกรมธรรม์จริงเบี้ย ฿12,000</p>
+  </header>
+
+  <!-- Worked example anchor -->
+  <div class="example">
+    <div class="tag">ตัวอย่างที่ใช้ตลอดหน้านี้</div>
+    <div class="big th">อนุชา (ผู้ขาย · Lv1) ขายกรมธรรม์ เบี้ย <b>฿12,000</b> — อยู่ใต้สายงาน สมหญิง (Lv3) ซึ่งอยู่ใต้ สมชาย (Lv5)</div>
+  </div>
+
+  <h2>ภาพรวม 4 ขั้น</h2>
+
+  <div class="stage">
+    <div class="stage-rail"><div class="badge b1">1</div><div class="connector"></div></div>
+    <div class="card">
+      <h3 class="th">ขายกรมธรรม์ + บันทึกการชำระเงิน</h3>
+      <p class="th">ตัวแทนขายกรมธรรม์ ลูกค้าชำระเบี้ย และมีการ <b>บันทึกการชำระเงิน</b> (policy payment) เข้าระบบ — นี่คือจุดที่ "กระตุ้น" ให้เครื่องคำนวณค่าคอมทำงาน</p>
+      <span class="where">trigger: PolicyPaymentObserver</span>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-rail"><div class="badge b2">2</div><div class="connector"></div></div>
+    <div class="card">
+      <h3 class="th">เครื่องคำนวณ MGM สร้างรายการค่าคอม</h3>
+      <p class="th">ทันทีที่บันทึกชำระเงิน ระบบคำนวณและบันทึก "รายการค่าคอม" (commission ledger) ให้ผู้ขาย <b>และ</b> ต้นสายขึ้นไปตามลำดับ — เกิดหลายรายการจากการชำระครั้งเดียว (ดูการแบ่งด้านล่าง)</p>
+      <span class="where">engine: MgmCommissionEngine → commission_ledgers</span>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-rail"><div class="badge b3">3</div><div class="connector"></div></div>
+    <div class="card">
+      <h3 class="th">รับค่าคอมจากบริษัทประกัน</h3>
+      <p class="th">บริษัทประกันจ่ายค่าคอม (บ.ประกัน → InsureHub) ตามรอบ ทีมบัญชีเทียบยอดกับ statement แล้วบันทึก "รับแล้ว" ที่หน้า <b>รับค่าคอม</b></p>
+      <span class="where">หน้า: /commissions/receipts</span>
+    </div>
+  </div>
+
+  <div class="stage">
+    <div class="stage-rail"><div class="badge b4">4</div><div class="connector"></div></div>
+    <div class="card">
+      <h3 class="th">ทำจ่ายค่าคอมให้ตัวแทน</h3>
+      <p class="th">สร้าง "รอบจ่าย" (batch) ดึงรายการที่ควรจ่าย → ตรวจ → <b>อนุมัติ</b> → <b>ยืนยันจ่าย</b> ระบบล็อกไม่ให้จ่ายซ้ำ ออกใบสรุป PDF ตามประเภท VAT และ export CSV ตรวจสอบได้</p>
+      <span class="where">หน้า: /commissions/payouts</span>
+    </div>
+  </div>
+
+  <h2>ขั้นที่ 2 แบ่งเงินอย่างไร — การแบ่งแบบ MGM</h2>
+  <p class="lede" style="margin:0 0 16px">จากเบี้ย ฿12,000 ที่อนุชาขาย ระบบสร้าง <b>4 รายการ</b> ให้คนในสายงาน 3 คน:</p>
+
+  <div class="cascade">
+    <div class="payline">
+      <div class="ptype">
+        <span class="dot d-direct"><i></i>DIRECT</span>
+        <span class="sub th">ค่าคอมผู้ขาย</span>
+      </div>
+      <div class="paywho th">→ <b>อนุชา</b> (ผู้ขาย · Lv1)</div>
+      <div class="paycalc">฿12,000 × 10%<b>฿1,200</b></div>
+    </div>
+    <div class="payline">
+      <div class="ptype">
+        <span class="dot d-ref"><i></i>REFERRAL</span>
+        <span class="sub th">ค่าแนะนำ</span>
+      </div>
+      <div class="paywho th">→ <b>สมหญิง</b> (ต้นสายตรงของผู้ขาย · Lv3)</div>
+      <div class="paycalc">฿12,000 × 1%<b>฿120</b></div>
+    </div>
+    <div class="payline">
+      <div class="ptype">
+        <span class="dot d-diff"><i></i>DIFFERENTIAL</span>
+        <span class="sub th">ส่วนต่างบริหาร</span>
+      </div>
+      <div class="paywho th">→ <b>สมหญิง</b> (Lv3)</div>
+      <div class="paycalc">฿12,000 × 4%<b>฿480</b></div>
+    </div>
+    <div class="payline">
+      <div class="ptype">
+        <span class="dot d-diff"><i></i>DIFFERENTIAL</span>
+        <span class="sub th">ส่วนต่างบริหาร (ต่อขึ้นไป)</span>
+      </div>
+      <div class="paywho th">→ <b>สมชาย</b> (ต้นสายของสมหญิง · Lv5)</div>
+      <div class="paycalc">฿12,000 × 1%<b>฿120</b></div>
+    </div>
+    <div class="cascade-foot">
+      <span class="lbl th">รวมค่าคอมที่ InsureHub จ่ายออกจากกรมธรรม์นี้</span>
+      <span class="tot num">฿1,920</span>
+    </div>
+  </div>
+
+  <div class="tree">
+    <div>สมชาย ใจดีมั่นคง <span class="lv">Lv5</span>  ← ได้ DIFFERENTIAL ฿120</div>
+    <div>└─ สมหญิง รักการขาย <span class="lv">Lv3</span>  ← ได้ REFERRAL ฿120 + DIFFERENTIAL ฿480</div>
+    <div>&nbsp;&nbsp;&nbsp;└─ <span class="me">อนุชา พากเพียรยิ่ง Lv1</span>  ← ผู้ขาย ได้ DIRECT ฿1,200</div>
+  </div>
+
+  <div class="note">
+    <span class="ico">◆</span>
+    <p><b>ค่าคอมสามประเภทต่างกันอย่างไร:</b> <b style="color:var(--direct)">DIRECT</b> = คนขายได้ตามอัตราสินค้า · <b style="color:var(--referral)">REFERRAL</b> = ต้นสายตรงได้ค่าแนะนำ (ตาม tier) · <b style="color:var(--diff)">DIFFERENTIAL</b> = ส่วนต่างของ "ค่าบริหาร" ไล่ขึ้นไปตามระดับ (Lv สูงกว่าได้ส่วนต่างมากกว่า) การแบ่งขึ้นกับ <b>tier ของสินค้า</b> และ <b>ระดับ (rank) ของแต่ละคน</b></p>
+  </div>
+
+  <h2>สองฝั่งของบัญชี — และกำไร</h2>
+  <div class="card">
+    <p class="th"><b>ฝั่งรับ</b> (บ.ประกัน → InsureHub): เงินที่ InsureHub ควรได้จากบริษัทประกัน ติดตามที่หน้า <b>รับค่าคอม</b> — เทียบ "ควรได้รับ" กับ "บริษัทแจ้ง" ให้ตรงกัน</p>
+    <p class="th"><b>ฝั่งจ่าย</b> (InsureHub → ตัวแทน): เงินที่ต้องจ่ายให้สายงาน (4 รายการด้านบน) ทำจ่ายที่หน้า <b>ทำจ่ายค่าคอม</b></p>
+    <p class="th"><b>กำไร</b> = รับจากบริษัทประกัน − จ่ายให้ตัวแทน — ดูภาพรวมได้ที่ <b>Dashboard</b> ในหน้ารับค่าคอม (กำไรคาดการณ์ vs กำไรที่รับรู้จริง)</p>
+  </div>
+
+  <div class="note" style="background:var(--agent-soft)">
+    <span class="ico" style="color:var(--agent)">✓</span>
+    <p><b>จุดสำคัญ:</b> การแบ่งค่าคอมใช้เฉพาะ <b>สายงาน (ต้นสาย, parent)</b> กับ <b>ระดับ (rank)</b> เท่านั้น — "ทีม" ไม่มีผลต่อการคำนวณ (จึงถูกถอดออกจากระบบแล้ว)</p>
+  </div>
+
+  <p class="foot">InsureHub · เส้นทางค่าคอมมิชชั่น · ตัวอย่างจากข้อมูลทดสอบ TST</p>
+</div>

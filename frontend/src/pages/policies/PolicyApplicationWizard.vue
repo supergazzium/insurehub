@@ -1128,7 +1128,7 @@ function buildDraftPayload(): Record<string, unknown> {
     mainPremium: form.grossPremiumInput || form.mainPremium || 0,
     dutyStamp: form.dutyStamp || 0,
     vat: form.vat || 0,
-    compulsoryPremium: form.compulsoryPremium || 0,
+    compulsoryPremium: kind.value === 'motor' ? (form.compulsoryPremium || 0) : 0,
     totalPremiumPaid: form.totalPremiumPaid || 0,
     whtAmt: form.whtAmt || 0,
     netCustomerPaid: form.netCustomerPaid || 0,
@@ -1998,8 +1998,9 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             <option v-for="m in INSTALLMENT_MODES" :key="m.value" :value="m.value">{{ m.label }}</option>
           </select>
         </FormField>
-        <!-- พ.ร.บ. — billed in full on งวด 1 only. -->
-        <FormField label="พ.ร.บ. (compulsory)">
+        <!-- พ.ร.บ. — motor products only (compulsory motor insurance); billed
+             in full on งวด 1. Hidden for non-motor where it doesn't apply. -->
+        <FormField v-if="kind === 'motor'" label="พ.ร.บ. (compulsory)">
           <input v-model.number="form.compulsoryPremium" type="number" min="0" step="0.01"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
