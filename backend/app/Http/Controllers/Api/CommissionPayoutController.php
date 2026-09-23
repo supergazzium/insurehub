@@ -45,6 +45,81 @@ class CommissionPayoutController extends Controller
         return response()->json($result);
     }
 
+    /**
+     * GET /commission-payout-batches/by-agent
+     * Agent-first outstanding list — every agent with unpaid commission,
+     * optionally filtered by a date range. Powers the payout landing page.
+     */
+    public function byAgent(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'fromDate' => ['nullable', 'date'],
+            'toDate' => ['nullable', 'date', 'after_or_equal:fromDate'],
+        ]);
+
+        $result = $this->service->byAgent(
+            $this->tenantId($request),
+            $data['fromDate'] ?? null,
+            $data['toDate'] ?? null,
+        );
+
+        return response()->json($result);
+    }
+
+    /**
+     * GET /commission-payout-batches/by-agent/{agent}
+     * One agent's outstanding line items (the policies a payout would cover).
+     */
+    public function agentDetail(Request $request, int $agent): JsonResponse
+    {
+        $data = $request->validate([
+            'fromDate' => ['nullable', 'date'],
+            'toDate' => ['nullable', 'date', 'after_or_equal:fromDate'],
+        ]);
+
+        $result = $this->service->agentDetail(
+            $this->tenantId($request),
+            $agent,
+            $data['fromDate'] ?? null,
+            $data['toDate'] ?? null,
+        );
+
+        return response()->json($result);
+    }
+
+    /**
+     * POST /commission-payout-batches/by-agent/{agent}/pay
+     * Pay one agent — snapshots their eligible items into a fresh single-agent
+     * batch, approves, and marks paid, atomically. Returns the paid batch.
+     */
+    public function payAgent(Request $request, int $agent): JsonResponse
+    {
+        $data = $request->validate([
+            'paymentDate' => ['required', 'date'],
+            'reference' => ['nullable', 'string', 'max:128'],
+            'fromDate' => ['nullable', 'date'],
+            'toDate' => ['nullable', 'date', 'after_or_equal:fromDate'],
+            'note' => ['nullable', 'string', 'max:255'],
+        ]);
+
+        try {
+            $batch = $this->service->payAgent(
+                $this->tenantId($request),
+                $agent,
+                $data['paymentDate'],
+                $data['reference'] ?? null,
+                $request->user()?->id,
+                $data['fromDate'] ?? null,
+                $data['toDate'] ?? null,
+                $data['note'] ?? null,
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->batchRow($batch)]);
+    }
+
     /** GET /commission-payout-batches */
     public function index(Request $request): JsonResponse
     {

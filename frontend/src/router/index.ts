@@ -164,6 +164,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'commissions/rebates', name: 'commission-rebates', component: RebateReconciliation, meta: { moduleKey: 'rebate-reconciliation' } },
       { path: 'commissions/payouts', name: 'commission-payouts', component: () => import('../pages/commissions/CommissionPayouts.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/payouts/:id', name: 'commission-payout-detail', component: () => import('../pages/commissions/CommissionPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
+      { path: 'commissions/payouts/agent/:agentId', name: 'agent-payout-detail', component: () => import('../pages/commissions/AgentPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/receipts', name: 'commission-receipts', component: () => import('../pages/commissions/CommissionReceipts.vue'), meta: { moduleKey: 'commission-receipt' } },
       { path: 'settings/import-failures', name: 'settings-import-failures', component: ImportFailures, meta: { moduleKey: 'import-failures' } },
       { path: 'support', name: 'agent-support', component: AgentSupport, meta: { moduleKey: 'agent-support' } },

@@ -138,6 +138,11 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // Agent commission payout batches — ทำจ่ายค่าคอมประจำเดือน (ตัวแทน).
     Route::post('commission-payout-batches/preview', [CommissionPayoutController::class, 'preview']);
+    // Agent-first payout endpoints — MUST be registered before the {batch}
+    // routes so "by-agent" is not captured as a batch id.
+    Route::get('commission-payout-batches/by-agent', [CommissionPayoutController::class, 'byAgent']);
+    Route::get('commission-payout-batches/by-agent/{agent}', [CommissionPayoutController::class, 'agentDetail']);
+    Route::post('commission-payout-batches/by-agent/{agent}/pay', [CommissionPayoutController::class, 'payAgent']);
     Route::get('commission-payout-batches', [CommissionPayoutController::class, 'index']);
     Route::post('commission-payout-batches', [CommissionPayoutController::class, 'store']);
     Route::get('commission-payout-batches/{batch}', [CommissionPayoutController::class, 'show']);

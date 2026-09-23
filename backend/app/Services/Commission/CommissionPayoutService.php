@@ -53,20 +53,27 @@ class CommissionPayoutService
      * If finance requires either gate, add it here per product-type — do not
      * re-introduce a blanket freelook check.
      */
-    private function eligibleQuery(int $tenantId, string $from, string $to)
+    private function eligibleQuery(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null)
     {
-        $fromDt = CarbonImmutable::parse($from, 'Asia/Bangkok')->startOfDay();
-        $toDtExclusive = CarbonImmutable::parse($to, 'Asia/Bangkok')->addDay()->startOfDay();
-
-        return DB::table('policies as p')
+        $q = DB::table('policies as p')
             ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
             ->leftJoin('policy_rebates as r', 'r.policy_id', '=', 'p.id')
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->whereNotNull('p.writing_agent_id')
-            ->where('p.created_at', '>=', $fromDt)
-            ->where('p.created_at', '<', $toDtExclusive)
-            ->where('p.status', '!=', 'cancelled')
+            ->where('p.status', '!=', 'cancelled');
+
+        if ($from !== null) {
+            $q->where('p.created_at', '>=', CarbonImmutable::parse($from, 'Asia/Bangkok')->startOfDay());
+        }
+        if ($to !== null) {
+            $q->where('p.created_at', '<', CarbonImmutable::parse($to, 'Asia/Bangkok')->addDay()->startOfDay());
+        }
+        if ($agentId !== null) {
+            $q->where('p.writing_agent_id', $agentId);
+        }
+
+        return $q
             ->whereIn('p.status', self::APPROVED_STATUSES)
             // Not already marked paid on the agent leg.
             ->where(function ($w): void {
@@ -132,11 +139,12 @@ class CommissionPayoutService
         return ['main' => 0.0, 'rider' => $rider, 'base' => $base, 'source' => 'none'];
     }
 
-    private function rows(int $tenantId, string $from, string $to)
+    private function rows(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null)
     {
-        return $this->eligibleQuery($tenantId, $from, $to)
+        return $this->eligibleQuery($tenantId, $from, $to, $agentId)
             ->select([
                 'p.id as policy_id', 'p.policy_no', 'p.application_no', 'p.main_premium',
+                'p.created_at as policy_created_at',
                 'p.comm_hub_to_agent_amount',
                 'p.writing_agent_id as agent_id',
                 'a.agent_code', 'a.vat_type', 'a.has_vat', 'a.vat_mode',
@@ -153,9 +161,9 @@ class CommissionPayoutService
      *
      * @return array{agents: array<int, array<string, mixed>>, totals: array<string, mixed>, warnings: array<int, string>}
      */
-    public function preview(int $tenantId, string $from, string $to): array
+    public function preview(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null): array
     {
-        $rows = $this->rows($tenantId, $from, $to);
+        $rows = $this->rows($tenantId, $from, $to, $agentId);
         $byAgent = [];
         $warnings = [];
         $grandTotal = 0.0;
@@ -205,13 +213,123 @@ class CommissionPayoutService
     }
 
     /**
+     * Agent-centric outstanding list: every agent that has unpaid, eligible
+     * commission (optionally within a date range), with their item count and
+     * total amount owed. Powers the agent-first payout landing page.
+     *
+     * @return array{agents: array<int, array<string, mixed>>, totals: array<string, mixed>}
+     */
+    public function byAgent(int $tenantId, ?string $from = null, ?string $to = null): array
+    {
+        $preview = $this->preview($tenantId, $from, $to);
+        // preview() already groups by agent with agentCode/agentName/vatType/
+        // itemCount/amount — exactly the shape the landing page needs. Filter
+        // out any null-agent bucket and sort by amount owed (desc).
+        $agents = array_values(array_filter(
+            $preview['agents'],
+            fn ($a) => ! empty($a['agentId']),
+        ));
+        usort($agents, fn ($a, $b) => ($b['amount'] <=> $a['amount']));
+
+        return [
+            'agents' => $agents,
+            'totals' => [
+                'totalAgents' => count($agents),
+                'totalItems' => array_sum(array_column($agents, 'itemCount')),
+                'totalAmount' => round(array_sum(array_column($agents, 'amount')), 2),
+            ],
+        ];
+    }
+
+    /**
+     * One agent's outstanding line items: the eligible policies + per-policy
+     * amount that a payout would cover. Powers the agent payout detail view.
+     *
+     * @return array{agent: array<string,mixed>|null, items: array<int,array<string,mixed>>, totals: array<string,mixed>}
+     */
+    public function agentDetail(int $tenantId, int $agentId, ?string $from = null, ?string $to = null): array
+    {
+        $rows = $this->rows($tenantId, $from, $to, $agentId);
+        $items = [];
+        $total = 0.0;
+        $agent = null;
+
+        foreach ($rows as $row) {
+            $amt = $this->resolveAmount($row);
+            $lineTotal = round($amt['main'] + $amt['rider'], 2);
+            $total += $lineTotal;
+            if ($agent === null) {
+                $agent = [
+                    'agentId' => (string) $row->agent_id,
+                    'agentCode' => $row->agent_code,
+                    'agentName' => $row->agent_name,
+                    'vatType' => $this->resolveVatType($row),
+                ];
+            }
+            $items[] = [
+                'policyId' => (int) $row->policy_id,
+                'policyNo' => $row->policy_no,
+                'applicationNo' => $row->application_no,
+                'basePremium' => round((float) ($row->main_premium ?? 0), 2),
+                'agentCommission' => round($amt['main'], 2),
+                'riderCommission' => round($amt['rider'], 2),
+                'amount' => $lineTotal,
+                'amountSource' => $amt['source'],
+                'policyDate' => $row->policy_created_at ? substr((string) $row->policy_created_at, 0, 10) : null,
+            ];
+        }
+
+        return [
+            'agent' => $agent,
+            'items' => $items,
+            'totals' => [
+                'itemCount' => count($items),
+                'totalAmount' => round($total, 2),
+            ],
+        ];
+    }
+
+    /**
+     * Pay a single agent in one action: snapshot that agent's eligible items
+     * into a fresh single-agent batch, approve it, and mark it paid — all
+     * atomically. The batch stays as the audit + double-pay record behind the
+     * scenes. Returns the paid batch.
+     */
+    public function payAgent(
+        int $tenantId,
+        int $agentId,
+        string $paymentDate,
+        ?string $reference,
+        ?int $userId,
+        ?string $from = null,
+        ?string $to = null,
+        ?string $note = null,
+    ): CommissionPayoutBatch {
+        return DB::transaction(function () use ($tenantId, $agentId, $paymentDate, $reference, $userId, $from, $to, $note): CommissionPayoutBatch {
+            $batch = $this->createBatch($tenantId, $from, $to, $userId, $note, $agentId);
+            $batch = $this->approveBatch($batch, $userId);
+
+            return $this->markPaid($batch, $paymentDate, $reference, $userId);
+        });
+    }
+
+    /**
      * Snapshot the eligible items into a new DRAFT batch.
      */
-    public function createBatch(int $tenantId, string $from, string $to, ?int $userId, ?string $note = null): CommissionPayoutBatch
+    public function createBatch(int $tenantId, ?string $from, ?string $to, ?int $userId, ?string $note = null, ?int $agentId = null): CommissionPayoutBatch
     {
-        $rows = $this->rows($tenantId, $from, $to);
+        $rows = $this->rows($tenantId, $from, $to, $agentId);
         if ($rows->isEmpty()) {
             throw new RuntimeException('ไม่พบรายการค่าคอมที่เข้าเงื่อนไขในช่วงวันที่ที่ระบุ');
+        }
+
+        // When no explicit range is given (all-dates payout), record the batch
+        // span from the actual eligible rows so the NOT NULL date columns hold.
+        if ($from === null || $to === null) {
+            $dates = $rows->pluck('policy_created_at')->filter()->map(fn ($d) => substr((string) $d, 0, 10))->sort()->values();
+            $today = CarbonImmutable::now('Asia/Bangkok')->toDateString();
+            $from ??= $dates->first() ?: $today;
+            $to ??= $dates->last() ?: $today;
         }
 
         return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows): CommissionPayoutBatch {

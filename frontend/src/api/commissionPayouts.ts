@@ -69,6 +69,56 @@ export interface BatchDetail extends BatchRow {
 export function previewPayout(fromDate: string, toDate: string) {
   return api.post<PreviewResult>('commission-payout-batches/preview', { fromDate, toDate })
 }
+
+// ── Agent-first payout ─────────────────────────────────────────────────────
+export interface AgentOutstandingRow {
+  agentId: string | null
+  agentCode: string | null
+  agentName: string
+  vatType: string | null
+  itemCount: number
+  amount: number
+}
+export interface AgentOutstandingResult {
+  agents: AgentOutstandingRow[]
+  totals: { totalAgents: number; totalItems: number; totalAmount: number }
+}
+export interface AgentDetailItem {
+  policyId: number
+  policyNo: string | null
+  applicationNo: string | null
+  basePremium: number
+  agentCommission: number
+  riderCommission: number
+  amount: number
+  amountSource: string
+  policyDate: string | null
+}
+export interface AgentDetailResult {
+  agent: { agentId: string; agentCode: string | null; agentName: string; vatType: string | null } | null
+  items: AgentDetailItem[]
+  totals: { itemCount: number; totalAmount: number }
+}
+
+/** Agent-first outstanding list — every agent with unpaid commission. */
+export function fetchOutstandingByAgent(fromDate?: string, toDate?: string) {
+  return api.get<AgentOutstandingResult>(
+    `commission-payout-batches/by-agent${buildQuery({ fromDate, toDate })}`,
+  )
+}
+/** One agent's outstanding line items. */
+export function fetchAgentOutstandingDetail(agentId: string, fromDate?: string, toDate?: string) {
+  return api.get<AgentDetailResult>(
+    `commission-payout-batches/by-agent/${agentId}${buildQuery({ fromDate, toDate })}`,
+  )
+}
+/** Pay one agent — creates a single-agent batch, approves, marks paid. */
+export function payAgent(
+  agentId: string,
+  payload: { paymentDate: string; reference?: string; fromDate?: string; toDate?: string; note?: string },
+) {
+  return api.post<{ data: BatchRow }>(`commission-payout-batches/by-agent/${agentId}/pay`, payload)
+}
 export function fetchPayoutBatches(status?: BatchStatus | 'all') {
   return api.get<{ data: BatchRow[] }>(`commission-payout-batches${buildQuery({ status })}`)
 }
