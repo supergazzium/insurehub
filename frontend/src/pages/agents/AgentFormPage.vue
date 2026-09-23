@@ -14,6 +14,7 @@ import {
   fetchAgentNotes, createAgentNote, fetchAgentRelations,
   type RankRow, type LevelProgress, type RankPromotionRow, type AgentNoteRow, type AgentRelations,
 } from '../../api/agents'
+import { fetchAgentCommissionDetail, type AgentCommissionResponse } from '../../api/mgm'
 import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
 
@@ -37,6 +38,10 @@ const error = ref<string | null>(null)
 const ranks = ref<RankRow[]>([])
 const progress = ref<LevelProgress | null>(null)
 const relations = ref<AgentRelations | null>(null)
+const commission = ref<AgentCommissionResponse | null>(null)
+const money2 = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+const PAYOUT_LABEL: Record<string, string> = { DIRECT_COMMISSION: 'ค่าคอมผู้ขาย', REFERRAL_FEE: 'ค่าแนะนำ', MANAGEMENT_DIFFERENTIAL: 'ส่วนต่างบริหาร' }
+const PAYOUT_BADGE: Record<string, string> = { DIRECT_COMMISSION: 'bg-sky-50 text-sky-700', REFERRAL_FEE: 'bg-violet-50 text-violet-700', MANAGEMENT_DIFFERENTIAL: 'bg-amber-50 text-amber-700' }
 const REL_LEVEL_DOT: Record<string, string> = {
   l1: 'bg-slate-400', l2: 'bg-sky-400', l3: 'bg-violet-400', l4: 'bg-amber-400', l5: 'bg-rose-400',
   l6: 'bg-orange-400', l7: 'bg-emerald-400', l8: 'bg-teal-400', l9: 'bg-indigo-400', l10: 'bg-fuchsia-500',
@@ -118,6 +123,7 @@ async function load(): Promise<void> {
       progress.value = prog.data
       promotions.value = promo.data.filter((x) => x.agentId === editId.value)
       relations.value = (await fetchAgentRelations(editId.value!).catch(() => null))
+      commission.value = (form.agentCode ? await fetchAgentCommissionDetail(form.agentCode).catch(() => null) : null)
       const nt = await fetchAgentNotes(editId.value!).catch(() => ({ data: [] as AgentNoteRow[] }))
       notes.value = nt.data
     }
@@ -420,6 +426,65 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
               </button>
             </div>
           </div>
+        </section>
+
+        <!-- ยอดขาย & ค่าคอมมิชชั่น (sales + commission history) -->
+        <section v-if="isEdit && commission" class="rounded-lg border border-slate-200 bg-white p-4">
+          <h2 class="mb-3 text-sm font-semibold text-slate-700">ยอดขาย &amp; ค่าคอมมิชชั่น</h2>
+
+          <!-- Totals cards -->
+          <div class="mb-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
+            <div class="rounded-lg border border-slate-200 p-3">
+              <div class="text-[10px] text-slate-500">ค่าคอมผู้ขาย</div>
+              <div class="mt-0.5 text-base font-semibold text-sky-700">฿{{ money2(commission.totals.directCommission) }}</div>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-3">
+              <div class="text-[10px] text-slate-500">ค่าแนะนำ</div>
+              <div class="mt-0.5 text-base font-semibold text-violet-700">฿{{ money2(commission.totals.referralFee) }}</div>
+            </div>
+            <div class="rounded-lg border border-slate-200 p-3">
+              <div class="text-[10px] text-slate-500">ส่วนต่างบริหาร</div>
+              <div class="mt-0.5 text-base font-semibold text-amber-700">฿{{ money2(commission.totals.managementDifferential) }}</div>
+            </div>
+            <div class="rounded-lg border border-brand-200 bg-brand-50 p-3">
+              <div class="text-[10px] text-brand-600">รวมทั้งหมด</div>
+              <div class="mt-0.5 text-base font-semibold text-brand-700">฿{{ money2(commission.totals.grandTotal) }}</div>
+            </div>
+          </div>
+
+          <!-- Ledger table -->
+          <div v-if="commission.ledger.length === 0" class="text-xs text-slate-400">— ยังไม่มีรายการค่าคอม —</div>
+          <div v-else class="overflow-x-auto">
+            <table class="min-w-full divide-y divide-slate-200 text-sm">
+              <thead class="text-left text-[10px] uppercase tracking-wide text-slate-400">
+                <tr>
+                  <th class="py-2 pr-3">วันที่</th>
+                  <th class="py-2 pr-3">กรมธรรม์</th>
+                  <th class="py-2 pr-3">สินค้า / บริษัท</th>
+                  <th class="py-2 pr-3">ประเภท</th>
+                  <th class="py-2 pr-3 text-right">เบี้ย × อัตรา</th>
+                  <th class="py-2 text-right">ค่าคอม</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+                <tr v-for="l in commission.ledger" :key="l.id" class="hover:bg-slate-50">
+                  <td class="py-2 pr-3 text-xs text-slate-500">{{ l.paymentDate ? fmtDate(l.paymentDate) : (l.createdAt ? fmtDate(l.createdAt) : '—') }}</td>
+                  <td class="py-2 pr-3">
+                    <button type="button" class="text-slate-700 hover:text-brand-700" @click="router.push({ name: 'policy-edit-draft', params: { id: l.policyId } })">{{ l.policyNo || '—' }}</button>
+                    <div v-if="l.sourceAgentCode && l.sourceAgentCode !== form.agentCode" class="text-[10px] text-slate-400">จากการขายของ {{ l.sourceAgentCode }}</div>
+                  </td>
+                  <td class="py-2 pr-3">
+                    <div class="text-xs text-slate-600">{{ l.productTypeNameTh || l.productTypeCode || '—' }}</div>
+                    <div class="text-[10px] text-slate-400">{{ l.carrierName || l.carrierCode || '' }}</div>
+                  </td>
+                  <td class="py-2 pr-3"><span :class="['rounded-full px-2 py-0.5 text-[10px] font-medium', PAYOUT_BADGE[l.payoutType]]">{{ PAYOUT_LABEL[l.payoutType] || l.payoutType }}</span></td>
+                  <td class="py-2 pr-3 text-right text-xs text-slate-500">฿{{ money2(l.basePremium) }} × {{ (l.rateApplied * 100).toFixed(2) }}%</td>
+                  <td class="py-2 text-right font-medium text-slate-800">฿{{ money2(l.amount) }}</td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <p class="mt-2 text-[10px] text-slate-400">ค่าคอมจากการขายเอง + ค่าแนะนำ/ส่วนต่างจากสายงานลูกทีม (คลิกเลขกรมธรรม์เพื่อเปิดกรมธรรม์)</p>
         </section>
 
         <!-- หมายเหตุ + สถานะ -->
