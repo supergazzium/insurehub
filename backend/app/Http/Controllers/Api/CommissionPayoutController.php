@@ -142,7 +142,9 @@ class CommissionPayoutController extends Controller
     public function show(Request $request, CommissionPayoutBatch $batch): JsonResponse
     {
         $this->authorizeTenant($request, $batch);
-        $batch->load(['items.policy:id,policy_no,application_no', 'items.agent:id,agent_code,first_name,last_name', 'adjustments']);
+        $batch->load(['items.policy:id,policy_no,application_no', 'items.agent:id,agent_code,first_name,last_name', 'adjustments', 'agentRows']);
+        // Per-agent payment state keyed by agent id (0 = no-agent bucket).
+        $payByAgent = $batch->agentRows->keyBy(fn ($ar) => $ar->agent_id ?? 0);
 
         // Group items by agent for the detail grid.
         $byAgent = [];
@@ -162,6 +164,7 @@ class CommissionPayoutController extends Controller
             $byAgent[$key]['itemCount']++;
             $byAgent[$key]['commission'] += $item->total();
             $byAgent[$key]['items'][] = [
+                'id' => (string) $item->id,
                 'policyId' => (string) $item->policy_id,
                 'policyNo' => $item->policy->policy_no ?? null,
                 'applicationNo' => $item->policy->application_no ?? null,
@@ -182,6 +185,17 @@ class CommissionPayoutController extends Controller
             $a['commission'] = round($a['commission'], 2);
             $a['deduct'] = round($deduct, 2);
             $a['net'] = round($a['commission'] - $deduct, 2);
+            // Merge in the per-agent payment-tracking row (bank, paid state, ref).
+            $pr = $payByAgent->get($key);
+            $a['bankAccountNo'] = $pr?->bank_account_no;
+            $a['bankAccountName'] = $pr?->bank_account_name;
+            $a['whtAmount'] = $pr ? round((float) $pr->wht_amount, 2) : 0.0;
+            $a['netTransfer'] = $pr ? round((float) $pr->net_transfer, 2) : $a['net'];
+            $a['paid'] = (bool) ($pr?->paid ?? false);
+            $a['paidAt'] = $pr?->paid_at?->toIso8601String();
+            $a['paymentReference'] = $pr?->payment_reference;
+            $a['reversed'] = (bool) ($pr?->reversed ?? false);
+            $a['pdfGeneratedAt'] = $pr?->pdf_generated_at?->toIso8601String();
             $agents[] = $a;
         }
 
@@ -201,19 +215,34 @@ class CommissionPayoutController extends Controller
         ]);
     }
 
-    /** POST /commission-payout-batches */
+    /**
+     * POST /commission-payout-batches
+     * Create a DRAFT batch spanning many agents — the monthly bulk run. Pass
+     * `agentIds` to build for a hand-picked selection (30–50 agents), or omit it
+     * to include every eligible agent in the range (select-all). Dates are
+     * optional; when omitted the batch covers all unpaid eligible commission.
+     */
     public function store(Request $request): JsonResponse
     {
         $data = $request->validate([
-            'fromDate' => ['required', 'date'],
-            'toDate' => ['required', 'date', 'after_or_equal:fromDate'],
+            'fromDate' => ['nullable', 'date'],
+            'toDate' => ['nullable', 'date', 'after_or_equal:fromDate'],
+            'agentIds' => ['nullable', 'array'],
+            'agentIds.*' => ['integer'],
+            'periodLabel' => ['nullable', 'string', 'max:64'],
             'note' => ['nullable', 'string', 'max:1000'],
         ]);
 
         try {
             $batch = $this->service->createBatch(
-                $this->tenantId($request), $data['fromDate'], $data['toDate'],
-                $request->user()?->id, $data['note'] ?? null,
+                $this->tenantId($request),
+                $data['fromDate'] ?? null,
+                $data['toDate'] ?? null,
+                $request->user()?->id,
+                $data['note'] ?? null,
+                null,
+                $data['agentIds'] ?? null,
+                $data['periodLabel'] ?? null,
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -231,12 +260,14 @@ class CommissionPayoutController extends Controller
             'agentCode' => ['nullable', 'string', 'max:32'],
             'amount' => ['required', 'numeric', 'min:0'],
             'reason' => ['required', 'string', 'max:1000'],
+            'type' => ['nullable', 'in:special_deduct,bonus,correction'],
         ]);
 
         try {
             $adj = $this->service->addAdjustment(
                 $batch, $data['agentId'] ?? null, $data['agentCode'] ?? null,
                 (float) $data['amount'], $data['reason'], $request->user()?->id,
+                $data['type'] ?? 'special_deduct',
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -295,6 +326,79 @@ class CommissionPayoutController extends Controller
         $this->authorizeTenant($request, $batch);
         try {
             $batch = $this->service->cancelBatch($batch, $request->user()?->id);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->batchRow($batch)]);
+    }
+
+    /** POST /commission-payout-batches/{batch}/agents/{agent}/mark-paid — pay one agent. */
+    public function markAgentPaid(Request $request, CommissionPayoutBatch $batch, int $agent): JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        $data = $request->validate([
+            'paymentDate' => ['required', 'date'],
+            'reference' => ['nullable', 'string', 'max:128'],
+        ]);
+        try {
+            $batch = $this->service->markAgentPaid(
+                $batch, $agent, $data['paymentDate'], $data['reference'] ?? null, $request->user()?->id,
+            );
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->batchRow($batch)]);
+    }
+
+    /** POST /commission-payout-batches/{batch}/reverse — void a wrong payment. */
+    public function reverse(Request $request, CommissionPayoutBatch $batch): JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        $data = $request->validate(['reason' => ['required', 'string', 'max:1000']]);
+        try {
+            $batch = $this->service->reverseBatch($batch, $data['reason'], $request->user()?->id);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->batchRow($batch)]);
+    }
+
+    /** POST /commission-payout-batches/{batch}/agents/{agent}/reverse — void one agent. */
+    public function reverseAgent(Request $request, CommissionPayoutBatch $batch, int $agent): JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        $data = $request->validate(['reason' => ['required', 'string', 'max:1000']]);
+        try {
+            $batch = $this->service->reverseAgent($batch, $agent, $data['reason'], $request->user()?->id);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->batchRow($batch)]);
+    }
+
+    /** POST /commission-payout-batches/{batch}/reissue — re-pay after reversal. */
+    public function reissue(Request $request, CommissionPayoutBatch $batch): JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        try {
+            $new = $this->service->reissueBatch($batch, $request->user()?->id);
+        } catch (RuntimeException $e) {
+            return response()->json(['message' => $e->getMessage()], 422);
+        }
+
+        return response()->json(['data' => $this->batchRow($new)], 201);
+    }
+
+    /** POST /commission-payout-batches/{batch}/items/{item}/exclude|include */
+    public function setItemExcluded(Request $request, CommissionPayoutBatch $batch, int $item, bool $excluded): JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        try {
+            $batch = $this->service->setItemExcluded($batch, $item, $excluded, $request->user()?->id);
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -390,14 +494,23 @@ class CommissionPayoutController extends Controller
 
     private function renderAgentPdf(array $data)
     {
+        // Brand logo embedded as a data URI (dompdf has enable_remote=false).
+        $logoData = null;
+        $logoPath = public_path('brand/logo.png');
+        if (is_file($logoPath)) {
+            $logoData = 'data:image/png;base64,' . base64_encode((string) file_get_contents($logoPath));
+        }
+
         return Pdf::loadView('pdf.commission-payout', [
             'vatType' => $data['vatType'],
             'agent' => $data['agent'],
-            'items' => $data['items'],
-            'totals' => $data['totals'],
+            'rows' => $data['rows'],
+            'columnTotals' => $data['columnTotals'],
+            'summary' => $data['summary'],
             'batch' => $data['batch'],
+            'logoData' => $logoData,
             'generatedAt' => now()->format('Y-m-d H:i'),
-        ])->setPaper('a4', 'portrait');
+        ])->setPaper('a4', 'landscape');
     }
 
     /** Filename per spec §5.1: <code>_<name>_<mmyyyy><vattag>.pdf, sanitised. */
@@ -427,6 +540,7 @@ class CommissionPayoutController extends Controller
             'id' => (string) $b->id,
             'fromDate' => $b->from_date?->toDateString(),
             'toDate' => $b->to_date?->toDateString(),
+            'periodLabel' => $b->period_label,
             'status' => $b->status,
             'totalAgents' => (int) $b->total_agents,
             'totalItems' => (int) $b->total_items,
@@ -436,6 +550,9 @@ class CommissionPayoutController extends Controller
             'note' => $b->note,
             'approvedAt' => $b->approved_at?->toIso8601String(),
             'paidAt' => $b->paid_at?->toIso8601String(),
+            'reversedAt' => $b->reversed_at?->toIso8601String(),
+            'reversalReason' => $b->reversal_reason,
+            'reissuedFromBatchId' => $b->reissued_from_batch_id ? (string) $b->reissued_from_batch_id : null,
             'createdAt' => $b->created_at?->toIso8601String(),
         ];
     }

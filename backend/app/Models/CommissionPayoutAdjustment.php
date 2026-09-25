@@ -12,6 +12,14 @@ class CommissionPayoutAdjustment extends Model
     protected $guarded = ['id'];
 
     public const TYPE_SPECIAL_DEDUCT = 'special_deduct';
+    public const TYPE_BONUS = 'bonus';
+    public const TYPE_CORRECTION = 'correction';
+
+    public const TYPES = [
+        self::TYPE_SPECIAL_DEDUCT,
+        self::TYPE_BONUS,
+        self::TYPE_CORRECTION,
+    ];
 
     protected $casts = [
         'amount' => 'decimal:2',

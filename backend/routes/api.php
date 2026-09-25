@@ -154,6 +154,15 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-payout-batches/{batch}/agents/{code}/pdf', [CommissionPayoutController::class, 'agentPdf']);
     Route::get('commission-payout-batches/{batch}/export.csv', [CommissionPayoutController::class, 'exportCsv']);
     Route::post('commission-payout-batches/{batch}/cancel', [CommissionPayoutController::class, 'cancel']);
+    // Per-agent bulk-run pay (each agent = separate transfer with its own ref).
+    Route::post('commission-payout-batches/{batch}/agents/{agent}/mark-paid', [CommissionPayoutController::class, 'markAgentPaid']);
+    // Wrong-payment handling — reverse (void) whole batch or one agent, then re-issue.
+    Route::post('commission-payout-batches/{batch}/reverse', [CommissionPayoutController::class, 'reverse']);
+    Route::post('commission-payout-batches/{batch}/agents/{agent}/reverse', [CommissionPayoutController::class, 'reverseAgent']);
+    Route::post('commission-payout-batches/{batch}/reissue', [CommissionPayoutController::class, 'reissue']);
+    // Per-item exclude / re-include before pay.
+    Route::post('commission-payout-batches/{batch}/items/{item}/exclude', fn (\Illuminate\Http\Request $r, \App\Models\CommissionPayoutBatch $batch, int $item) => app(CommissionPayoutController::class)->setItemExcluded($r, $batch, $item, true));
+    Route::post('commission-payout-batches/{batch}/items/{item}/include', fn (\Illuminate\Http\Request $r, \App\Models\CommissionPayoutBatch $batch, int $item) => app(CommissionPayoutController::class)->setItemExcluded($r, $batch, $item, false));
 
     // รับค่าคอมจากบริษัทประกัน (insurer commission receipt — Phase 1 manual).
     Route::get('commission-receivables', [CommissionReceiptController::class, 'index']);

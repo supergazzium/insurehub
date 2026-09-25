@@ -7,6 +7,7 @@ namespace App\Services\Commission;
 use App\Models\AuditEntry;
 use App\Models\CommissionPayoutAdjustment;
 use App\Models\CommissionPayoutBatch;
+use App\Models\CommissionPayoutBatchAgent;
 use App\Models\CommissionPayoutBatchItem;
 use App\Models\PolicyRebate;
 use Carbon\CarbonImmutable;
@@ -27,6 +28,9 @@ class CommissionPayoutService
 
     /** Value written to policy_rebates.agent_rebate_status when a batch is paid. */
     public const PAID_STATUS = 'paid';
+
+    /** Withholding-tax rate applied to agent commission (หัก ณ ที่จ่าย 3%). */
+    public const WHT_RATE = 0.03;
 
     /**
      * Eligible-item query, shared by preview() and createBatch() so the
@@ -81,14 +85,21 @@ class CommissionPayoutService
                     ->orWhere('r.agent_rebate_status', '')
                     ->orWhere('r.agent_rebate_status', '!=', self::PAID_STATUS);
             })
-            // Not already in a live batch.
+            // Not already in a LIVE batch. CANCELLED and REVERSED batches are
+            // not live — their items are pending again (a reversal voids the
+            // payment and frees the policies), so they must NOT block
+            // eligibility, otherwise re-issuing a corrected batch after a
+            // reversal would find nothing.
             ->whereNotExists(function ($q) use ($tenantId): void {
                 $q->select(DB::raw(1))
                     ->from('commission_payout_batch_items as bi')
                     ->join('commission_payout_batches as b', 'b.id', '=', 'bi.batch_id')
                     ->whereColumn('bi.policy_id', 'p.id')
                     ->where('bi.tenant_id', $tenantId)
-                    ->where('b.status', '!=', CommissionPayoutBatch::STATUS_CANCELLED);
+                    ->whereNotIn('b.status', [
+                        CommissionPayoutBatch::STATUS_CANCELLED,
+                        CommissionPayoutBatch::STATUS_REVERSED,
+                    ]);
             });
     }
 
@@ -139,21 +150,94 @@ class CommissionPayoutService
         return ['main' => 0.0, 'rider' => $rider, 'base' => $base, 'source' => 'none'];
     }
 
-    private function rows(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null)
+    /**
+     * Build the full frozen snapshot for one policy row — the extra columns the
+     * formal per-agent statement (reference PDF) needs beyond the base amounts.
+     * WHT is 3% of the item's total commission (locked decision); the
+     * payoff/discount column maps to policies.discount_amount and the card fee
+     * to policies.credit_card_fee.
+     *
+     * @param  array{main: float, rider: float, base: float, source: string}  $amt
+     * @return array<string, mixed>
+     */
+    private function snapshotColumns(object $row, array $amt): array
     {
-        return $this->eligibleQuery($tenantId, $from, $to, $agentId)
+        $itemCommission = $amt['main'] + $amt['rider'];
+        // เบี้ยประกัน — net = main premium leg; total = full premium paid (fallbacks).
+        $net = (float) ($row->main_premium ?? 0);
+        $total = (float) ($row->total_premium_paid ?? $row->annual_premium ?? $row->main_premium ?? 0);
+        // policies has no stored agent-commission rate column; derive the main
+        // rate from commission ÷ net premium (fraction). Rider rate comes from
+        // the policy_riders subquery.
+        $mainRate = ($net > 0 && $amt['main'] > 0) ? round($amt['main'] / $net, 4) : null;
+
+        return [
+            'snapshot_net_premium' => round($net, 2),
+            'snapshot_total_premium' => round($total, 2),
+            'snapshot_main_rate' => $mainRate,
+            'snapshot_rider_rate' => $row->rider_rate_ag !== null ? (float) $row->rider_rate_ag : null,
+            'snapshot_payoff_discount' => round((float) ($row->discount_amount ?? 0), 2),
+            'snapshot_card_fee' => round((float) ($row->credit_card_fee ?? 0), 2),
+            'snapshot_wht_rate' => self::WHT_RATE,
+            'snapshot_wht_amount' => round($itemCommission * self::WHT_RATE, 2),
+            'snapshot_customer_name' => $row->customer_name ? trim((string) $row->customer_name) : null,
+            'snapshot_rider_name' => $row->rider_names ? trim((string) $row->rider_names) : null,
+            'snapshot_note' => null,
+        ];
+    }
+
+    private function rows(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null, ?array $agentIds = null)
+    {
+        $rows = $this->eligibleQuery($tenantId, $from, $to, $agentId)
+            ->when($agentIds !== null && $agentIds !== [], fn ($q) => $q->whereIn('p.writing_agent_id', $agentIds))
             ->select([
                 'p.id as policy_id', 'p.policy_no', 'p.application_no', 'p.main_premium',
+                'p.annual_premium', 'p.total_premium_paid',
+                'p.discount_amount', 'p.credit_card_fee',
                 'p.created_at as policy_created_at',
-                'p.comm_hub_to_agent_amount',
+                'p.comm_hub_to_agent_amount', 'p.customer_id',
                 'p.writing_agent_id as agent_id',
                 'a.agent_code', 'a.vat_type', 'a.has_vat', 'a.vat_mode',
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
+                DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
                 'r.calculated_agent_amount', 'r.actual_agent_amount', 'r.agent_rebate_status',
-                DB::raw('(SELECT COALESCE(SUM(pr.com_amt_ag),0) FROM policy_riders pr WHERE pr.policy_id = p.id) as rider_com_ag'),
             ])
-            ->orderBy('a.agent_code')
-            ->get();
+            ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
+            // Sort in PHP, not SQL: an ORDER BY on this 4-table join forces a
+            // MySQL filesort that spools to /tmp. The result set is bounded
+            // (hundreds of rows), so ordering in memory is both cheap and
+            // resilient to disk/tmp pressure on the DB host.
+            ->get()
+            ->sortBy('agent_code')
+            ->values();
+
+        // Rider aggregates fetched in ONE grouped query and merged in PHP,
+        // instead of three correlated subqueries per policy row. Correlated
+        // subqueries force MySQL to materialise + filesort to /tmp per row —
+        // slow, and fragile under disk/tmp pressure. This is O(1) queries.
+        $policyIds = $rows->pluck('policy_id')->all();
+        $riderAgg = [];
+        if ($policyIds !== []) {
+            $riderAgg = DB::table('policy_riders')
+                ->whereIn('policy_id', $policyIds)
+                ->groupBy('policy_id')
+                ->select([
+                    'policy_id',
+                    DB::raw('COALESCE(SUM(com_amt_ag), 0) as rider_com_ag'),
+                    DB::raw("GROUP_CONCAT(name SEPARATOR ', ') as rider_names"),
+                    DB::raw('MAX(com_rate_ag) as rider_rate_ag'),
+                ])
+                ->get()
+                ->keyBy('policy_id');
+        }
+        foreach ($rows as $row) {
+            $agg = $riderAgg[$row->policy_id] ?? null;
+            $row->rider_com_ag = $agg->rider_com_ag ?? 0;
+            $row->rider_names = $agg->rider_names ?? null;
+            $row->rider_rate_ag = $agg->rider_rate_ag ?? null;
+        }
+
+        return $rows;
     }
 
     /**
@@ -315,10 +399,28 @@ class CommissionPayoutService
 
     /**
      * Snapshot the eligible items into a new DRAFT batch.
+     *
+     * The batch spans many agents (the monthly run pays 30–50 at once). Pass
+     * `$agentId` for the single-agent quick-pay path, or `$agentIds` to build a
+     * batch for a hand-picked selection; both null = every eligible agent in the
+     * range. In addition to the frozen item snapshot, one
+     * commission_payout_batch_agents row is created per agent with the per-agent
+     * roll-up + bank (decrypted via the Agent model) so the bulk pay + per-agent
+     * transfer references work.
+     *
+     * @param  array<int>|null  $agentIds
      */
-    public function createBatch(int $tenantId, ?string $from, ?string $to, ?int $userId, ?string $note = null, ?int $agentId = null): CommissionPayoutBatch
-    {
-        $rows = $this->rows($tenantId, $from, $to, $agentId);
+    public function createBatch(
+        int $tenantId,
+        ?string $from,
+        ?string $to,
+        ?int $userId,
+        ?string $note = null,
+        ?int $agentId = null,
+        ?array $agentIds = null,
+        ?string $periodLabel = null,
+    ): CommissionPayoutBatch {
+        $rows = $this->rows($tenantId, $from, $to, $agentId, $agentIds);
         if ($rows->isEmpty()) {
             throw new RuntimeException('ไม่พบรายการค่าคอมที่เข้าเงื่อนไขในช่วงวันที่ที่ระบุ');
         }
@@ -331,22 +433,27 @@ class CommissionPayoutService
             $from ??= $dates->first() ?: $today;
             $to ??= $dates->last() ?: $today;
         }
+        // Default the printed month label from the batch end date.
+        $periodLabel ??= CarbonImmutable::parse($to, 'Asia/Bangkok')->translatedFormat('F Y');
 
-        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows): CommissionPayoutBatch {
+        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows, $periodLabel): CommissionPayoutBatch {
             $batch = CommissionPayoutBatch::create([
                 'tenant_id' => $tenantId,
                 'from_date' => $from,
                 'to_date' => $to,
+                'period_label' => $periodLabel,
                 'status' => CommissionPayoutBatch::STATUS_DRAFT,
                 'created_by_user_id' => $userId,
                 'note' => $note,
             ]);
 
-            $agents = [];
+            // Roll-ups accumulated per agent → commission_payout_batch_agents.
+            $byAgent = [];
             $total = 0.0;
             foreach ($rows as $row) {
                 $amt = $this->resolveAmount($row);
-                CommissionPayoutBatchItem::create([
+                $snap = $this->snapshotColumns($row, $amt);
+                CommissionPayoutBatchItem::create(array_merge([
                     'batch_id' => $batch->id,
                     'tenant_id' => $tenantId,
                     'policy_id' => $row->policy_id,
@@ -359,45 +466,107 @@ class CommissionPayoutService
                     'amount_source' => $amt['source'],
                     'item_status' => CommissionPayoutBatchItem::ITEM_PENDING,
                     'original_agent_rebate_status' => $row->agent_rebate_status,
-                ]);
-                $agents[$row->agent_id ?? 0] = true;
+                ], $snap));
+
+                $key = $row->agent_id ?? 0;
+                if (! isset($byAgent[$key])) {
+                    $byAgent[$key] = [
+                        'agent_id' => $row->agent_id,
+                        'agent_code' => $row->agent_code,
+                        'agent_name' => $row->agent_name,
+                        'vat_type' => $this->resolveVatType($row),
+                        'item_count' => 0,
+                        'gross_commission' => 0.0,
+                        'wht_amount' => 0.0,
+                        'payoff_card' => 0.0,
+                    ];
+                }
+                $byAgent[$key]['item_count']++;
+                $byAgent[$key]['gross_commission'] += $amt['main'] + $amt['rider'];
+                $byAgent[$key]['wht_amount'] += (float) $snap['snapshot_wht_amount'];
+                $byAgent[$key]['payoff_card'] += (float) $snap['snapshot_payoff_discount'] + (float) $snap['snapshot_card_fee'];
                 $total += $amt['main'] + $amt['rider'];
             }
 
+            // Decrypt bank once per agent via the model (columns are encrypted at rest).
+            $agentIdList = array_values(array_filter(array_map(fn ($a) => $a['agent_id'], $byAgent)));
+            $bank = \App\Models\Agent::query()
+                ->whereIn('id', $agentIdList)
+                ->get(['id', 'bank_account_no', 'bank_account_name'])
+                ->keyBy('id');
+
+            foreach ($byAgent as $a) {
+                $gross = round($a['gross_commission'], 2);
+                $deduct = round($a['payoff_card'], 2);      // adjustments added later reduce net at pay time
+                $wht = round($a['wht_amount'], 2);
+                $net = round($gross - $deduct - $wht, 2);
+                $ag = $a['agent_id'] ? ($bank[$a['agent_id']] ?? null) : null;
+                CommissionPayoutBatchAgent::create([
+                    'batch_id' => $batch->id,
+                    'tenant_id' => $tenantId,
+                    'agent_id' => $a['agent_id'],
+                    'agent_code' => $a['agent_code'],
+                    'agent_name' => $a['agent_name'],
+                    'vat_type' => $a['vat_type'],
+                    'bank_account_no' => $ag?->bank_account_no,
+                    'bank_account_name' => $ag?->bank_account_name,
+                    'item_count' => $a['item_count'],
+                    'gross_commission' => $gross,
+                    'deduct_amount' => $deduct,
+                    'wht_amount' => $wht,
+                    'net_transfer' => $net,
+                ]);
+            }
+
             $batch->update([
-                'total_agents' => count($agents),
+                'total_agents' => count($byAgent),
                 'total_items' => $rows->count(),
                 'total_amount' => round($total, 2),
             ]);
 
             $this->audit($tenantId, $userId, 'commission_payout.create', "batch:{$batch->id}", [
-                'from' => $from, 'to' => $to, 'items' => $rows->count(), 'amount' => round($total, 2),
+                'from' => $from, 'to' => $to, 'agents' => count($byAgent),
+                'items' => $rows->count(), 'amount' => round($total, 2),
             ]);
 
             return $batch->fresh();
         });
     }
 
-    public function addAdjustment(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode, float $amount, string $reason, ?int $userId): CommissionPayoutAdjustment
-    {
+    public function addAdjustment(
+        CommissionPayoutBatch $batch,
+        ?int $agentId,
+        ?string $agentCode,
+        float $amount,
+        string $reason,
+        ?int $userId,
+        string $type = CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT,
+    ): CommissionPayoutAdjustment {
         if (! $batch->isEditable()) {
             throw new RuntimeException('ไม่สามารถแก้ไข batch ที่จ่ายแล้วหรือยกเลิกแล้ว');
         }
         if ($amount < 0) {
             throw new RuntimeException('ยอดหักต้องไม่ติดลบ');
         }
+        if (! in_array($type, CommissionPayoutAdjustment::TYPES, true)) {
+            throw new RuntimeException('ประเภทรายการปรับปรุงไม่ถูกต้อง');
+        }
         $adj = CommissionPayoutAdjustment::create([
             'batch_id' => $batch->id,
             'tenant_id' => $batch->tenant_id,
             'agent_id' => $agentId,
             'agent_code' => $agentCode,
-            'type' => CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT,
+            'type' => $type,
             'amount' => $amount,
             'reason' => $reason,
             'created_by_user_id' => $userId,
         ]);
+        // Keep the agent's roll-up net in sync (deduct/bonus change the transfer).
+        if ($agentId !== null) {
+            $this->recomputeAgentRollup($batch, $agentId);
+        }
         $this->audit($batch->tenant_id, $userId, 'commission_payout.adjust', "batch:{$batch->id}", [
-            'agent' => $agentCode, 'amount' => $amount, 'reason' => $reason,
+            'agent' => $agentCode, 'type' => $type, 'amount' => $amount, 'reason' => $reason,
         ]);
 
         return $adj;
@@ -446,6 +615,19 @@ class CommissionPayoutService
                 $item->update(['item_status' => CommissionPayoutBatchItem::ITEM_PAID]);
             }
 
+            // Mark every not-yet-paid agent row paid (bulk pay). Per-agent
+            // references set earlier via markAgentPaid() are preserved; agents
+            // with none inherit the batch reference.
+            $batch->agentRows()->where('paid', false)->where('reversed', false)->get()
+                ->each(function (CommissionPayoutBatchAgent $ar) use ($reference, $userId): void {
+                    $ar->update([
+                        'paid' => true,
+                        'paid_at' => now(),
+                        'paid_by_user_id' => $userId,
+                        'payment_reference' => $ar->payment_reference ?: $reference,
+                    ]);
+                });
+
             $batch->update([
                 'status' => CommissionPayoutBatch::STATUS_PAID,
                 'paid_by_user_id' => $userId,
@@ -457,6 +639,79 @@ class CommissionPayoutService
             $this->audit($batch->tenant_id, $userId, 'commission_payout.mark_paid', "batch:{$batch->id}", [
                 'items' => $items->count(), 'payment_date' => $paymentDate, 'reference' => $reference,
             ]);
+
+            return $batch->fresh();
+        });
+    }
+
+    /**
+     * Mark ONE agent in the batch paid, with that agent's own transfer
+     * reference — the per-agent bank-transfer flow. Flips only that agent's
+     * items + rebate rows. When every non-excluded agent is paid, the batch
+     * itself flips to PAID. The batch must be APPROVED first (same gate as the
+     * bulk pay).
+     */
+    public function markAgentPaid(
+        CommissionPayoutBatch $batch,
+        int $agentId,
+        string $paymentDate,
+        ?string $reference,
+        ?int $userId,
+    ): CommissionPayoutBatch {
+        if ($batch->status !== CommissionPayoutBatch::STATUS_APPROVED) {
+            throw new RuntimeException('ต้องอนุมัติ batch ก่อนจึงจะบันทึกจ่ายรายตัวแทนได้');
+        }
+        $agentRow = $batch->agentRows()->where('agent_id', $agentId)->first();
+        if ($agentRow === null) {
+            throw new RuntimeException('ไม่พบตัวแทนนี้ใน batch');
+        }
+        if ($agentRow->paid) {
+            throw new RuntimeException('ตัวแทนนี้ถูกบันทึกจ่ายแล้ว');
+        }
+
+        return DB::transaction(function () use ($batch, $agentId, $agentRow, $paymentDate, $reference, $userId): CommissionPayoutBatch {
+            $items = $batch->items()
+                ->where('agent_id', $agentId)
+                ->where('item_status', CommissionPayoutBatchItem::ITEM_PENDING)
+                ->get();
+
+            foreach ($items as $item) {
+                PolicyRebate::updateOrCreate(
+                    ['policy_id' => $item->policy_id],
+                    [
+                        'tenant_id' => $batch->tenant_id,
+                        'agent_rebate_status' => self::PAID_STATUS,
+                        'agent_receive_date' => $paymentDate,
+                    ],
+                );
+                $item->update(['item_status' => CommissionPayoutBatchItem::ITEM_PAID]);
+            }
+
+            $agentRow->update([
+                'paid' => true,
+                'paid_at' => now(),
+                'paid_by_user_id' => $userId,
+                'payment_reference' => $reference,
+            ]);
+
+            $this->audit($batch->tenant_id, $userId, 'commission_payout.mark_agent_paid', "batch:{$batch->id}", [
+                'agent' => $agentRow->agent_code, 'items' => $items->count(),
+                'payment_date' => $paymentDate, 'reference' => $reference,
+            ]);
+
+            // Flip the whole batch once every non-excluded agent is paid.
+            $remaining = $batch->agentRows()->where('paid', false)->where('reversed', false)->count();
+            if ($remaining === 0) {
+                $batch->update([
+                    'status' => CommissionPayoutBatch::STATUS_PAID,
+                    'paid_by_user_id' => $userId,
+                    'paid_at' => now(),
+                    'payment_date' => $batch->payment_date ?: $paymentDate,
+                ]);
+                $this->audit($batch->tenant_id, $userId, 'commission_payout.mark_paid', "batch:{$batch->id}", [
+                    'via' => 'per-agent-complete',
+                ]);
+            }
 
             return $batch->fresh();
         });
@@ -505,6 +760,228 @@ class CommissionPayoutService
         return $batch->fresh();
     }
 
+    // ── Wrong-payment handling ───────────────────────────────────────────────
+
+    /**
+     * Reverse a PAID batch (void a wrong payment). Un-marks every paid item,
+     * restores each policy's original agent_rebate_status so the commission
+     * becomes eligible again, flips agent rows + batch to REVERSED, and records
+     * the reason. Paid financial records are never deleted — only reversed, with
+     * a full audit trail. After a reversal, use reissueBatch() to re-pay
+     * correctly.
+     */
+    public function reverseBatch(CommissionPayoutBatch $batch, string $reason, ?int $userId): CommissionPayoutBatch
+    {
+        if ($batch->status !== CommissionPayoutBatch::STATUS_PAID) {
+            throw new RuntimeException('ทำรายการย้อนกลับได้เฉพาะ batch ที่จ่ายแล้ว');
+        }
+
+        return DB::transaction(function () use ($batch, $reason, $userId): CommissionPayoutBatch {
+            $items = $batch->items()->where('item_status', CommissionPayoutBatchItem::ITEM_PAID)->get();
+            foreach ($items as $item) {
+                // Restore the pre-batch rebate status (may have been null/empty).
+                PolicyRebate::where('policy_id', $item->policy_id)->update([
+                    'agent_rebate_status' => $item->original_agent_rebate_status,
+                    'agent_receive_date' => null,
+                ]);
+                $item->update(['item_status' => CommissionPayoutBatchItem::ITEM_PENDING]);
+            }
+
+            $batch->agentRows()->update([
+                'paid' => false,
+                'reversed' => true,
+                'reversed_at' => now(),
+                'reversal_reason' => $reason,
+            ]);
+
+            $batch->update([
+                'status' => CommissionPayoutBatch::STATUS_REVERSED,
+                'reversed_by_user_id' => $userId,
+                'reversed_at' => now(),
+                'reversal_reason' => $reason,
+            ]);
+
+            $this->audit($batch->tenant_id, $userId, 'commission_payout.reverse', "batch:{$batch->id}", [
+                'items' => $items->count(), 'reason' => $reason,
+            ]);
+
+            return $batch->fresh();
+        });
+    }
+
+    /**
+     * Reverse a single agent within a PAID (or partially-paid) batch — the
+     * per-agent wrong-payment case. Restores that agent's items only; the batch
+     * drops back from PAID to APPROVED so the remaining agents stay payable.
+     */
+    public function reverseAgent(CommissionPayoutBatch $batch, int $agentId, string $reason, ?int $userId): CommissionPayoutBatch
+    {
+        $agentRow = $batch->agentRows()->where('agent_id', $agentId)->first();
+        if ($agentRow === null) {
+            throw new RuntimeException('ไม่พบตัวแทนนี้ใน batch');
+        }
+        if (! $agentRow->paid) {
+            throw new RuntimeException('ตัวแทนนี้ยังไม่ได้จ่าย จึงย้อนกลับไม่ได้');
+        }
+
+        return DB::transaction(function () use ($batch, $agentId, $agentRow, $reason, $userId): CommissionPayoutBatch {
+            $items = $batch->items()
+                ->where('agent_id', $agentId)
+                ->where('item_status', CommissionPayoutBatchItem::ITEM_PAID)
+                ->get();
+            foreach ($items as $item) {
+                PolicyRebate::where('policy_id', $item->policy_id)->update([
+                    'agent_rebate_status' => $item->original_agent_rebate_status,
+                    'agent_receive_date' => null,
+                ]);
+                $item->update(['item_status' => CommissionPayoutBatchItem::ITEM_PENDING]);
+            }
+
+            $agentRow->update([
+                'paid' => false, 'paid_at' => null, 'payment_reference' => null,
+                'reversed' => true, 'reversed_at' => now(), 'reversal_reason' => $reason,
+            ]);
+
+            // A paid batch with a reversed agent is no longer fully paid.
+            if ($batch->status === CommissionPayoutBatch::STATUS_PAID) {
+                $batch->update([
+                    'status' => CommissionPayoutBatch::STATUS_APPROVED,
+                    'paid_at' => null, 'paid_by_user_id' => null,
+                ]);
+            }
+
+            $this->audit($batch->tenant_id, $userId, 'commission_payout.reverse_agent', "batch:{$batch->id}", [
+                'agent' => $agentRow->agent_code, 'items' => $items->count(), 'reason' => $reason,
+            ]);
+
+            return $batch->fresh();
+        });
+    }
+
+    /**
+     * Re-issue: after a reversal, build a fresh DRAFT batch that re-covers the
+     * now-eligible policies so the correct payment can be made. The new batch is
+     * linked to the one it corrects via reissued_from_batch_id. Because the
+     * reversed items are pending again and no longer sit in a live batch, the
+     * normal eligibility query picks them up.
+     */
+    public function reissueBatch(CommissionPayoutBatch $reversed, ?int $userId): CommissionPayoutBatch
+    {
+        if ($reversed->status !== CommissionPayoutBatch::STATUS_REVERSED) {
+            throw new RuntimeException('ออกใหม่ได้เฉพาะ batch ที่ทำรายการย้อนกลับแล้ว');
+        }
+        $agentIds = $reversed->agentRows()->whereNotNull('agent_id')->pluck('agent_id')->all();
+        $batch = $this->createBatch(
+            $reversed->tenant_id,
+            $reversed->from_date?->toDateString(),
+            $reversed->to_date?->toDateString(),
+            $userId,
+            'ออกใหม่จากรอบ #' . $reversed->id,
+            null,
+            $agentIds,
+            $reversed->period_label,
+        );
+        $batch->update(['reissued_from_batch_id' => $reversed->id]);
+        $this->audit($batch->tenant_id, $userId, 'commission_payout.reissue', "batch:{$batch->id}", [
+            'from_batch' => $reversed->id,
+        ]);
+
+        return $batch->fresh();
+    }
+
+    // ── Per-item edit (before pay) ───────────────────────────────────────────
+
+    /**
+     * Exclude / re-include a single line item from a batch before it is paid
+     * (item_status excluded ⇄ pending). Recomputes the affected agent's roll-up
+     * and the batch totals. Only DRAFT/GENERATED/APPROVED batches are editable.
+     */
+    public function setItemExcluded(CommissionPayoutBatch $batch, int $itemId, bool $excluded, ?int $userId): CommissionPayoutBatch
+    {
+        if (! $batch->isEditable()) {
+            throw new RuntimeException('แก้ไขรายการได้เฉพาะ batch ที่ยังไม่จ่าย');
+        }
+        $item = $batch->items()->where('id', $itemId)->first();
+        if ($item === null) {
+            throw new RuntimeException('ไม่พบรายการใน batch');
+        }
+        if ($item->item_status === CommissionPayoutBatchItem::ITEM_PAID) {
+            throw new RuntimeException('รายการนี้จ่ายแล้ว แก้ไขไม่ได้');
+        }
+
+        return DB::transaction(function () use ($batch, $item, $excluded, $userId): CommissionPayoutBatch {
+            $item->update([
+                'item_status' => $excluded
+                    ? CommissionPayoutBatchItem::ITEM_EXCLUDED
+                    : CommissionPayoutBatchItem::ITEM_PENDING,
+            ]);
+            $this->recomputeAgentRollup($batch, (int) ($item->agent_id ?? 0));
+            $this->recomputeBatchTotals($batch);
+            $this->audit($batch->tenant_id, $userId, 'commission_payout.item_' . ($excluded ? 'exclude' : 'include'), "batch:{$batch->id}", [
+                'item' => $item->id, 'policy' => $item->policy_id,
+            ]);
+
+            return $batch->fresh();
+        });
+    }
+
+    /** Recompute one agent's roll-up row from its non-excluded items + adjustments. */
+    private function recomputeAgentRollup(CommissionPayoutBatch $batch, int $agentId): void
+    {
+        $agentRow = $batch->agentRows()->where('agent_id', $agentId ?: null)->first();
+        if ($agentRow === null) {
+            return;
+        }
+        $items = $batch->items()
+            ->where('agent_id', $agentId ?: null)
+            ->where('item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)
+            ->get();
+
+        $gross = 0.0;
+        $wht = 0.0;
+        $payoffCard = 0.0;
+        foreach ($items as $it) {
+            $gross += $it->total();
+            $wht += (float) $it->snapshot_wht_amount;
+            $payoffCard += (float) $it->snapshot_payoff_discount + (float) $it->snapshot_card_fee;
+        }
+        // Bonuses add to the payout; special_deduct / correction subtract.
+        $bonus = (float) $batch->adjustments()
+            ->where('agent_id', $agentId ?: null)
+            ->where('type', CommissionPayoutAdjustment::TYPE_BONUS)->sum('amount');
+        $subtractAdj = (float) $batch->adjustments()
+            ->where('agent_id', $agentId ?: null)
+            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
+            ->sum('amount');
+        $deduct = round($payoffCard + $subtractAdj, 2);
+        $net = round($gross + $bonus - $deduct - $wht, 2);
+
+        $agentRow->update([
+            'item_count' => $items->count(),
+            'gross_commission' => round($gross, 2),
+            'deduct_amount' => $deduct,
+            'wht_amount' => round($wht, 2),
+            'net_transfer' => $net,
+        ]);
+    }
+
+    /** Recompute the batch header roll-ups from its non-excluded items. */
+    private function recomputeBatchTotals(CommissionPayoutBatch $batch): void
+    {
+        $items = $batch->items()->where('item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)->get();
+        $total = 0.0;
+        $agents = [];
+        foreach ($items as $it) {
+            $total += $it->total();
+            $agents[$it->agent_id ?? 0] = true;
+        }
+        $batch->update([
+            'total_agents' => count($agents),
+            'total_items' => $items->count(),
+            'total_amount' => round($total, 2),
+        ]);
+    }
+
     /** VAT rate applied to agent commission when the agent carries VAT. */
     private const VAT_RATE = 0.07;
 
@@ -518,9 +995,11 @@ class CommissionPayoutService
     public function buildAgentPdfData(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode): ?array
     {
         $items = $batch->items()
-            ->with(['policy:id,policy_no,application_no,customer_id', 'policy.customer:id,first_name,last_name', 'agent:id,agent_code,first_name,last_name,vat_type,has_vat,vat_mode'])
+            ->with(['policy:id,policy_no,application_no,created_at,customer_id', 'policy.customer:id,first_name,last_name', 'agent:id,agent_code,first_name,last_name,vat_type,has_vat,vat_mode'])
+            ->where('item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)
             ->when($agentId !== null, fn ($q) => $q->where('agent_id', $agentId))
             ->when($agentId === null && $agentCode !== null, fn ($q) => $q->where('agent_code', $agentCode))
+            ->orderBy('id')
             ->get();
 
         if ($items->isEmpty()) {
@@ -528,64 +1007,133 @@ class CommissionPayoutService
         }
 
         $first = $items->first();
-        // The item's vat_type was resolved at batch creation; use it, else re-resolve
-        // from the agent's current has_vat/vat_mode.
+        $agentIdResolved = $first->agent_id;
         $vatType = $first->vat_type ?: ($first->agent ? $this->resolveVatType($first->agent) : '1');
 
+        // Per-agent payment-tracking row carries the frozen bank + roll-ups.
+        $agentRow = $batch->agentRows()
+            ->when($agentIdResolved !== null, fn ($q) => $q->where('agent_id', $agentIdResolved))
+            ->when($agentIdResolved === null, fn ($q) => $q->where('agent_code', $first->agent_code))
+            ->first();
+
+        // ── Line rows (mirror the printed columns) ──────────────────────────
         $rows = [];
-        $commission = 0.0;
+        $sumNet = 0.0;
+        $sumTotal = 0.0;
+        $sumMain = 0.0;
+        $sumRider = 0.0;
+        $sumPayoff = 0.0;
+        $sumCard = 0.0;
+        $sumCommA = 0.0;    // ค่านายหน้าสุทธิ (A) = main + rider − (payoff + card)
+        $sumWht = 0.0;
+        $sumPayable = 0.0;  // ยอดจ่ายสุทธิ = A − wht
+        $i = 0;
         foreach ($items as $it) {
-            $amt = $it->total();
-            $commission += $amt;
+            $i++;
+            $main = (float) $it->snapshot_agent_commission;
+            $rider = (float) $it->snapshot_rider_commission;
+            $payoff = (float) $it->snapshot_payoff_discount;
+            $card = (float) $it->snapshot_card_fee;
+            $commA = round($main + $rider - $payoff - $card, 2);
+            $wht = (float) $it->snapshot_wht_amount;
+            $payable = round($commA - $wht, 2);
+
             $cust = $it->policy?->customer;
+            $custName = $it->snapshot_customer_name
+                ?: ($cust ? trim("{$cust->first_name} {$cust->last_name}") : null);
+
             $rows[] = [
-                'policyNo' => $it->policy?->policy_no,
+                'no' => $i,
                 'applicationNo' => $it->policy?->application_no,
-                'customerName' => $cust ? trim("{$cust->first_name} {$cust->last_name}") : null,
-                'base' => (float) $it->snapshot_base_premium,
-                'commission' => round($amt, 2),
+                'policyNo' => $it->policy?->policy_no,
+                'policyDate' => $it->policy?->created_at?->format('d/m/Y'),
+                'customerName' => $custName,
+                'riderName' => $it->snapshot_rider_name,
+                'netPremium' => (float) $it->snapshot_net_premium,
+                'totalPremium' => (float) $it->snapshot_total_premium,
+                'mainRatePct' => $it->snapshot_main_rate !== null ? round((float) $it->snapshot_main_rate * 100, 2) : null,
+                'riderRatePct' => $it->snapshot_rider_rate !== null ? round((float) $it->snapshot_rider_rate * 100, 2) : null,
+                'payoffDiscount' => $payoff,
+                'cardFee' => $card,
+                'commissionA' => $commA,
+                'wht' => $wht,
+                'payable' => $payable,
+                'note' => $it->snapshot_note,
             ];
+            $sumNet += (float) $it->snapshot_net_premium;
+            $sumTotal += (float) $it->snapshot_total_premium;
+            $sumMain += $main;
+            $sumRider += $rider;
+            $sumPayoff += $payoff;
+            $sumCard += $card;
+            $sumCommA += $commA;
+            $sumWht += $wht;
+            $sumPayable += $payable;
         }
 
-        $deduct = (float) $batch->adjustments()
-            ->when($agentId !== null, fn ($q) => $q->where('agent_id', $agentId))
-            ->when($agentId === null && $agentCode !== null, fn ($q) => $q->where('agent_code', $agentCode))
+        // ── Per-agent adjustments (bonus / special_deduct / correction) ─────
+        $adjQuery = $batch->adjustments()
+            ->when($agentIdResolved !== null, fn ($q) => $q->where('agent_id', $agentIdResolved))
+            ->when($agentIdResolved === null, fn ($q) => $q->where('agent_code', $first->agent_code));
+        $bonus = (float) (clone $adjQuery)->where('type', CommissionPayoutAdjustment::TYPE_BONUS)->sum('amount');
+        $otherDeduct = (float) (clone $adjQuery)
+            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
             ->sum('amount');
 
-        $afterDeduct = round($commission - $deduct, 2);
+        // ── Summary block (mirrors the printed WHT recap) ───────────────────
+        // WHT is 3% of the base; each line shows its base and its 3% amount.
+        $whtFromCommission = round($sumCommA, 2);
+        $whtFromCommissionTax = round($whtFromCommission * self::WHT_RATE, 2);
+        $whtFromBonus = round($bonus, 2);
+        $whtFromBonusTax = round($whtFromBonus * self::WHT_RATE, 2);
+        $whtFromPayoff = round($sumPayoff, 2);
+        $whtFromPayoffTax = round($whtFromPayoff * self::WHT_RATE, 2);
 
-        // VAT presentation per VAT_TYPE (spec §5).
-        $vat = 0.0;
-        $net = $afterDeduct;
-        $baseExVat = $afterDeduct;
-        $payable = $afterDeduct;
-        if ($vatType === '2') {
-            // Exclude: add VAT on top.
-            $vat = round($afterDeduct * self::VAT_RATE, 2);
-            $payable = round($afterDeduct + $vat, 2);
-        } elseif ($vatType === '3') {
-            // Include: VAT already inside the amount.
-            $baseExVat = round($afterDeduct / (1 + self::VAT_RATE), 2);
-            $vat = round($afterDeduct - $baseExVat, 2);
-            $payable = $afterDeduct;
-        }
+        $whtBaseTotal = round($whtFromCommission + $whtFromBonus + $whtFromPayoff, 2);
+        $whtTaxTotal = round($whtFromCommissionTax + $whtFromBonusTax + $whtFromPayoffTax, 2);
 
-        $agentName = $first->agent ? trim("{$first->agent->first_name} {$first->agent->last_name}") : '';
+        // ยอดเงินโอน (net transfer): prefer the frozen agent-row value; else derive.
+        $netTransfer = $agentRow !== null
+            ? round((float) $agentRow->net_transfer, 2)
+            : round($sumCommA + $bonus - $otherDeduct - $whtTaxTotal, 2);
+
+        $agentName = $agentRow?->agent_name
+            ?: ($first->agent ? trim("{$first->agent->first_name} {$first->agent->last_name}") : '');
 
         return [
             'vatType' => $vatType,
-            'agent' => ['code' => $first->agent_code ?? $agentCode, 'name' => $agentName],
-            'items' => $rows,
-            'totals' => [
-                'commission' => round($commission, 2),
-                'deduct' => round($deduct, 2),
-                'net' => $net,
-                'baseExVat' => $baseExVat,
-                'vat' => $vat,
-                'payable' => $payable,
+            'agent' => [
+                'code' => $first->agent_code ?? $agentCode,
+                'name' => $agentName,
+                'bankAccountNo' => $agentRow?->bank_account_no,
+                'bankAccountName' => $agentRow?->bank_account_name,
+            ],
+            'rows' => $rows,
+            'columnTotals' => [
+                'netPremium' => round($sumNet, 2),
+                'totalPremium' => round($sumTotal, 2),
+                'payoffDiscount' => round($sumPayoff, 2),
+                'cardFee' => round($sumCard, 2),
+                'commissionA' => round($sumCommA, 2),
+                'wht' => round($sumWht, 2),
+                'payable' => round($sumPayable, 2),
+            ],
+            'summary' => [
+                'whtFromCommission' => $whtFromCommission,
+                'whtFromCommissionTax' => $whtFromCommissionTax,
+                'whtFromBonus' => $whtFromBonus,
+                'whtFromBonusTax' => $whtFromBonusTax,
+                'whtFromPayoff' => $whtFromPayoff,
+                'whtFromPayoffTax' => $whtFromPayoffTax,
+                'salesPromoTax' => 0.0,      // บวกเงินค่าส่งเสริมการขาย (Tax Related) — reserved
+                'whtBaseTotal' => $whtBaseTotal,
+                'whtTaxTotal' => $whtTaxTotal,
+                'nonTaxAdjust' => round($bonus - $otherDeduct, 2), // หักอื่นๆ (+) / บวก (-) Non-tax
+                'netTransfer' => $netTransfer,
             ],
             'batch' => [
                 'id' => $batch->id,
+                'periodLabel' => $batch->period_label,
                 'from' => $batch->from_date?->toDateString(),
                 'to' => $batch->to_date?->toDateString(),
             ],

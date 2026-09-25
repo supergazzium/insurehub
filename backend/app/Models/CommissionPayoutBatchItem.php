@@ -19,6 +19,14 @@ class CommissionPayoutBatchItem extends Model
         'snapshot_base_premium' => 'decimal:2',
         'snapshot_agent_commission' => 'decimal:2',
         'snapshot_rider_commission' => 'decimal:2',
+        'snapshot_net_premium' => 'decimal:2',
+        'snapshot_total_premium' => 'decimal:2',
+        'snapshot_main_rate' => 'decimal:4',
+        'snapshot_rider_rate' => 'decimal:4',
+        'snapshot_payoff_discount' => 'decimal:2',
+        'snapshot_card_fee' => 'decimal:2',
+        'snapshot_wht_rate' => 'decimal:4',
+        'snapshot_wht_amount' => 'decimal:2',
     ];
 
     public function batch(): BelongsTo
