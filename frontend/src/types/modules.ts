@@ -236,6 +236,20 @@ export const MODULES: ModuleDef[] = [
     ],
   },
   {
+    key: 'commission-payout-history',
+    number: 9,
+    routePath: '/commissions/payouts/history',
+    routeName: 'commission-payout-history',
+    icon: 'pi pi-history',
+    i18nKey: 'commissionPayoutHistory',
+    group: 'commission',
+    functions: [
+      'ประวัติรอบจ่ายทั้งหมด + ตัวกรอง (งวด/สถานะ/ช่วงวันที่)',
+      'ไทม์ไลน์การทำงานต่อรอบ (สร้าง→อนุมัติ→จ่าย→ย้อนกลับ)',
+      'ค้นหาเลขอ้างอิงโอน + สรุปยอด + ดาวน์โหลดเอกสารย้อนหลัง',
+    ],
+  },
+  {
     key: 'commission-receipt',
     number: 8,
     routePath: '/commissions/receipts',

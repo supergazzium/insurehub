@@ -55,7 +55,7 @@ import { MODULES } from '../types/modules'
 const IMPLEMENTED_MODULES = new Set([
   'tenant-settings', 'carriers', 'products', 'contracts',
   'agents', 'customers', 'policies', 'renewal-pipeline', 'collections', 'follow-ups',
-  'rebate-reconciliation', 'commission-payout', 'commission-receipt',
+  'rebate-reconciliation', 'commission-payout', 'commission-payout-history', 'commission-receipt',
   'import-failures',
   'agent-support', 'agent-operation-support',
   // Phase 2 (agent portal)
@@ -163,6 +163,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'policies/:id/renewal', name: 'policy-renewal', component: () => import('../pages/policies/RenewalDetail.vue'), meta: { moduleKey: 'renewal-pipeline' } },
       { path: 'commissions/rebates', name: 'commission-rebates', component: RebateReconciliation, meta: { moduleKey: 'rebate-reconciliation' } },
       { path: 'commissions/payouts', name: 'commission-payouts', component: () => import('../pages/commissions/CommissionPayouts.vue'), meta: { moduleKey: 'commission-payout' } },
+      // History MUST precede :id so "history" is not captured as a batch id.
+      { path: 'commissions/payouts/history', name: 'commission-payout-history', component: () => import('../pages/commissions/PayoutHistory.vue'), meta: { moduleKey: 'commission-payout-history' } },
       { path: 'commissions/payouts/:id', name: 'commission-payout-detail', component: () => import('../pages/commissions/CommissionPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/payouts/agent/:agentId', name: 'agent-payout-detail', component: () => import('../pages/commissions/AgentPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/receipts', name: 'commission-receipts', component: () => import('../pages/commissions/CommissionReceipts.vue'), meta: { moduleKey: 'commission-receipt' } },

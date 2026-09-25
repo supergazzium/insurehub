@@ -138,6 +138,68 @@ export function payAgent(
 export function fetchPayoutBatches(status?: BatchStatus | 'all') {
   return api.get<{ data: BatchRow[] }>(`commission-payout-batches${buildQuery({ status })}`)
 }
+
+// ── History / management ────────────────────────────────────────────────────
+export interface HistoryFilters {
+  fromDate?: string
+  toDate?: string
+  status?: BatchStatus | 'all'
+  period?: string
+  q?: string
+  page?: number
+  perPage?: number
+}
+export interface HistoryMeta { total: number; page: number; perPage: number }
+export interface PayoutSummary {
+  batchCount: number
+  paidBatchCount: number
+  pendingBatchCount: number
+  reversedBatchCount: number
+  paidAmount: number
+  pendingAmount: number
+  reversedAmount: number
+  totalAgentsPaid: number
+}
+export interface AuditEntryRow {
+  action: string
+  at: string | null
+  actor: string
+  metadata: Record<string, unknown> | null
+}
+export interface ReferenceHit {
+  batchId: string
+  periodLabel: string | null
+  status: BatchStatus
+  paymentDate: string | null
+  agentCode: string | null
+  agentName: string | null
+  reference: string | null
+  amount: number
+  level: 'agent' | 'batch'
+}
+
+/** Paginated batch history for the history page. */
+export function fetchPayoutHistory(filters: HistoryFilters) {
+  return api.get<{ data: BatchRow[]; meta: HistoryMeta }>(
+    `commission-payout-batches/history${buildQuery(filters as Record<string, unknown>)}`,
+  )
+}
+/** Reconciliation KPI summary. */
+export function fetchPayoutSummary(fromDate?: string, toDate?: string) {
+  return api.get<{ data: PayoutSummary }>(
+    `commission-payout-batches/summary${buildQuery({ fromDate, toDate })}`,
+  )
+}
+/** Per-batch audit timeline. */
+export function fetchPayoutAuditLog(batchId: string) {
+  return api.get<{ data: AuditEntryRow[] }>(`commission-payout-batches/${batchId}/audit-log`)
+}
+/** Resolve a bank-transfer reference to its batch/agent(s). */
+export function findPayoutByReference(ref: string) {
+  return api.get<{ data: ReferenceHit[] }>(
+    `commission-payout-batches/find-by-reference${buildQuery({ ref })}`,
+  )
+}
 /**
  * Create a DRAFT batch. Pass `agentIds` for a hand-picked selection (the
  * monthly bulk run pays 30–50 at once); omit it to include every eligible

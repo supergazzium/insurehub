@@ -143,9 +143,15 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-payout-batches/by-agent', [CommissionPayoutController::class, 'byAgent']);
     Route::get('commission-payout-batches/by-agent/{agent}', [CommissionPayoutController::class, 'agentDetail']);
     Route::post('commission-payout-batches/by-agent/{agent}/pay', [CommissionPayoutController::class, 'payAgent']);
+    // History / management reads — MUST precede the {batch} routes so these
+    // static paths are not captured as a batch id.
+    Route::get('commission-payout-batches/history', [CommissionPayoutController::class, 'history']);
+    Route::get('commission-payout-batches/summary', [CommissionPayoutController::class, 'summary']);
+    Route::get('commission-payout-batches/find-by-reference', [CommissionPayoutController::class, 'findByReference']);
     Route::get('commission-payout-batches', [CommissionPayoutController::class, 'index']);
     Route::post('commission-payout-batches', [CommissionPayoutController::class, 'store']);
     Route::get('commission-payout-batches/{batch}', [CommissionPayoutController::class, 'show']);
+    Route::get('commission-payout-batches/{batch}/audit-log', [CommissionPayoutController::class, 'auditLog']);
     Route::post('commission-payout-batches/{batch}/adjustments', [CommissionPayoutController::class, 'addAdjustment']);
     Route::post('commission-payout-batches/{batch}/mark-paid', [CommissionPayoutController::class, 'markPaid']);
     Route::post('commission-payout-batches/{batch}/approve', [CommissionPayoutController::class, 'approve']);

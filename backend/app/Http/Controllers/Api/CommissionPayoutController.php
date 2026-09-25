@@ -138,6 +138,65 @@ class CommissionPayoutController extends Controller
         return response()->json(['data' => $rows]);
     }
 
+    /**
+     * GET /commission-payout-batches/history
+     * Paginated, filterable batch history for the payout history page.
+     */
+    public function history(Request $request): JsonResponse
+    {
+        $filters = $request->validate([
+            'fromDate' => ['nullable', 'date'],
+            'toDate' => ['nullable', 'date', 'after_or_equal:fromDate'],
+            'status' => ['nullable', 'string', 'max:16'],
+            'period' => ['nullable', 'string', 'max:64'],
+            'q' => ['nullable', 'string', 'max:128'],
+            'page' => ['nullable', 'integer', 'min:1'],
+            'perPage' => ['nullable', 'integer', 'min:1', 'max:100'],
+        ]);
+
+        $res = $this->service->history($this->tenantId($request), $filters);
+
+        return response()->json([
+            'data' => $res['rows']->map(fn (CommissionPayoutBatch $b): array => $this->batchRow($b)),
+            'meta' => ['total' => $res['total'], 'page' => $res['page'], 'perPage' => $res['perPage']],
+        ]);
+    }
+
+    /** GET /commission-payout-batches/summary — reconciliation KPIs. */
+    public function summary(Request $request): JsonResponse
+    {
+        $data = $request->validate([
+            'fromDate' => ['nullable', 'date'],
+            'toDate' => ['nullable', 'date', 'after_or_equal:fromDate'],
+        ]);
+
+        return response()->json([
+            'data' => $this->service->historySummary(
+                $this->tenantId($request), $data['fromDate'] ?? null, $data['toDate'] ?? null,
+            ),
+        ]);
+    }
+
+    /** GET /commission-payout-batches/find-by-reference?ref=… — bank recon lookup. */
+    public function findByReference(Request $request): JsonResponse
+    {
+        $data = $request->validate(['ref' => ['required', 'string', 'min:1', 'max:128']]);
+
+        return response()->json([
+            'data' => $this->service->findByReference($this->tenantId($request), $data['ref']),
+        ]);
+    }
+
+    /** GET /commission-payout-batches/{batch}/audit-log — the audit timeline. */
+    public function auditLog(Request $request, CommissionPayoutBatch $batch): JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+
+        return response()->json([
+            'data' => $this->service->auditTimeline($this->tenantId($request), (int) $batch->id),
+        ]);
+    }
+
     /** GET /commission-payout-batches/{batch} */
     public function show(Request $request, CommissionPayoutBatch $batch): JsonResponse
     {

@@ -1210,4 +1210,176 @@ class CommissionPayoutService
             'metadata' => $metadata,
         ]);
     }
+
+    // ── History / management reads ───────────────────────────────────────────
+
+    /**
+     * Paginated, filterable batch history. Filters: date range (on payment_date,
+     * falling back to created_at), period_label, status, and a free-text query
+     * matched against period label, note, and payment reference.
+     *
+     * @return array{rows: \Illuminate\Support\Collection, total: int, page: int, perPage: int}
+     */
+    public function history(int $tenantId, array $filters): array
+    {
+        $page = max(1, (int) ($filters['page'] ?? 1));
+        $perPage = min(100, max(1, (int) ($filters['perPage'] ?? 25)));
+
+        $q = CommissionPayoutBatch::query()->where('tenant_id', $tenantId);
+
+        if (! empty($filters['status']) && $filters['status'] !== 'all') {
+            $q->where('status', $filters['status']);
+        }
+        if (! empty($filters['period'])) {
+            $q->where('period_label', $filters['period']);
+        }
+        if (! empty($filters['fromDate'])) {
+            $from = CarbonImmutable::parse($filters['fromDate'], 'Asia/Bangkok')->toDateString();
+            $q->where(fn ($w) => $w->whereDate('payment_date', '>=', $from)
+                ->orWhere(fn ($ww) => $ww->whereNull('payment_date')->whereDate('created_at', '>=', $from)));
+        }
+        if (! empty($filters['toDate'])) {
+            $to = CarbonImmutable::parse($filters['toDate'], 'Asia/Bangkok')->toDateString();
+            $q->where(fn ($w) => $w->whereDate('payment_date', '<=', $to)
+                ->orWhere(fn ($ww) => $ww->whereNull('payment_date')->whereDate('created_at', '<=', $to)));
+        }
+        if (! empty($filters['q'])) {
+            $needle = '%' . $filters['q'] . '%';
+            $q->where(fn ($w) => $w->where('period_label', 'like', $needle)
+                ->orWhere('note', 'like', $needle)
+                ->orWhere('payment_reference', 'like', $needle));
+        }
+
+        $total = (clone $q)->count();
+        $rows = $q->orderByDesc('id')
+            ->forPage($page, $perPage)
+            ->get();
+
+        return ['rows' => $rows, 'total' => $total, 'page' => $page, 'perPage' => $perPage];
+    }
+
+    /**
+     * Reconciliation KPIs across the (optionally date-filtered) batch history.
+     * Paid = sum of PAID batches; pending = APPROVED/DRAFT/GENERATED not yet
+     * paid; reversed count; plus batch/agent tallies.
+     *
+     * @return array<string, mixed>
+     */
+    public function historySummary(int $tenantId, ?string $from = null, ?string $to = null): array
+    {
+        $q = CommissionPayoutBatch::query()->where('tenant_id', $tenantId);
+        if ($from !== null) {
+            $f = CarbonImmutable::parse($from, 'Asia/Bangkok')->toDateString();
+            $q->where(fn ($w) => $w->whereDate('payment_date', '>=', $f)
+                ->orWhere(fn ($ww) => $ww->whereNull('payment_date')->whereDate('created_at', '>=', $f)));
+        }
+        if ($to !== null) {
+            $t = CarbonImmutable::parse($to, 'Asia/Bangkok')->toDateString();
+            $q->where(fn ($w) => $w->whereDate('payment_date', '<=', $t)
+                ->orWhere(fn ($ww) => $ww->whereNull('payment_date')->whereDate('created_at', '<=', $t)));
+        }
+        $batches = $q->get();
+
+        $paid = $batches->where('status', CommissionPayoutBatch::STATUS_PAID);
+        $pending = $batches->whereIn('status', [
+            CommissionPayoutBatch::STATUS_DRAFT,
+            CommissionPayoutBatch::STATUS_GENERATED,
+            CommissionPayoutBatch::STATUS_APPROVED,
+        ]);
+        $reversed = $batches->where('status', CommissionPayoutBatch::STATUS_REVERSED);
+
+        return [
+            'batchCount' => $batches->count(),
+            'paidBatchCount' => $paid->count(),
+            'pendingBatchCount' => $pending->count(),
+            'reversedBatchCount' => $reversed->count(),
+            'paidAmount' => round((float) $paid->sum('total_amount'), 2),
+            'pendingAmount' => round((float) $pending->sum('total_amount'), 2),
+            'reversedAmount' => round((float) $reversed->sum('total_amount'), 2),
+            'totalAgentsPaid' => (int) $paid->sum('total_agents'),
+        ];
+    }
+
+    /**
+     * The audit timeline for one batch — reads back the AuditEntry rows this
+     * service writes (target = "batch:{id}"), joined to users for readable
+     * actor names, oldest first.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function auditTimeline(int $tenantId, int $batchId): array
+    {
+        return AuditEntry::query()
+            ->leftJoin('users as u', 'u.id', '=', 'audit_entries.user_id')
+            ->where('audit_entries.tenant_id', $tenantId)
+            ->where('audit_entries.target', "batch:{$batchId}")
+            ->where('audit_entries.action', 'like', 'commission_payout.%')
+            ->orderBy('audit_entries.occurred_at')
+            ->orderBy('audit_entries.id')
+            ->get([
+                'audit_entries.action', 'audit_entries.occurred_at', 'audit_entries.actor',
+                'audit_entries.metadata', 'u.name as user_name',
+            ])
+            ->map(fn ($e) => [
+                'action' => str_replace('commission_payout.', '', (string) $e->action),
+                'at' => $e->occurred_at?->toIso8601String(),
+                'actor' => $e->user_name ?: ($e->actor === 'system' ? 'system' : "user #{$e->actor}"),
+                'metadata' => is_string($e->metadata) ? json_decode($e->metadata, true) : $e->metadata,
+            ])
+            ->all();
+    }
+
+    /**
+     * Resolve a bank-transfer reference to the batch(es)/agent(s) that carry it
+     * — for reconciling payouts against a bank statement. Matches both the
+     * batch-level reference and per-agent references.
+     *
+     * @return array<int, array<string, mixed>>
+     */
+    public function findByReference(int $tenantId, string $reference): array
+    {
+        $needle = '%' . $reference . '%';
+        $hits = [];
+
+        // Per-agent references.
+        CommissionPayoutBatchAgent::query()
+            ->where('tenant_id', $tenantId)
+            ->where('payment_reference', 'like', $needle)
+            ->with('batch:id,period_label,status,payment_date')
+            ->get()
+            ->each(function ($ar) use (&$hits): void {
+                $hits[] = [
+                    'batchId' => (string) $ar->batch_id,
+                    'periodLabel' => $ar->batch?->period_label,
+                    'status' => $ar->batch?->status,
+                    'paymentDate' => $ar->batch?->payment_date?->toDateString(),
+                    'agentCode' => $ar->agent_code,
+                    'agentName' => $ar->agent_name,
+                    'reference' => $ar->payment_reference,
+                    'amount' => round((float) $ar->net_transfer, 2),
+                    'level' => 'agent',
+                ];
+            });
+
+        // Batch-level references (bulk pay).
+        CommissionPayoutBatch::query()
+            ->where('tenant_id', $tenantId)
+            ->where('payment_reference', 'like', $needle)
+            ->get()
+            ->each(function ($b) use (&$hits): void {
+                $hits[] = [
+                    'batchId' => (string) $b->id,
+                    'periodLabel' => $b->period_label,
+                    'status' => $b->status,
+                    'paymentDate' => $b->payment_date?->toDateString(),
+                    'agentCode' => null,
+                    'agentName' => null,
+                    'reference' => $b->payment_reference,
+                    'amount' => round((float) $b->total_amount, 2),
+                    'level' => 'batch',
+                ];
+            });
+
+        return $hits;
+    }
 }

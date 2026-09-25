@@ -218,6 +218,7 @@ export default {
     reportMailing: { name: 'Mailing Pipeline', short: 'Mailing' },
     reportPayments: { name: 'Payment History', short: 'Payments' },
     quotes: { name: 'Quotations', short: 'Quotes' },
+    commissionPayoutHistory: { name: 'Payout History', short: 'Payout History' },
   },
 
   carriers: {
