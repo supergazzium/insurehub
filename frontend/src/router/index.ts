@@ -55,7 +55,7 @@ import { MODULES } from '../types/modules'
 const IMPLEMENTED_MODULES = new Set([
   'tenant-settings', 'carriers', 'products', 'contracts',
   'agents', 'customers', 'policies', 'renewal-pipeline', 'collections', 'follow-ups',
-  'rebate-reconciliation', 'commission-payout', 'commission-payout-history', 'commission-receipt',
+  'rebate-reconciliation', 'commission-payout', 'commission-payout-history', 'commission-receipt', 'wht-report',
   'import-failures',
   'agent-support', 'agent-operation-support',
   // Phase 2 (agent portal)
@@ -168,6 +168,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'commissions/payouts/:id', name: 'commission-payout-detail', component: () => import('../pages/commissions/CommissionPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/payouts/agent/:agentId', name: 'agent-payout-detail', component: () => import('../pages/commissions/AgentPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/receipts', name: 'commission-receipts', component: () => import('../pages/commissions/CommissionReceipts.vue'), meta: { moduleKey: 'commission-receipt' } },
+      { path: 'accounting/wht', name: 'wht-report', component: () => import('../pages/accounting/WhtReport.vue'), meta: { moduleKey: 'wht-report' } },
       { path: 'settings/import-failures', name: 'settings-import-failures', component: ImportFailures, meta: { moduleKey: 'import-failures' } },
       { path: 'support', name: 'agent-support', component: AgentSupport, meta: { moduleKey: 'agent-support' } },
       { path: 'ops', name: 'agent-operation-support', component: AgentOperationSupport, meta: { moduleKey: 'agent-operation-support' } },

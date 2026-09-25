@@ -170,6 +170,10 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('commission-payout-batches/{batch}/items/{item}/exclude', fn (\Illuminate\Http\Request $r, \App\Models\CommissionPayoutBatch $batch, int $item) => app(CommissionPayoutController::class)->setItemExcluded($r, $batch, $item, true));
     Route::post('commission-payout-batches/{batch}/items/{item}/include', fn (\Illuminate\Http\Request $r, \App\Models\CommissionPayoutBatch $batch, int $item) => app(CommissionPayoutController::class)->setItemExcluded($r, $batch, $item, false));
 
+    // บัญชี — Withholding-tax (ภาษีหัก ณ ที่จ่าย) report for tax filing.
+    Route::get('wht-report', [\App\Http\Controllers\Api\WhtReportController::class, 'index']);
+    Route::get('wht-report/export.csv', [\App\Http\Controllers\Api\WhtReportController::class, 'exportCsv']);
+
     // รับค่าคอมจากบริษัทประกัน (insurer commission receipt — Phase 1 manual).
     Route::get('commission-receivables', [CommissionReceiptController::class, 'index']);
     Route::get('commission-receivables/{receivable}', [CommissionReceiptController::class, 'show']);

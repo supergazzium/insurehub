@@ -6,7 +6,7 @@ export interface ModuleDef {
   icon: string
   i18nKey: string
   functions: string[]
-  group: 'core' | 'agents' | 'people' | 'business' | 'commission' | 'reporting' | 'platform' | 'support' | 'portal'
+  group: 'core' | 'agents' | 'people' | 'business' | 'commission' | 'accounting' | 'reporting' | 'platform' | 'support' | 'portal'
   // If omitted, module is visible to admin/staff/super_admin only. Include
   // 'agent' to also expose it to logged-in agents inside their portal.
   roles?: Array<'admin' | 'super_admin' | 'staff' | 'agent'>
@@ -247,6 +247,20 @@ export const MODULES: ModuleDef[] = [
       'ประวัติรอบจ่ายทั้งหมด + ตัวกรอง (งวด/สถานะ/ช่วงวันที่)',
       'ไทม์ไลน์การทำงานต่อรอบ (สร้าง→อนุมัติ→จ่าย→ย้อนกลับ)',
       'ค้นหาเลขอ้างอิงโอน + สรุปยอด + ดาวน์โหลดเอกสารย้อนหลัง',
+    ],
+  },
+  {
+    key: 'wht-report',
+    number: 11,
+    routePath: '/accounting/wht',
+    routeName: 'wht-report',
+    icon: 'pi pi-percentage',
+    i18nKey: 'whtReport',
+    group: 'accounting',
+    functions: [
+      'รายงานภาษีหัก ณ ที่จ่าย (3%) ต่อตัวแทน ตามงวด/ช่วงวันที่',
+      'สรุปยอดสำหรับยื่น ภ.ง.ด.53 / ออกหนังสือรับรอง 50 ทวิ',
+      'ส่งออก CSV พร้อมเลขผู้เสียภาษี / เลขบัตรประชาชน',
     ],
   },
   {
@@ -558,6 +572,7 @@ export const MODULE_GROUPS: { key: ModuleDef['group']; labelTh: string }[] = [
   { key: 'agents', labelTh: 'ตัวแทน' },
   { key: 'people', labelTh: 'ลูกค้า' },
   { key: 'commission', labelTh: 'ค่าคอมมิชชั่นและจ่ายเงิน' },
+  { key: 'accounting', labelTh: 'บัญชี' },
   { key: 'reporting', labelTh: 'รายงานและแจ้งเตือน' },
   { key: 'platform', labelTh: 'แพลตฟอร์ม' },
   { key: 'support', labelTh: 'ฝ่ายสนับสนุน' },

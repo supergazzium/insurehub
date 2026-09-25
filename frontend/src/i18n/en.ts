@@ -219,6 +219,7 @@ export default {
     reportPayments: { name: 'Payment History', short: 'Payments' },
     quotes: { name: 'Quotations', short: 'Quotes' },
     commissionPayoutHistory: { name: 'Payout History', short: 'Payout History' },
+    whtReport: { name: 'Withholding Tax Report', short: 'WHT Report' },
   },
 
   carriers: {
