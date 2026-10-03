@@ -169,6 +169,9 @@ const customerYearDisplay = computed<number | null>(() =>
 watch(suggestedPolicyYear, (n) => {
   if (n !== null && !yearsTouched.value && !hydrating.value) form.policyYear = n
 })
+const DELIVERY_METHODS = ['post', 'kerry', 'flash', 'pickup', 'e_policy', 'other'] as const
+const needsTracking = computed(() => !['pickup', 'e_policy'].includes(form.deliveryMethod))
+const needsCourier = computed(() => ['post', 'other'].includes(form.deliveryMethod))
 const saving = ref(false)
 const error = ref<string | null>(null)
 const flash = ref<string | null>(null)
@@ -262,8 +265,13 @@ const form = reactive({
   receivedDate: '' as string,
   receivedNote: '' as string,
   delivered: false as boolean,
-  mailingDate: '' as string,
+  shippedDate: '' as string,
   mailingNote: '' as string,
+  deliveryMethod: '' as string,
+  courier: '' as string,
+  trackingNo: '' as string,
+  deliveredDate: '' as string,
+  deliveredTo: '' as string,
   // Free Look date — life products only.
   freelookEndDate: '' as string,
 })
@@ -1185,8 +1193,13 @@ function buildDraftPayload(): Record<string, unknown> {
     receivedDate: form.received ? (form.receivedDate || null) : null,
     receivedNote: form.receivedNote || null,
     // การจัดส่ง (delivered to customer) — reuses the mailing_* columns.
-    mailingDate: form.delivered ? (form.mailingDate || null) : null,
+    shippedDate: form.delivered ? (form.shippedDate || null) : null,
     mailingNote: form.mailingNote || null,
+    deliveryMethod: form.delivered ? (form.deliveryMethod || null) : null,
+    courier: form.delivered ? (form.courier || null) : null,
+    trackingNo: form.delivered ? (form.trackingNo || null) : null,
+    deliveredDate: form.delivered ? (form.deliveredDate || null) : null,
+    deliveredTo: form.delivered ? (form.deliveredTo || null) : null,
     // Free Look date (life products). Empty until recorded.
     freelookEndDate: form.freelookEndDate || null,
   }
@@ -1394,9 +1407,14 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
     form.receivedDate = receivedDate
     form.received = !!receivedDate
     form.receivedNote = renewMode ? '' : String(p.receivedNote ?? '')
-    const mailingDate = renewMode ? '' : String(p.mailingDate ?? '')
-    form.mailingDate = mailingDate
-    form.delivered = !!mailingDate
+    const shippedDate = renewMode ? '' : String(p.shippedDate ?? p.mailingDate ?? '')
+    form.shippedDate = shippedDate
+    form.delivered = !!shippedDate
+    form.deliveryMethod = renewMode ? '' : String(p.deliveryMethod ?? '')
+    form.courier = renewMode ? '' : String(p.courier ?? '')
+    form.trackingNo = renewMode ? '' : String(p.trackingNo ?? '')
+    form.deliveredDate = renewMode ? '' : String(p.deliveredDate ?? '')
+    form.deliveredTo = renewMode ? '' : String(p.deliveredTo ?? '')
     // Free Look date — cleared on renewal (fresh lifecycle).
     form.freelookEndDate = renewMode ? '' : String(p.freelookEndDate ?? '')
     form.mailingNote = renewMode ? '' : String(p.mailingNote ?? '')
@@ -2349,8 +2367,36 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             <span class="font-medium text-sm text-slate-800">{{ t('policyCreate.fulfilment.deliveredDone') }}</span>
           </label>
           <div v-if="form.delivered" class="mt-3 space-y-3">
-            <FormField :label="t('policyCreate.fulfilment.deliveredDate')">
-              <input type="date" v-model="form.mailingDate"
+            <div class="grid grid-cols-2 gap-3">
+              <FormField :label="t('policyCreate.fulfilment.deliveryMethod')">
+                <select v-model="form.deliveryMethod"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+                  <option value="">—</option>
+                  <option v-for="m in DELIVERY_METHODS" :key="m" :value="m">{{ t(`policyCreate.fulfilment.methods.${m}`) }}</option>
+                </select>
+              </FormField>
+              <FormField v-if="needsCourier" :label="t('policyCreate.fulfilment.courier')">
+                <input v-model.trim="form.courier" type="text" maxlength="64"
+                  :placeholder="t('policyCreate.fulfilment.courierPlaceholder')"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+            <FormField v-if="needsTracking" :label="t('policyCreate.fulfilment.trackingNo')">
+              <input v-model.trim="form.trackingNo" type="text" maxlength="64"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand-400" />
+            </FormField>
+            <div class="grid grid-cols-2 gap-3">
+              <FormField :label="t('policyCreate.fulfilment.deliveredDate')">
+                <input type="date" v-model="form.shippedDate"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField :label="t('policyCreate.fulfilment.customerReceivedDate')">
+                <input type="date" v-model="form.deliveredDate" :min="form.shippedDate || undefined"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+            <FormField :label="t('policyCreate.fulfilment.deliveredTo')">
+              <input v-model.trim="form.deliveredTo" type="text" maxlength="255"
                 class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
             </FormField>
             <FormField :label="t('policyCreate.fulfilment.note')">

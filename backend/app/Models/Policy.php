@@ -16,7 +16,25 @@ class Policy extends Model
 {
     use SoftDeletes;
 
+    public const DELIVERY_METHODS = ['post', 'kerry', 'flash', 'pickup', 'e_policy', 'other'];
+
+    public const FULFILMENT_COLUMNS = [
+        'received_date', 'received_note', 'mailing_note',
+        'delivery_method', 'courier', 'tracking_no', 'shipped_date', 'delivered_date', 'delivered_to',
+    ];
+
     protected $table = 'policies';
+
+    protected static function booted(): void
+    {
+        static::saving(function (Policy $policy): void {
+            if ($policy->isDirty('shipped_date') && ! $policy->isDirty('mailing_date')) {
+                $policy->mailing_date = $policy->shipped_date;
+            } elseif ($policy->isDirty('mailing_date') && ! $policy->isDirty('shipped_date')) {
+                $policy->shipped_date = $policy->mailing_date;
+            }
+        });
+    }
 
     protected $guarded = ['id'];
 
@@ -38,6 +56,8 @@ class Policy extends Model
         'last_due_inst_date' => 'date',
         'payment_date' => 'date',
         'mailing_date' => 'date',
+        'shipped_date' => 'date',
+        'delivered_date' => 'date',
         'freelook_active' => 'boolean',
         'freelook_end_date' => 'date',
         'vehicle_on_non_motor' => 'boolean',

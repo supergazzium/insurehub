@@ -6,6 +6,7 @@ namespace App\Observers;
 
 use App\Models\AuditEntry;
 use App\Models\Policy;
+use App\Models\PolicyEvent;
 use App\Models\ProductCommissionRate;
 use App\Services\Commission\CommissionSnapshot;
 use App\Services\Policy\InstallmentSchedule;
@@ -58,6 +59,7 @@ class PolicyObserver
     public function updated(Policy $policy): void
     {
         $this->auditYearChange($policy);
+        $this->logFulfilmentChange($policy);
 
         $entered = $policy->wasChanged('status')
             && in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true);
@@ -87,6 +89,55 @@ class PolicyObserver
             }
         } catch (\Throwable $e) {
             Log::warning('Policy year seeding failed', ['policy_id' => $policy->id, 'error' => $e->getMessage()]);
+        }
+    }
+
+    private function logFulfilmentChange(Policy $policy): void
+    {
+        $changed = array_values(array_filter(Policy::FULFILMENT_COLUMNS, fn ($c) => $policy->wasChanged($c)));
+        if ($changed === []) {
+            return;
+        }
+        try {
+            $fmt = fn ($v) => $v instanceof \DateTimeInterface ? $v->format('Y-m-d') : ($v === '' ? null : $v);
+            $changes = [];
+            foreach ($changed as $col) {
+                $changes[$col] = ['from' => $fmt($policy->getOriginal($col)), 'to' => $fmt($policy->{$col})];
+            }
+            $userId = auth()->id();
+
+            $recent = PolicyEvent::query()
+                ->where('policy_id', $policy->id)
+                ->where('type', 'fulfilmentUpdated')
+                ->where('by_user_id', $userId)
+                ->where('occurred_at', '>=', now()->subMinutes(5))
+                ->latest('occurred_at')
+                ->first();
+            if ($recent !== null) {
+                $merged = (array) ($recent->payload['changes'] ?? []);
+                foreach ($changes as $col => $c) {
+                    $from = array_key_exists($col, $merged) ? $merged[$col]['from'] : $c['from'];
+                    $merged[$col] = ['from' => $from, 'to' => $c['to']];
+                }
+                $merged = array_filter($merged, fn ($c) => $c['from'] !== $c['to']);
+                if ($merged === []) {
+                    $recent->delete();
+                } else {
+                    $recent->update(['payload' => ['changes' => $merged], 'occurred_at' => now()]);
+                }
+
+                return;
+            }
+
+            PolicyEvent::create([
+                'policy_id' => $policy->id,
+                'type' => 'fulfilmentUpdated',
+                'occurred_at' => now(),
+                'by_user_id' => $userId,
+                'payload' => ['changes' => $changes],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Fulfilment event logging failed', ['policy_id' => $policy->id, 'error' => $e->getMessage()]);
         }
     }
 
