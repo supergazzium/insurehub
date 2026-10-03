@@ -80,6 +80,7 @@ class PolicyResource extends JsonResource
             'periodPaidEnd' => $this->period_paid_end?->toDateString(),
             'policyEnd' => $this->policy_end?->toDateString(),
             'policyYear' => (int) $this->policy_year,
+            'customerYear' => $this->customer_year !== null ? (int) $this->customer_year : null,
             'actYear' => (int) $this->act_year,
             'newOrRenew' => $this->new_or_renew,
             'freelookActive' => (bool) $this->freelook_active,

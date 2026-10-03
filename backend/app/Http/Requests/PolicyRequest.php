@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Requests;
 
 use App\Models\Product;
+use App\Support\PolicyYears;
 use App\Support\PremiumMode;
 use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
@@ -92,6 +93,7 @@ class PolicyRequest extends FormRequest
             'cancelDate' => ['sometimes', 'nullable', 'date'],
             'lapseDate' => ['sometimes', 'nullable', 'date'],
             'policyYear' => ['sometimes', 'integer', 'min:1'],
+            'customerYear' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:99'],
             'actYear' => ['sometimes', 'integer', 'min:1'],
             'newOrRenew' => ['sometimes', 'string', 'in:new,renew'],
             'freelookActive' => ['sometimes', 'boolean'],
@@ -251,6 +253,7 @@ class PolicyRequest extends FormRequest
             'cancelDate' => 'cancel_date',
             'lapseDate' => 'lapse_date',
             'policyYear' => 'policy_year',
+            'customerYear' => 'customer_year',
             'actYear' => 'act_year',
             'newOrRenew' => 'new_or_renew',
             'freelookActive' => 'freelook_active',
@@ -338,6 +341,17 @@ class PolicyRequest extends FormRequest
     public function withValidator(Validator $validator): void
     {
         $validator->after(function (Validator $validator) {
+            // ปีของกรมธรรม์ / ปีของลูกค้า — admin-only once past quotation (1.4).
+            $incoming = [];
+            foreach (['policyYear' => 'policy_year', 'customerYear' => 'customer_year'] as $camel => $col) {
+                if ($this->has($camel)) {
+                    $incoming[$col] = $this->input($camel);
+                }
+            }
+            if ($incoming !== [] && ($msg = PolicyYears::overrideError($this->user(), $this->route('policy'), $incoming)) !== null) {
+                $validator->errors()->add(array_key_exists('policy_year', $incoming) ? 'policyYear' : 'customerYear', $msg);
+            }
+
             $mode = $this->input('premiumMode');
             if (! is_string($mode) || $mode === '' || $validator->errors()->has('premiumMode')) {
                 return;

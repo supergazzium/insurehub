@@ -29,6 +29,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../../stores/auth'
 import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
 import DurationChip from '../../components/DurationChip.vue'
@@ -128,13 +129,13 @@ function rollForwardYear(iso: string | null, n = 1): string | null {
 
 // ── Renewal (ต่ออายุ) prefill context ────────────────────────────────────
 // Set when the wizard is opened via ?renewFrom=<sourceId>. Holds the source
-// policy's year figures so the renewed badges compute from them:
-//   customer year = source tenure + 1 (always)
+// policy's STORED year figures (task 1.4) so the renewal's years follow:
+//   customer year = source customer year + 1 (always)
 //   policy year   = source policy year + 1, UNLESS the product was changed,
 //                   in which case it resets to 1 (a new product = fresh policy).
 const renewSource = ref<{
-  policyYear: number | null
-  customerTenure: number | null
+  policyYear: number
+  customerYear: number | null
   productId: string
 } | null>(null)
 const isRenewingFromSource = computed(() => renewSource.value !== null)
@@ -143,24 +144,30 @@ const renewProductChanged = computed(() =>
   isRenewingFromSource.value && String(form.productId) !== String(renewSource.value?.productId ?? ''),
 )
 
-/** ปีที่ของกรมธรรม์. In a renewal: source year + 1, or reset to 1 if the
- *  product was changed. Otherwise computed from this policy's effective_date. */
-const policyYear = computed<number | null>(() => {
-  if (isRenewingFromSource.value) {
-    if (renewProductChanged.value) return 1
-    const base = renewSource.value?.policyYear
-    return base != null ? base + 1 : 1
-  }
-  return yearsSince(form.effectiveDate || null)
+/** ปีของกรมธรรม์ to suggest for a renewal: source + 1, or 1 when the product
+ *  was changed. Null outside a renewal (the stored value stands). */
+const suggestedPolicyYear = computed<number | null>(() => {
+  if (!isRenewingFromSource.value) return null
+  return renewProductChanged.value ? 1 : (renewSource.value?.policyYear ?? 0) + 1
 })
-/** อายุการเป็นลูกค้า. In a renewal: source tenure + 1. Otherwise from the
- *  customer's earliest policy effective_date. */
-const customerTenureYears = computed<number | null>(() => {
-  if (isRenewingFromSource.value) {
-    const base = renewSource.value?.customerTenure
-    return base != null ? base + 1 : yearsSince(customerFirstPolicyDate.value)
-  }
-  return yearsSince(customerFirstPolicyDate.value)
+// ปีของกรมธรรม์ / ปีของลูกค้า are STORED on the policy (task 1.4) — the badges
+// show the saved figures, not a date calculation. The operator may type them
+// while the policy is a draft/quotation; past that only an admin can correct
+// them (the backend enforces this and audits the change).
+const auth = useAuthStore()
+const yearsTouched = ref(false)
+const canEditYears = computed(() =>
+  isDraftMode.value || loadedStatus.value === 'quotation'
+  || auth.user?.role === 'super_admin' || auth.user?.role === 'admin',
+)
+/** ปีของลูกค้า for the badge: the stored value, else (new policy, not yet
+ *  saved) the customer's tenure — the backend fills it on create. */
+const customerYearDisplay = computed<number | null>(() =>
+  // `||` not `??`: a cleared number input yields '' rather than null.
+  form.customerYear || yearsSince(customerFirstPolicyDate.value),
+)
+watch(suggestedPolicyYear, (n) => {
+  if (n !== null && !yearsTouched.value && !hydrating.value) form.policyYear = n
 })
 const saving = ref(false)
 const error = ref<string | null>(null)
@@ -195,6 +202,7 @@ const form = reactive({
   carrierId: '' as string,
   productId: '' as string,
   policyYear: 1,
+  customerYear: null as number | null,  // ปีของลูกค้า — null until stored
   actYear: 1,
   appDate: '' as string,
   effectiveDate: '' as string,
@@ -1090,11 +1098,12 @@ async function doAutosave(): Promise<void> {
     const payload = buildDraftPayload()
     if (!draftId.value) {
       const res = await createDraftPolicy(payload)
-      const created = res.data as unknown as { id: string; applicationNo?: string; jobNo?: string; status?: string }
+      const created = res.data as unknown as { id: string; applicationNo?: string; jobNo?: string; status?: string; customerYear?: number | null }
       draftId.value = created.id
       // Reflect the auto-run numbers the backend minted at draft creation.
       if (created.applicationNo) form.applicationNo = created.applicationNo
       if (created.jobNo) form.jobNo = created.jobNo
+      if (form.customerYear == null && created.customerYear) form.customerYear = created.customerYear
       // Seed the status dropdown from the freshly-created draft's status.
       if (!form.status && created.status) form.status = created.status
       flash.value = t('policyCreate.action.draftSaved')
@@ -1142,6 +1151,8 @@ function buildDraftPayload(): Record<string, unknown> {
     effectiveDate: form.effectiveDate || null,
     expiryDate: form.expiryDate || null,
     policyYear: form.policyYear || 1,
+    // Omitted while unknown so the backend seeds it (never wipes a stored one).
+    ...(form.customerYear ? { customerYear: form.customerYear } : {}),
     actYear: form.actYear || 1,
     coverage: form.coverage || 0,
     discountAmount: form.discountAmount || 0,
@@ -1330,8 +1341,9 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
       // Capture the source's year figures so the renewed badges compute from
       // them (customer +1; policy +1 unless the product is later changed).
       renewSource.value = {
-        policyYear: yearsSince((p.effectiveDate as string | null) ?? null),
-        customerTenure: yearsSince((p.customerFirstPolicyDate as string | null) ?? null),
+        policyYear: Number(p.policyYear ?? 1) || 1,
+        // Legacy sources may predate stored customer years — fall back to tenure.
+        customerYear: (p.customerYear as number | null) ?? yearsSince((p.customerFirstPolicyDate as string | null) ?? null),
         productId: String(p.productId ?? ''),
       }
       loadedStatus.value = null // a brand-new draft, not editing the source
@@ -1362,7 +1374,15 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
     form.effectiveDate = renewMode ? (String(p.expiryDate ?? '')) : String(p.effectiveDate ?? '')
     form.expiryDate = renewMode ? (rollForwardYear(p.expiryDate as string | null, 1) ?? '') : String(p.expiryDate ?? '')
     form.coverage = Number(p.coverage ?? 0)
-    form.policyYear = Number(p.policyYear ?? 1)
+    if (renewMode && renewSource.value) {
+      // The renewal is next year of the source (product changes reset it — see watch).
+      form.policyYear = renewSource.value.policyYear + 1
+      form.customerYear = renewSource.value.customerYear !== null ? renewSource.value.customerYear + 1 : null
+    } else {
+      form.policyYear = Number(p.policyYear ?? 1)
+      form.customerYear = (p.customerYear as number | null) ?? null
+    }
+    yearsTouched.value = false
     form.actYear = Number(p.actYear ?? 1)
     form.annualPremium = Number(p.annualPremium ?? 0)
     form.premiumMode = (p.premiumMode as typeof form.premiumMode) ?? 'annual'
@@ -1606,13 +1626,12 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <span :class="['inline-flex px-2 py-0.5 rounded', statusBadgeClass(((!isDraftMode && form.status) || loadedStatus || 'draft') as PolicyStatus)]">
             {{ t(`policies.status.${(!isDraftMode && form.status) || loadedStatus || 'draft'}`) }}
           </span>
-          <!-- ปีที่ของกรมธรรม์ (from this policy's effective_date) -->
-          <span v-if="policyYear !== null" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-100">
-            <i class="pi pi-calendar text-[10px]" /> {{ t('policyCreate.policyYearBadge', { n: policyYear }) }}
+          <!-- ปีของกรมธรรม์ / ปีของลูกค้า — stored values (task 1.4) -->
+          <span v-if="form.policyYear" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-100">
+            <i class="pi pi-calendar text-[10px]" /> {{ t('policyCreate.policyYearBadge', { n: form.policyYear }) }}
           </span>
-          <!-- อายุการเป็นลูกค้า InsureHub (from the customer's first policy) -->
-          <span v-if="customerTenureYears !== null" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">
-            <i class="pi pi-user text-[10px]" /> {{ t('policyCreate.customerTenureBadge', { n: customerTenureYears }) }}
+          <span v-if="customerYearDisplay !== null" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">
+            <i class="pi pi-user text-[10px]" /> {{ t('policyCreate.customerTenureBadge', { n: customerYearDisplay }) }}
           </span>
           <span v-if="autosaving" class="text-slate-400">
             <i class="pi pi-spin pi-spinner text-[10px] mr-1" /> {{ t('policyCreate.action.savingDraft') }}
@@ -1678,6 +1697,24 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             </button>
           </div>
         </FormField>
+
+        <!-- ปีของกรมธรรม์ / ปีของลูกค้า (task 1.4) — suggested on renewal,
+             editable while draft/quotation; afterwards admin-only + audited. -->
+        <div class="grid grid-cols-2 gap-4">
+          <FormField :label="t('policyCreate.policyYearField')"
+            :hint="canEditYears ? undefined : t('policyCreate.yearsAdminOnly')">
+            <input v-model.number="form.policyYear" type="number" min="1" max="99" step="1"
+              :disabled="!canEditYears" @input="yearsTouched = true"
+              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 disabled:bg-slate-50 disabled:text-slate-500" />
+          </FormField>
+          <FormField :label="t('policyCreate.customerYearField')"
+            :hint="!form.customerYear && canEditYears ? t('policyCreate.customerYearAuto') : undefined">
+            <input v-model.number="form.customerYear" type="number" min="1" max="99" step="1"
+              :placeholder="customerYearDisplay != null ? String(customerYearDisplay) : ''"
+              :disabled="!canEditYears" @input="yearsTouched = true"
+              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 disabled:bg-slate-50 disabled:text-slate-500" />
+          </FormField>
+        </div>
 
         <!-- เลขที่ใบสมัคร (application_no) — auto-run by the backend at draft
              creation. Read-only; shows a hint until the first save mints it. -->

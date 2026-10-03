@@ -4,10 +4,12 @@ declare(strict_types=1);
 
 namespace App\Observers;
 
+use App\Models\AuditEntry;
 use App\Models\Policy;
 use App\Models\ProductCommissionRate;
 use App\Services\Commission\CommissionSnapshot;
 use App\Services\Policy\InstallmentSchedule;
+use App\Support\PolicyYears;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -39,6 +41,7 @@ class PolicyObserver
     public function created(Policy $policy): void
     {
         $this->captureCommissionSnapshot($policy);
+        $this->seedYears($policy);
 
         // Rows imported / seeded straight into issued|active get their
         // schedule now; normal policies get it when they're issued (below).
@@ -54,6 +57,8 @@ class PolicyObserver
      */
     public function updated(Policy $policy): void
     {
+        $this->auditYearChange($policy);
+
         $entered = $policy->wasChanged('status')
             && in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true);
         $replan = $policy->wasChanged(InstallmentSchedule::PLAN_COLUMNS)
@@ -61,6 +66,55 @@ class PolicyObserver
         if ($entered || $replan) {
             $this->syncInstallments($policy);
         }
+    }
+
+    /**
+     * Fill ปีของลูกค้า (and a renewal's ปีของกรมธรรม์) when the creating
+     * request didn't — e.g. imports or API callers other than the wizard.
+     */
+    private function seedYears(Policy $policy): void
+    {
+        try {
+            $suggested = PolicyYears::suggest($policy);
+            if ($policy->customer_year === null) {
+                $policy->customer_year = $suggested['customerYear'];
+            }
+            if ($policy->ref_app_to_id !== null && (int) $policy->policy_year <= 1) {
+                $policy->policy_year = $suggested['policyYear'];
+            }
+            if ($policy->isDirty()) {
+                $policy->saveQuietly();
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Policy year seeding failed', ['policy_id' => $policy->id, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /** Admin corrections to the stored years past quotation are audited (1.4). */
+    private function auditYearChange(Policy $policy): void
+    {
+        if (! $policy->wasChanged(['policy_year', 'customer_year'])
+            || in_array($policy->getOriginal('status'), PolicyYears::FREE_EDIT_STATUSES, true)) {
+            return;
+        }
+        $changes = [];
+        foreach (['policy_year', 'customer_year'] as $col) {
+            if ($policy->wasChanged($col)) {
+                $changes[$col] = ['from' => $policy->getOriginal($col), 'to' => $policy->{$col}];
+            }
+        }
+        $user = auth()->user();
+        AuditEntry::create([
+            'tenant_id' => $policy->tenant_id,
+            'user_id' => $user?->id,
+            'occurred_at' => now(),
+            'actor' => $user?->name ?? 'system',
+            'action' => 'policy.years_updated',
+            'target' => 'policy:'.$policy->id,
+            'ip' => request()?->ip(),
+            'result' => 'success',
+            'metadata' => $changes,
+        ]);
     }
 
     private function syncInstallments(Policy $policy): void

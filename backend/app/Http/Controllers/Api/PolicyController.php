@@ -14,6 +14,7 @@ use App\Models\Policy;
 use App\Models\PolicyEvent;
 use App\Services\Commission\CommissionBandCoverage;
 use App\Support\PolicyNumbering;
+use App\Support\PolicyYears;
 use App\Support\PremiumMode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -459,6 +460,7 @@ class PolicyController extends ApiController
             'mailingDate' => 'mailing_date',
             'appDate' => 'app_date',
             'policyYear' => 'policy_year',
+            'customerYear' => 'customer_year',
             'actYear' => 'act_year',
             'newOrRenew' => 'new_or_renew',
         ],
@@ -528,6 +530,7 @@ class PolicyController extends ApiController
             'mailingDate' => ['sometimes', 'nullable', 'date'],
             'appDate' => ['sometimes', 'nullable', 'date'],
             'policyYear' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'customerYear' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:99'],
             'actYear' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'newOrRenew' => ['sometimes', 'nullable', 'string', 'in:new,renew'],
         ],
@@ -592,6 +595,14 @@ class PolicyController extends ApiController
         $map = self::SECTION_MAPS[$section];
 
         $v = Validator::make($request->all(), $rules)->validate();
+
+        $years = array_intersect_key(
+            ['policy_year' => $v['policyYear'] ?? null, 'customer_year' => $v['customerYear'] ?? null],
+            array_filter(['policy_year' => array_key_exists('policyYear', $v), 'customer_year' => array_key_exists('customerYear', $v)]),
+        );
+        if (($msg = PolicyYears::overrideError($request->user(), $policy, $years)) !== null) {
+            throw ValidationException::withMessages([array_key_first($years) === 'policy_year' ? 'policyYear' : 'customerYear' => [$msg]]);
+        }
 
         if (isset($v['premiumMode']) && $v['premiumMode'] !== $policy->premium_mode) {
             PremiumMode::assertAllowed($policy->product()->with('carrier')->first(), $v['premiumMode']);
