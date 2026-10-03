@@ -4,6 +4,7 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Http\Resources\PolicyInstallmentResource;
 use App\Http\Resources\PolicyPaymentResource;
 use App\Models\Policy;
 use App\Models\PolicyEvent;
@@ -12,6 +13,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Validation\Rule;
 
 class PolicyPaymentController extends ApiController
 {
@@ -23,6 +25,14 @@ class PolicyPaymentController extends ApiController
         return PolicyPaymentResource::collection(
             $policy->payments()->orderByDesc('payment_date')->orderByDesc('id')->get()
         );
+    }
+
+    /** ตารางงวดชำระ — the policy's งวด with how much of each is paid. */
+    public function installments(Request $request, Policy $policy): AnonymousResourceCollection
+    {
+        $this->authorizeTenant($request, $policy);
+
+        return PolicyInstallmentResource::collection($policy->installments()->get());
     }
 
     /**
@@ -61,6 +71,10 @@ class PolicyPaymentController extends ApiController
             'payments.*.amount' => ['required', 'numeric', 'min:0'],
             'payments.*.method' => ['required', 'string', 'in:bankTransfer,creditCard,cash,cheque,directDebit,transfer,credit_card'],
             'payments.*.reference' => ['sometimes', 'nullable', 'string', 'max:255'],
+            // งวดที่รับชำระ — settles this งวด first (partial OK); omitted =
+            // applied to the oldest unpaid งวด. See InstallmentSchedule.
+            'payments.*.installmentId' => ['sometimes', 'nullable', 'integer',
+                Rule::exists('policy_installments', 'id')->where('policy_id', $policy->id)],
             'payments.*.note' => ['sometimes', 'nullable', 'string', 'max:255'],
             // Tax decomposition of the actual amount paid (per งวด) + the สูตร used.
             'payments.*.taxFormula' => ['sometimes', 'nullable', 'integer', 'in:1,2,3,4'],
@@ -76,6 +90,7 @@ class PolicyPaymentController extends ApiController
             $rows = collect();
             foreach ($data['payments'] as $p) {
                 $payment = $policy->payments()->create([
+                    'policy_installment_id' => $p['installmentId'] ?? null,
                     'payment_date' => $p['paymentDate'],
                     'amount' => $p['amount'],
                     'net_amount' => $p['netAmount'] ?? null,
@@ -94,6 +109,7 @@ class PolicyPaymentController extends ApiController
                     'by_user_id' => $request->user()->id,
                     'payload' => [
                         'paymentId' => (string) $payment->id,
+                        'installmentId' => isset($p['installmentId']) ? (string) $p['installmentId'] : null,
                         'amount' => (float) $p['amount'],
                         'method' => self::normalizeMethod($p['method']),
                         'payMode' => $payMode,

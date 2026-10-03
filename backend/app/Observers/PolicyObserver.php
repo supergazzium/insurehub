@@ -7,6 +7,7 @@ namespace App\Observers;
 use App\Models\Policy;
 use App\Models\ProductCommissionRate;
 use App\Services\Commission\CommissionSnapshot;
+use App\Services\Policy\InstallmentSchedule;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -36,6 +37,47 @@ use Illuminate\Support\Facades\Log;
 class PolicyObserver
 {
     public function created(Policy $policy): void
+    {
+        $this->captureCommissionSnapshot($policy);
+
+        // Rows imported / seeded straight into issued|active get their
+        // schedule now; normal policies get it when they're issued (below).
+        if (in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true)) {
+            $this->syncInstallments($policy);
+        }
+    }
+
+    /**
+     * ตารางงวดชำระ (task 1.2): build it when the policy enters issued/active,
+     * and re-plan it when a plan input changes — InstallmentSchedule::sync
+     * leaves a schedule alone once money has been applied to it.
+     */
+    public function updated(Policy $policy): void
+    {
+        $entered = $policy->wasChanged('status')
+            && in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true);
+        $replan = $policy->wasChanged(InstallmentSchedule::PLAN_COLUMNS)
+            && in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true);
+        if ($entered || $replan) {
+            $this->syncInstallments($policy);
+        }
+    }
+
+    private function syncInstallments(Policy $policy): void
+    {
+        try {
+            app(InstallmentSchedule::class)->sync($policy);
+        } catch (\Throwable $e) {
+            // Never block the policy write — `policies:backfill-installments`
+            // can rebuild a missed schedule.
+            Log::warning('Installment schedule sync failed', [
+                'policy_id' => $policy->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function captureCommissionSnapshot(Policy $policy): void
     {
         if ($policy->product_id === null || $policy->commission_snapshot !== null) {
             return;

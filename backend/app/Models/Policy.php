@@ -101,6 +101,12 @@ class Policy extends Model
         return $this->hasMany(PolicyPayment::class);
     }
 
+    /** ตารางงวดชำระ, งวด 1 first. */
+    public function installments(): HasMany
+    {
+        return $this->hasMany(PolicyInstallment::class)->orderBy('installment_no');
+    }
+
     public function documents(): HasMany
     {
         return $this->hasMany(PolicyDocument::class);

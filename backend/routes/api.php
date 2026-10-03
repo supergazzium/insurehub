@@ -314,6 +314,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // Policy children: payments + documents + lifecycle events.
     Route::get('policies/{policy}/payments', [PolicyPaymentController::class, 'index']);
+    Route::get('policies/{policy}/installments', [PolicyPaymentController::class, 'installments']);
     Route::post('policies/{policy}/payments', [PolicyPaymentController::class, 'store']);
     Route::delete('policies/{policy}/payments/{payment}', [PolicyPaymentController::class, 'destroy']);
     Route::post('policies/{policy}/documents', [PolicyDocumentController::class, 'store']);

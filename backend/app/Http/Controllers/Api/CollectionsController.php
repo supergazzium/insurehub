@@ -7,6 +7,7 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PaymentReminder;
 use App\Models\Policy;
+use App\Services\Policy\InstallmentSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -22,11 +23,6 @@ use Illuminate\Support\Facades\DB;
  */
 class CollectionsController extends Controller
 {
-    // Installment engine rates (mirror utils/installmentCalc.ts).
-    private const DOWN_RATE = 0.25;
-    private const FEE_RATE = 0.02;
-    private const INT_RATE = 0.01;
-
     public function index(Request $request): JsonResponse
     {
         $tenantId = (int) $request->attributes->get('tenant_id', $request->user()->tenant_id);
@@ -289,20 +285,14 @@ class CollectionsController extends Controller
             return [];
         }
 
-        $first = $count <= 4 ? $main / $count : $main * self::DOWN_RATE;
-        $stdFee = $main * self::FEE_RATE;
-        $stdInt = $main * self::INT_RATE * $count;
-        $customerFee = in_array($mode, ['B', 'C'], true) ? $stdFee : 0;
-        $customerInterest = $mode === 'C' ? $stdInt : 0;
-        $inst1 = (int) ceil($first + $compulsory + $customerFee + $customerInterest - 1e-9);
-        $rest = (int) ceil(($main - $first) / ($count - 1) - 1e-9);
+        $amounts = InstallmentSchedule::financePlan($main, $compulsory, $count, $mode);
 
         $baseDate = $r->first_due_inst_date ?? $r->effective_date;
         $base = $baseDate ? Carbon::parse($baseDate) : null;
 
         $sched = [];
         for ($i = 1; $i <= $count; $i++) {
-            $amount = $i === 1 ? $inst1 : $rest;
+            $amount = $amounts[$i - 1];
             $paid = $i <= $paidCount;
             $dueDate = $base ? $base->copy()->addMonths($i - 1)->toDateString() : null;
             $overdue = ! $paid && ($dueDate !== null ? Carbon::parse($dueDate)->lte($today) : $i <= $paidCount + 1);
