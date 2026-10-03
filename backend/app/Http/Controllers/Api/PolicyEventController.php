@@ -288,6 +288,11 @@ class PolicyEventController extends ApiController
                 // captured for audit.
                 if (isset($payload['note'])) {
                     $updates['status_note'] = $payload['note'];
+                    $updates['approval_note'] = $payload['note'];
+                }
+                $updates['approved_date'] = $payload['approvedDate'] ?? now()->toDateString();
+                if (isset($payload['approvalRef'])) {
+                    $updates['approval_ref'] = $payload['approvalRef'];
                 }
                 break;
 

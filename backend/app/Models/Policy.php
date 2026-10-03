@@ -23,6 +23,8 @@ class Policy extends Model
         'delivery_method', 'courier', 'tracking_no', 'shipped_date', 'delivered_date', 'delivered_to',
     ];
 
+    public const APPROVAL_COLUMNS = ['approved_date', 'approval_ref', 'approval_note'];
+
     protected $table = 'policies';
 
     protected static function booted(): void
@@ -32,6 +34,9 @@ class Policy extends Model
                 $policy->mailing_date = $policy->shipped_date;
             } elseif ($policy->isDirty('mailing_date') && ! $policy->isDirty('shipped_date')) {
                 $policy->shipped_date = $policy->mailing_date;
+            }
+            if ($policy->isDirty('status') && $policy->status === 'approved' && $policy->approved_date === null) {
+                $policy->approved_date = now()->toDateString();
             }
         });
     }
@@ -57,6 +62,7 @@ class Policy extends Model
         'payment_date' => 'date',
         'mailing_date' => 'date',
         'shipped_date' => 'date',
+        'approved_date' => 'date',
         'delivered_date' => 'date',
         'freelook_active' => 'boolean',
         'freelook_end_date' => 'date',

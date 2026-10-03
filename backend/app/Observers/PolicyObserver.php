@@ -59,7 +59,10 @@ class PolicyObserver
     public function updated(Policy $policy): void
     {
         $this->auditYearChange($policy);
-        $this->logFulfilmentChange($policy);
+        $this->logTrackedChange($policy, 'fulfilmentUpdated', Policy::FULFILMENT_COLUMNS);
+        if (! $policy->wasChanged('status')) {
+            $this->logTrackedChange($policy, 'approvalUpdated', Policy::APPROVAL_COLUMNS);
+        }
 
         $entered = $policy->wasChanged('status')
             && in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true);
@@ -92,9 +95,9 @@ class PolicyObserver
         }
     }
 
-    private function logFulfilmentChange(Policy $policy): void
+    private function logTrackedChange(Policy $policy, string $type, array $columns): void
     {
-        $changed = array_values(array_filter(Policy::FULFILMENT_COLUMNS, fn ($c) => $policy->wasChanged($c)));
+        $changed = array_values(array_filter($columns, fn ($c) => $policy->wasChanged($c)));
         if ($changed === []) {
             return;
         }
@@ -108,7 +111,7 @@ class PolicyObserver
 
             $recent = PolicyEvent::query()
                 ->where('policy_id', $policy->id)
-                ->where('type', 'fulfilmentUpdated')
+                ->where('type', $type)
                 ->where('by_user_id', $userId)
                 ->where('occurred_at', '>=', now()->subMinutes(5))
                 ->latest('occurred_at')
@@ -131,13 +134,13 @@ class PolicyObserver
 
             PolicyEvent::create([
                 'policy_id' => $policy->id,
-                'type' => 'fulfilmentUpdated',
+                'type' => $type,
                 'occurred_at' => now(),
                 'by_user_id' => $userId,
                 'payload' => ['changes' => $changes],
             ]);
         } catch (\Throwable $e) {
-            Log::warning('Fulfilment event logging failed', ['policy_id' => $policy->id, 'error' => $e->getMessage()]);
+            Log::warning('Policy change event logging failed', ['policy_id' => $policy->id, 'type' => $type, 'error' => $e->getMessage()]);
         }
     }
 

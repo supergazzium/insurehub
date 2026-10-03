@@ -64,6 +64,7 @@ export type PolicyEventType =
   | 'backfillMigrated'
   | 'premiumPaid'
   | 'fulfilmentUpdated'
+  | 'approvalUpdated'
   | 'detailsUpdated'
   | 'documentUploaded'
 

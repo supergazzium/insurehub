@@ -261,6 +261,10 @@ const form = reactive({
   // การรับกรมธรรม์และจัดส่ง — received-from-carrier + delivered-to-customer
   // tracking. `received`/`delivered` are UI-only "done" checkboxes derived
   // from / driving the presence of the paired date.
+  approved: false as boolean,
+  approvedDate: '' as string,
+  approvalRef: '' as string,
+  approvalNote: '' as string,
   received: false as boolean,
   receivedDate: '' as string,
   receivedNote: '' as string,
@@ -1190,6 +1194,9 @@ function buildDraftPayload(): Record<string, unknown> {
     notes: form.notes || null,
     // การรับกรมธรรม์ (received from carrier) — when the "done" box is off we
     // clear the date so the status is unambiguous.
+    approvedDate: form.approved ? (form.approvedDate || null) : null,
+    approvalRef: form.approved ? (form.approvalRef || null) : null,
+    approvalNote: form.approved ? (form.approvalNote || null) : null,
     receivedDate: form.received ? (form.receivedDate || null) : null,
     receivedNote: form.receivedNote || null,
     // การจัดส่ง (delivered to customer) — reuses the mailing_* columns.
@@ -1403,6 +1410,11 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
 
     // การรับกรมธรรม์และจัดส่ง — cleared on renewal (fresh document lifecycle).
     // The "done" checkbox is derived from whether a date is present.
+    const approvedDate = renewMode ? '' : String(p.approvedDate ?? '')
+    form.approvedDate = approvedDate
+    form.approved = !!approvedDate
+    form.approvalRef = renewMode ? '' : String(p.approvalRef ?? '')
+    form.approvalNote = renewMode ? '' : String(p.approvalNote ?? '')
     const receivedDate = renewMode ? '' : String(p.receivedDate ?? '')
     form.receivedDate = receivedDate
     form.received = !!receivedDate
@@ -2339,6 +2351,32 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       <p class="text-xs text-slate-500 mt-0.5 mb-4">{{ t('policyCreate.fulfilment.subtitle') }}</p>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="rounded-lg border border-slate-200 p-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" v-model="form.approved"
+              class="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            <span class="font-medium text-sm text-slate-800">{{ t('policyCreate.fulfilment.approvedDone') }}</span>
+          </label>
+          <div v-if="form.approved" class="mt-3 space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <FormField :label="t('policyCreate.fulfilment.approvedDate')">
+                <input type="date" v-model="form.approvedDate"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField :label="t('policyCreate.fulfilment.approvalRef')">
+                <input v-model.trim="form.approvalRef" type="text" maxlength="64"
+                  :placeholder="t('policyCreate.fulfilment.approvalRefPlaceholder')"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+            <FormField :label="t('policyCreate.fulfilment.note')">
+              <textarea v-model="form.approvalNote" rows="2"
+                :placeholder="t('policyCreate.fulfilment.approvalNotePlaceholder')"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+          </div>
+        </div>
+
         <!-- การได้รับกรมธรรม์ — received from carrier -->
         <div class="rounded-lg border border-slate-200 p-4">
           <label class="flex items-center gap-2 cursor-pointer">
