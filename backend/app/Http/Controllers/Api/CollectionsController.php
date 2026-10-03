@@ -197,6 +197,28 @@ class CollectionsController extends Controller
             $overdueCount = collect($schedule)->where('overdue', true)->count();
         }
 
+        $nextDue = null;
+        if ($installments->isNotEmpty()) {
+            $unpaid = $installments->filter(fn (PolicyInstallment $i) => $i->status !== PolicyInstallment::STATUS_PAID);
+            $remaining = fn (PolicyInstallment $i): float => max(0.0, (float) $i->amount_due - (float) $i->amount_paid);
+            $dueToDate = $unpaid
+                ->filter(fn (PolicyInstallment $i) => $i->due_date !== null && $i->due_date->lte($today))
+                ->sum($remaining);
+            $next = $unpaid->first();
+            if ($next !== null) {
+                $nextDue = [
+                    'no' => (int) $next->installment_no,
+                    'dueDate' => $next->due_date?->toDateString(),
+                    'amount' => round($remaining($next), 2),
+                ];
+            }
+        } elseif ($schedule !== null) {
+            $dueToDate = collect($schedule)->where('overdue', true)->sum('amount');
+        } else {
+            $dueToDate = $r->effective_date !== null && Carbon::parse($r->effective_date)->lte($today) ? $outstanding : 0.0;
+        }
+        $dueToDate = round(min(max(0.0, (float) $dueToDate), max(0.0, $outstanding)), 2);
+
         return [
             'policyId' => (string) $r->id,
             'policyNo' => $r->policy_no,
@@ -211,6 +233,8 @@ class CollectionsController extends Controller
             'totalDue' => $totalDue,
             'paid' => $paid,
             'outstanding' => $outstanding,
+            'dueToDate' => $dueToDate,
+            'nextDue' => $nextDue,
             'installmentMode' => $r->installment_mode,
             'installmentCount' => $installmentCount,
             'paidCount' => $paidCount,

@@ -71,6 +71,15 @@ function openReminder(installmentNo: number | null = null): void {
   remError.value = null
   showReminder.value = true
 }
+function reminderAmount(installmentNo: number | null): number | undefined {
+  const d = data.value
+  if (!d) return undefined
+  if (installmentNo !== null) {
+    const line = d.schedule?.find((x) => x.no === installmentNo)
+    if (line) return Math.max(0, Math.round((line.amount - (line.amountPaid ?? 0)) * 100) / 100)
+  }
+  return d.dueToDate || d.outstanding
+}
 async function saveReminder(): Promise<void> {
   remSaving.value = true; remError.value = null
   try {
@@ -78,7 +87,7 @@ async function saveReminder(): Promise<void> {
       channel: remForm.value.channel,
       note: remForm.value.note || undefined,
       installmentNo: remForm.value.installmentNo ?? undefined,
-      amountDue: data.value?.outstanding,
+      amountDue: reminderAmount(remForm.value.installmentNo),
     })
     showReminder.value = false
     await load()
@@ -117,7 +126,7 @@ onMounted(load)
 
       <!-- Money summary -->
       <div class="mb-4 rounded-xl border border-slate-200 bg-white p-5">
-        <div class="grid grid-cols-3 gap-4">
+        <div class="grid grid-cols-2 gap-4 sm:grid-cols-4">
           <div>
             <div class="text-xs text-slate-500">ยอดที่ต้องชำระ</div>
             <div class="mt-0.5 text-xl font-semibold text-slate-800">฿{{ money(data.totalDue) }}</div>
@@ -127,8 +136,13 @@ onMounted(load)
             <div class="mt-0.5 text-xl font-semibold text-emerald-700">฿{{ money(data.paid) }}</div>
           </div>
           <div>
-            <div class="text-xs text-slate-500">ค้างชำระ</div>
-            <div class="mt-0.5 text-xl font-semibold text-rose-700">฿{{ money(data.outstanding) }}</div>
+            <div class="text-xs text-slate-500">ถึงกำหนดแล้ว</div>
+            <div :class="['mt-0.5 text-xl font-semibold', data.dueToDate > 0 ? 'text-rose-700' : 'text-slate-400']">฿{{ money(data.dueToDate) }}</div>
+            <div v-if="data.nextDue" class="text-[11px] text-slate-400">งวดถัดไป {{ data.nextDue.no }} · {{ data.nextDue.dueDate ? fmtDate(data.nextDue.dueDate) : '—' }} · ฿{{ money(data.nextDue.amount) }}</div>
+          </div>
+          <div>
+            <div class="text-xs text-slate-500">ค้างทั้งหมด</div>
+            <div class="mt-0.5 text-xl font-semibold text-slate-700">฿{{ money(data.outstanding) }}</div>
           </div>
         </div>
         <div class="mt-3">
@@ -224,7 +238,7 @@ onMounted(load)
     <div v-if="showReminder" class="fixed inset-0 z-50 flex items-center justify-center bg-black/30 p-4" @click.self="showReminder = false">
       <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
         <h3 class="mb-1 font-semibold text-slate-800">บันทึกการทวง</h3>
-        <p class="mb-3 text-xs text-slate-500">{{ data?.policyNo || data?.applicationNo }}<span v-if="remForm.installmentNo"> · งวดที่ {{ remForm.installmentNo }}</span></p>
+        <p class="mb-3 text-xs text-slate-500">{{ data?.policyNo || data?.applicationNo }}<span v-if="remForm.installmentNo"> · งวดที่ {{ remForm.installmentNo }}</span> · ค้าง ฿{{ money(reminderAmount(remForm.installmentNo) ?? 0) }}</p>
         <label class="mb-1 block text-xs text-slate-500">ช่องทาง</label>
         <select v-model="remForm.channel" class="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm">
           <option value="phone">โทรศัพท์</option><option value="line">LINE</option><option value="email">อีเมล</option>

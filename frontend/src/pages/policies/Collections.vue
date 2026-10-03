@@ -17,6 +17,8 @@ const error = ref<string | null>(null)
 const tab = ref<'policy' | 'installment'>('policy')  // รายกรมธรรม์ | รายงวด
 const kind = ref<CollectionKind | 'all'>('all')
 const q = ref('')
+const dueOnly = ref(false)
+const visibleRows = computed(() => (dueOnly.value ? rows.value.filter((r) => r.dueToDate > 0) : rows.value))
 
 const money = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -49,16 +51,24 @@ interface GuadRow {
   policy: CollectionRow
   no: number
   amount: number
+  remaining: number
+  partial: boolean
   dueDate: string | null
   overdue: boolean
 }
 const installmentGuadRows = computed<GuadRow[]>(() => {
   const out: GuadRow[] = []
-  for (const p of rows.value) {
+  for (const p of visibleRows.value) {
     if (!p.schedule) continue
     for (const s of p.schedule) {
       if (s.paid) continue
-      out.push({ policy: p, no: s.no, amount: s.amount, dueDate: s.dueDate, overdue: s.overdue })
+      if (dueOnly.value && !s.overdue) continue
+      const paid = s.amountPaid ?? 0
+      out.push({
+        policy: p, no: s.no, amount: s.amount,
+        remaining: Math.max(0, Math.round((s.amount - paid) * 100) / 100),
+        partial: paid > 0, dueDate: s.dueDate, overdue: s.overdue,
+      })
     }
   }
   // overdue first, then by due date
@@ -67,9 +77,15 @@ const installmentGuadRows = computed<GuadRow[]>(() => {
 
 const summary = computed(() => {
   const totalOutstanding = rows.value.reduce((s, r) => s + r.outstanding, 0)
+  const totalDueToDate = rows.value.reduce((s, r) => s + (r.dueToDate || 0), 0)
   const overduePolicies = rows.value.filter((r) => r.overdueCount > 0).length
-  return { count: rows.value.length, totalOutstanding, overduePolicies }
+  return { count: rows.value.length, totalOutstanding, totalDueToDate, overduePolicies }
 })
+
+function installmentRemaining(p: CollectionRow, no: number): number {
+  const s = p.schedule?.find((x) => x.no === no)
+  return s ? Math.max(0, Math.round((s.amount - (s.amountPaid ?? 0)) * 100) / 100) : 0
+}
 
 function openPolicy(id: string) { router.push({ name: 'policies-collection-detail', params: { id } }) }
 
@@ -98,9 +114,7 @@ async function submitReminder(): Promise<void> {
       channel: reminderForm.value.channel,
       note: reminderForm.value.note || undefined,
       installmentNo: m.installmentNo,
-      amountDue: m.installmentNo
-        ? (m.policy.schedule?.find((s) => s.no === m.installmentNo)?.amount ?? null)
-        : m.policy.outstanding,
+      amountDue: m.installmentNo ? installmentRemaining(m.policy, m.installmentNo) : m.policy.dueToDate || m.policy.outstanding,
     })
     flash.value = { ok: true, text: 'บันทึกการทวงแล้ว' }
     reminderModal.value = null
@@ -126,7 +140,7 @@ onMounted(load)
       <div>
         <h1 class="text-lg font-semibold text-slate-800">ติดตามเงิน (ค้างชำระ)</h1>
         <p class="text-[11px] text-slate-400">
-          ทั้งหมด {{ summary.count }} กรมธรรม์ · ค้างชำระรวม ฿{{ money(summary.totalOutstanding) }}
+          ทั้งหมด {{ summary.count }} กรมธรรม์ · ถึงกำหนดแล้ว ฿{{ money(summary.totalDueToDate) }} · ค้างชำระรวม ฿{{ money(summary.totalOutstanding) }}
           <span v-if="summary.overduePolicies" class="text-rose-600"> · เกินกำหนด {{ summary.overduePolicies }}</span>
         </p>
       </div>
@@ -139,7 +153,7 @@ onMounted(load)
         @click="tab = 'policy'">รายกรมธรรม์</button>
       <button type="button"
         :class="['px-4 py-2 text-sm font-medium -mb-px border-b-2', tab === 'installment' ? 'border-brand-600 text-brand-700' : 'border-transparent text-slate-500 hover:text-slate-800']"
-        @click="tab = 'installment'; kind = 'installment'; reload()">รายงวด</button>
+        @click="tab = 'installment'">รายงวด</button>
     </div>
 
     <!-- Filters -->
@@ -153,6 +167,10 @@ onMounted(load)
       </div>
       <input v-model="q" @input="reload" placeholder="ค้นหา ชื่อ/เลขกรมธรรม์"
         class="rounded-lg border border-slate-200 px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+      <label class="inline-flex items-center gap-1.5 text-xs text-slate-600">
+        <input v-model="dueOnly" type="checkbox" class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+        เฉพาะที่ถึงกำหนดแล้ว
+      </label>
     </div>
 
     <transition name="fade">
@@ -171,13 +189,14 @@ onMounted(load)
             <th class="px-3 py-2 text-left">ประเภท</th>
             <th class="px-3 py-2 text-right">ยอดที่ต้องจ่าย</th>
             <th class="px-3 py-2 text-right">จ่ายแล้ว</th>
-            <th class="px-3 py-2 text-right">ค้างชำระ</th>
+            <th class="px-3 py-2 text-right">ถึงกำหนดแล้ว</th>
+            <th class="px-3 py-2 text-right">ค้างทั้งหมด</th>
             <th class="px-3 py-2 text-center">การทวง</th>
             <th class="px-3 py-2"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          <tr v-for="r in rows" :key="r.policyId" class="hover:bg-slate-50">
+          <tr v-for="r in visibleRows" :key="r.policyId" class="hover:bg-slate-50">
             <td class="px-3 py-2">
               <button type="button" class="text-left text-slate-800 hover:text-brand-700" @click="openPolicy(r.policyId)">
                 <div class="font-medium">{{ r.customerName || '—' }}</div>
@@ -190,7 +209,11 @@ onMounted(load)
             </td>
             <td class="px-3 py-2 text-right font-mono text-slate-600">{{ money(r.totalDue) }}</td>
             <td class="px-3 py-2 text-right font-mono text-emerald-700">{{ money(r.paid) }}</td>
-            <td class="px-3 py-2 text-right font-mono font-medium text-rose-600">{{ money(r.outstanding) }}</td>
+            <td class="px-3 py-2 text-right">
+              <div :class="['font-mono font-medium', r.dueToDate > 0 ? 'text-rose-600' : 'text-slate-300']">{{ money(r.dueToDate) }}</div>
+              <div v-if="r.nextDue" class="text-[10px] text-slate-400">งวด {{ r.nextDue.no }} · {{ r.nextDue.dueDate ? fmtDate(r.nextDue.dueDate) : '—' }}</div>
+            </td>
+            <td class="px-3 py-2 text-right font-mono text-slate-600">{{ money(r.outstanding) }}</td>
             <td class="px-3 py-2 text-center text-xs text-slate-500">
               <span v-if="r.reminderCount">ทวง {{ r.reminderCount }} ครั้ง<br><span class="text-[10px] text-slate-400">ล่าสุด {{ fmtDate(r.lastReminderAt) }}</span></span>
               <span v-else class="text-slate-300">—</span>
@@ -200,7 +223,7 @@ onMounted(load)
                 @click="openReminder(r)"><i class="pi pi-bell text-[10px]" /> บันทึกการทวง</button>
             </td>
           </tr>
-          <tr v-if="!rows.length"><td colspan="7" class="px-3 py-10 text-center text-sm text-slate-400">ไม่มีรายการค้างชำระ</td></tr>
+          <tr v-if="!visibleRows.length"><td colspan="8" class="px-3 py-10 text-center text-sm text-slate-400">ไม่มีรายการค้างชำระ</td></tr>
         </tbody>
       </table>
     </div>
@@ -213,6 +236,7 @@ onMounted(load)
             <th class="px-3 py-2 text-left">ลูกค้า / กรมธรรม์</th>
             <th class="px-3 py-2 text-left">งวด</th>
             <th class="px-3 py-2 text-right">ยอดงวด</th>
+            <th class="px-3 py-2 text-right">คงค้าง</th>
             <th class="px-3 py-2 text-left">ครบกำหนด</th>
             <th class="px-3 py-2 text-center">สถานะ</th>
             <th class="px-3 py-2"></th>
@@ -227,18 +251,20 @@ onMounted(load)
               </button>
             </td>
             <td class="px-3 py-2 text-slate-700">งวด {{ g.no }}/{{ g.policy.installmentCount }}</td>
-            <td class="px-3 py-2 text-right font-mono text-slate-700">{{ money(g.amount) }}</td>
+            <td class="px-3 py-2 text-right font-mono text-slate-500">{{ money(g.amount) }}</td>
+            <td class="px-3 py-2 text-right font-mono font-medium text-slate-800">{{ money(g.remaining) }}</td>
             <td class="px-3 py-2 text-slate-500">{{ g.dueDate ? fmtDate(g.dueDate) : '—' }}</td>
             <td class="px-3 py-2 text-center">
               <span v-if="g.overdue" class="rounded bg-rose-50 px-1.5 py-0.5 text-[10px] text-rose-600">เกินกำหนด</span>
               <span v-else class="rounded bg-slate-100 px-1.5 py-0.5 text-[10px] text-slate-500">รอชำระ</span>
+              <span v-if="g.partial" class="ml-1 rounded bg-amber-50 px-1.5 py-0.5 text-[10px] text-amber-700">ชำระบางส่วน</span>
             </td>
             <td class="px-3 py-2 text-right">
               <button type="button" class="rounded bg-amber-50 px-2 py-1 text-xs text-amber-700 hover:bg-amber-100"
                 @click="openReminder(g.policy, g.no)"><i class="pi pi-bell text-[10px]" /> ทวงงวดนี้</button>
             </td>
           </tr>
-          <tr v-if="!installmentGuadRows.length"><td colspan="6" class="px-3 py-10 text-center text-sm text-slate-400">ไม่มีงวดค้างชำระ</td></tr>
+          <tr v-if="!installmentGuadRows.length"><td colspan="7" class="px-3 py-10 text-center text-sm text-slate-400">ไม่มีงวดค้างชำระ</td></tr>
         </tbody>
       </table>
     </div>
@@ -250,7 +276,7 @@ onMounted(load)
           บันทึกการทวงเงิน<span v-if="reminderModal.installmentNo"> · งวด {{ reminderModal.installmentNo }}</span>
         </h3>
         <p class="mb-3 text-xs text-slate-500">
-          {{ reminderModal.policy.customerName }} · ค้าง ฿{{ money(reminderModal.installmentNo ? (reminderModal.policy.schedule?.find(s => s.no === reminderModal!.installmentNo)?.amount ?? 0) : reminderModal.policy.outstanding) }}
+          {{ reminderModal.policy.customerName }} · ค้าง ฿{{ money(reminderModal.installmentNo ? installmentRemaining(reminderModal.policy, reminderModal.installmentNo) : (reminderModal.policy.dueToDate || reminderModal.policy.outstanding)) }}
         </p>
         <div class="mb-2 flex gap-2">
           <select v-model="reminderForm.channel" class="rounded border border-slate-300 px-2 py-1 text-xs">
