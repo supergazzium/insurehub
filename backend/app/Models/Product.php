@@ -17,6 +17,7 @@ class Product extends Model
 
     protected $casts = [
         'occupation_classes' => 'array',
+        'allowed_premium_modes' => 'array',
         'require_medical' => 'boolean',
         'smoker_accepted' => 'boolean',
         'preexisting_excluded' => 'boolean',

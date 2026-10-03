@@ -48,6 +48,9 @@ export function fetchProductList(filters: ProductListFilters = {}) {
   return api.get<Paginated<ProductListRow>>(`products${buildQuery({ ...filters })}`)
 }
 
+export type PremiumMode = 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'single'
+export const PREMIUM_MODES: PremiumMode[] = ['monthly', 'quarterly', 'semiannual', 'annual', 'single']
+
 /** Full product detail (matches ProductResource). Extends ProductListRow
  *  with every editable field so the create-wizard can prefill from an
  *  existing product ("duplicate from…"). */
@@ -71,7 +74,11 @@ export interface ProductDetail extends ProductListRow {
   vehicleAgeMax: number | null
   durationYears: number
   payYears: number
-  premiumMode: 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'single'
+  premiumMode: PremiumMode
+  /** งวดการชำระที่ผลิตภัณฑ์กำหนดเอง — null = ใช้ค่าเริ่มต้นตามประเภทประกัน. */
+  allowedPremiumModes: PremiumMode[] | null
+  /** งวดที่ wizard ควรให้เลือกจริง (รวม fallback แล้ว). */
+  effectivePremiumModes: PremiumMode[]
   minPremium: number
   maxPremium: number
   gender: 'all' | 'male' | 'female'

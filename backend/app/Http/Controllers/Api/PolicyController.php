@@ -14,6 +14,7 @@ use App\Models\Policy;
 use App\Models\PolicyEvent;
 use App\Services\Commission\CommissionBandCoverage;
 use App\Support\PolicyNumbering;
+use App\Support\PremiumMode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -591,6 +592,10 @@ class PolicyController extends ApiController
         $map = self::SECTION_MAPS[$section];
 
         $v = Validator::make($request->all(), $rules)->validate();
+
+        if (isset($v['premiumMode']) && $v['premiumMode'] !== $policy->premium_mode) {
+            PremiumMode::assertAllowed($policy->product()->with('carrier')->first(), $v['premiumMode']);
+        }
 
         $updates = [];
         foreach ($map as $camel => $snake) {

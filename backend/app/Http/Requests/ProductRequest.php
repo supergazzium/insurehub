@@ -60,6 +60,10 @@ class ProductRequest extends FormRequest
             'durationYears' => ['sometimes', 'integer', 'min:1'],
             'payYears' => ['sometimes', 'integer', 'min:1'],
             'premiumMode' => ['sometimes', 'string', 'in:monthly,quarterly,semiannual,annual,single'],
+            // งวดการชำระที่ผลิตภัณฑ์รองรับ. null/[] = insure-type default
+            // (see App\Support\PremiumMode).
+            'allowedPremiumModes' => ['sometimes', 'nullable', 'array'],
+            'allowedPremiumModes.*' => ['string', 'distinct', 'in:monthly,quarterly,semiannual,annual,single'],
             'minPremium' => ['sometimes', 'numeric', 'min:0'],
             'maxPremium' => ['sometimes', 'numeric', 'min:0'],
             'minAge' => ['sometimes', 'integer', 'min:0', 'max:120'],
@@ -158,6 +162,7 @@ class ProductRequest extends FormRequest
             'durationYears' => 'duration_years',
             'payYears' => 'pay_years',
             'premiumMode' => 'premium_mode',
+            'allowedPremiumModes' => 'allowed_premium_modes',
             'minPremium' => 'min_premium',
             'maxPremium' => 'max_premium',
             'minAge' => 'min_age',
@@ -175,6 +180,10 @@ class ProductRequest extends FormRequest
             if (array_key_exists($camel, $v)) {
                 $out[$snake] = $v[$camel];
             }
+        }
+        // Store "no restriction" as null rather than an empty list.
+        if (array_key_exists('allowed_premium_modes', $out) && empty($out['allowed_premium_modes'])) {
+            $out['allowed_premium_modes'] = null;
         }
 
         return $out;

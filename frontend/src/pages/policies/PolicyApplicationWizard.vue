@@ -288,6 +288,8 @@ const agentPicked = ref<AgentListRow | null>(null)
  *  is available. The picker returns a lean ProductListRow — we re-fetch
  *  on pick to hydrate the full shape. */
 const productDetail = ref<ProductDetail | null>(null)
+// True while hydrateFromDraft is restoring a saved policy — see there.
+const hydrating = ref(false)
 const productDetailLoading = ref(false)
 
 /** C-20: commission frozen onto an existing policy (edit mode). Null in
@@ -678,19 +680,33 @@ function applyPriorAsset(asset: PriorAsset): void {
   form.risk = { ...form.risk, ...patch }
 }
 
-// ── Payment frequency (งวดการชำระ) by product type ───────────────────────
-// ประกันชีวิต (Life): monthly / quarterly / semiannual / annual / single.
-// ประกันวินาศภัย (Non-Life) + ภาษี (Tax): annual only.
+// ── Payment frequency (งวดการชำระ) ───────────────────────────────────────
+// The product decides (ProductResource.effectivePremiumModes, which already
+// falls back to the insure-type default). Before a product is picked:
+// Life → every mode, Non-Life / Tax → annual only. The backend
+// (PolicyRequest) rejects a mode the product doesn't offer.
 type PremiumMode = typeof form.premiumMode
-const premiumModeOptions = computed<PremiumMode[]>(() =>
-  form.insureType === 'Life'
+const premiumModeOptions = computed<PremiumMode[]>(() => {
+  const fromProduct = productDetail.value?.effectivePremiumModes
+  if (fromProduct && fromProduct.length > 0) return fromProduct
+  return form.insureType === 'Life'
     ? ['monthly', 'quarterly', 'semiannual', 'annual', 'single']
-    : ['annual'],
+    : ['annual']
+})
+// What the <select> lists: the allowed modes, plus a legacy stored mode the
+// product no longer offers so the saved value still displays (the backend
+// only re-checks the mode when it changes).
+const premiumModeChoices = computed<PremiumMode[]>(() =>
+  premiumModeOptions.value.includes(form.premiumMode)
+    ? premiumModeOptions.value
+    : [...premiumModeOptions.value, form.premiumMode],
 )
-// When the product type changes, snap premiumMode back to a valid option
-// (defaults to annual, which is valid for every type).
-watch(() => form.insureType, () => {
-  if (!premiumModeOptions.value.includes(form.premiumMode)) form.premiumMode = 'annual'
+// When the product / insure type changes, snap premiumMode back to a valid
+// option (prefer annual). Skipped while hydrating so a stored mode isn't
+// clobbered before the product detail arrives.
+watch(premiumModeOptions, (opts) => {
+  if (hydrating.value || opts.includes(form.premiumMode)) return
+  form.premiumMode = opts.includes('annual') ? 'annual' : opts[0]
 })
 
 // จำนวนงวด per payment frequency. รายเดือน 12 / รายสามเดือน 4 /
@@ -702,7 +718,13 @@ const INSTALLMENTS_BY_MODE: Record<PremiumMode, number> = {
 // still edit installmentCount afterwards (this only fires when the mode
 // changes, so a manual override survives until the next mode switch).
 watch(() => form.premiumMode, (mode) => {
-  form.installmentCount = INSTALLMENTS_BY_MODE[mode] ?? 1
+  // Hydration restores both from the saved policy instead.
+  if (hydrating.value) return
+  const n = INSTALLMENTS_BY_MODE[mode] ?? 1
+  form.installmentCount = n
+  // งวดการผ่อน (installment_term) is what gets saved — keep it in step
+  // for multi-installment modes; annual/single = one payment (blank).
+  form.installmentTerm = n > 1 ? String(n) : ''
 }, { immediate: true })
 
 // ── Premium recalc watchers (KEEP verbatim per B3 §9) ────────────────────
@@ -1290,9 +1312,9 @@ async function submitToCarrier(): Promise<void> {
  *
  *  Race condition: the autosave watcher fires on every form mutation.
  *  We suppress it during hydration by holding a `hydrating` flag and
- *  short-circuiting scheduleAutosave() when it's set.
+ *  short-circuiting scheduleAutosave() when it's set. (`hydrating` itself
+ *  is declared near the top — the premium-mode watchers read it at setup.)
  */
-const hydrating = ref(false)
 
 /** @param renewMode when true, prefill a NEW renewal draft from this policy:
  *  keep the party/product/premium/risk, but drop the identifiers + dates and
@@ -1385,6 +1407,7 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
     form.discountAmount = Number(installment.discountAmount ?? p.discountAmount ?? 0)
 
     form.installmentTerm = String(installment.term ?? p.installmentTerm ?? '')
+    form.installmentCount = Number(form.installmentTerm) || INSTALLMENTS_BY_MODE[form.premiumMode] || 1
     form.firstDueInst = Number(installment.firstDueAmount ?? p.firstDueInst ?? 0)
     form.firstDueInstDate = String(installment.firstDueDate ?? p.firstDueInstDate ?? '')
     form.nextDueInst = Number(installment.nextDueAmount ?? p.nextDueInst ?? 0)
@@ -1975,7 +1998,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <FormField :label="t('policyCreate.premiumMode')">
           <select v-model="form.premiumMode"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-            <option v-for="m in premiumModeOptions" :key="m" :value="m">
+            <option v-for="m in premiumModeChoices" :key="m" :value="m">
               {{ t(`policyCreate.premiumModes.${m}`) }}
             </option>
           </select>

@@ -4,8 +4,12 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Product;
+use App\Support\PremiumMode;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class PolicyRequest extends FormRequest
 {
@@ -308,7 +312,52 @@ class PolicyRequest extends FormRequest
             $out['risk_data'] = $shimRiskData;
         }
 
+        // งวดการผ่อน follows the frequency when the operator left it blank:
+        // monthly 12 / quarterly 4 / semiannual 2. Annual + single stay
+        // null (one payment) so an InsureHub-financed annual plan with an
+        // explicit term is never overwritten.
+        $mode = $out['premium_mode'] ?? null;
+        if ($mode !== null && PremiumMode::installmentsFor($mode) > 1) {
+            $term = array_key_exists('installment_term', $out)
+                ? $out['installment_term']
+                : $this->route('policy')?->installment_term;
+            if ($term === null || trim((string) $term) === '') {
+                $out['installment_term'] = (string) PremiumMode::installmentsFor($mode);
+            }
+        }
+
         return $out;
+    }
+
+    /**
+     * งวดการชำระ must be one the product offers (non-life defaults to annual
+     * unless the product opts in). Only checked when the request sets or
+     * changes the mode, so editing a legacy policy whose stored mode predates
+     * the product's list doesn't get blocked.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $mode = $this->input('premiumMode');
+            if (! is_string($mode) || $mode === '' || $validator->errors()->has('premiumMode')) {
+                return;
+            }
+            $policy = $this->route('policy');
+            $productId = $this->input('productId', $policy?->product_id);
+            if ($policy !== null && $mode === $policy->premium_mode && (string) $productId === (string) $policy->product_id) {
+                return;
+            }
+            $product = $productId ? Product::with('carrier')->where('tenant_id', $this->user()->tenant_id)->find($productId) : null;
+            try {
+                PremiumMode::assertAllowed($product, $mode);
+            } catch (ValidationException $e) {
+                foreach ($e->errors() as $field => $messages) {
+                    foreach ($messages as $message) {
+                        $validator->errors()->add($field, $message);
+                    }
+                }
+            }
+        });
     }
 
     /**
