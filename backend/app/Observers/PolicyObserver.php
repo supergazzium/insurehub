@@ -4,9 +4,13 @@ declare(strict_types=1);
 
 namespace App\Observers;
 
+use App\Models\AuditEntry;
 use App\Models\Policy;
+use App\Models\PolicyEvent;
 use App\Models\ProductCommissionRate;
 use App\Services\Commission\CommissionSnapshot;
+use App\Services\Policy\InstallmentSchedule;
+use App\Support\PolicyYears;
 use Illuminate\Support\Facades\Log;
 
 /**
@@ -36,6 +40,152 @@ use Illuminate\Support\Facades\Log;
 class PolicyObserver
 {
     public function created(Policy $policy): void
+    {
+        $this->captureCommissionSnapshot($policy);
+        $this->seedYears($policy);
+
+        // Rows imported / seeded straight into issued|active get their
+        // schedule now; normal policies get it when they're issued (below).
+        if (in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true)) {
+            $this->syncInstallments($policy);
+        }
+    }
+
+    /**
+     * ตารางงวดชำระ (task 1.2): build it when the policy enters issued/active,
+     * and re-plan it when a plan input changes — InstallmentSchedule::sync
+     * leaves a schedule alone once money has been applied to it.
+     */
+    public function updated(Policy $policy): void
+    {
+        $this->auditYearChange($policy);
+        $this->logTrackedChange($policy, 'fulfilmentUpdated', Policy::FULFILMENT_COLUMNS);
+        if (! $policy->wasChanged('status')) {
+            $this->logTrackedChange($policy, 'approvalUpdated', Policy::APPROVAL_COLUMNS);
+        }
+
+        $entered = $policy->wasChanged('status')
+            && in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true);
+        $replan = $policy->wasChanged(InstallmentSchedule::PLAN_COLUMNS)
+            && in_array($policy->status, InstallmentSchedule::SCHEDULED_STATUSES, true);
+        if ($entered || $replan) {
+            $this->syncInstallments($policy);
+        }
+    }
+
+    /**
+     * Fill ปีของลูกค้า (and a renewal's ปีของกรมธรรม์) when the creating
+     * request didn't — e.g. imports or API callers other than the wizard.
+     */
+    private function seedYears(Policy $policy): void
+    {
+        try {
+            $suggested = PolicyYears::suggest($policy);
+            if ($policy->customer_year === null) {
+                $policy->customer_year = $suggested['customerYear'];
+            }
+            if ($policy->ref_app_to_id !== null && (int) $policy->policy_year <= 1) {
+                $policy->policy_year = $suggested['policyYear'];
+            }
+            if ($policy->isDirty()) {
+                $policy->saveQuietly();
+            }
+        } catch (\Throwable $e) {
+            Log::warning('Policy year seeding failed', ['policy_id' => $policy->id, 'error' => $e->getMessage()]);
+        }
+    }
+
+    private function logTrackedChange(Policy $policy, string $type, array $columns): void
+    {
+        $changed = array_values(array_filter($columns, fn ($c) => $policy->wasChanged($c)));
+        if ($changed === []) {
+            return;
+        }
+        try {
+            $fmt = fn ($v) => $v instanceof \DateTimeInterface ? $v->format('Y-m-d') : ($v === '' ? null : $v);
+            $changes = [];
+            foreach ($changed as $col) {
+                $changes[$col] = ['from' => $fmt($policy->getOriginal($col)), 'to' => $fmt($policy->{$col})];
+            }
+            $userId = auth()->id();
+
+            $recent = PolicyEvent::query()
+                ->where('policy_id', $policy->id)
+                ->where('type', $type)
+                ->where('by_user_id', $userId)
+                ->where('occurred_at', '>=', now()->subMinutes(5))
+                ->latest('occurred_at')
+                ->first();
+            if ($recent !== null) {
+                $merged = (array) ($recent->payload['changes'] ?? []);
+                foreach ($changes as $col => $c) {
+                    $from = array_key_exists($col, $merged) ? $merged[$col]['from'] : $c['from'];
+                    $merged[$col] = ['from' => $from, 'to' => $c['to']];
+                }
+                $merged = array_filter($merged, fn ($c) => $c['from'] !== $c['to']);
+                if ($merged === []) {
+                    $recent->delete();
+                } else {
+                    $recent->update(['payload' => ['changes' => $merged], 'occurred_at' => now()]);
+                }
+
+                return;
+            }
+
+            PolicyEvent::create([
+                'policy_id' => $policy->id,
+                'type' => $type,
+                'occurred_at' => now(),
+                'by_user_id' => $userId,
+                'payload' => ['changes' => $changes],
+            ]);
+        } catch (\Throwable $e) {
+            Log::warning('Policy change event logging failed', ['policy_id' => $policy->id, 'type' => $type, 'error' => $e->getMessage()]);
+        }
+    }
+
+    /** Admin corrections to the stored years past quotation are audited (1.4). */
+    private function auditYearChange(Policy $policy): void
+    {
+        if (! $policy->wasChanged(['policy_year', 'customer_year'])
+            || in_array($policy->getOriginal('status'), PolicyYears::FREE_EDIT_STATUSES, true)) {
+            return;
+        }
+        $changes = [];
+        foreach (['policy_year', 'customer_year'] as $col) {
+            if ($policy->wasChanged($col)) {
+                $changes[$col] = ['from' => $policy->getOriginal($col), 'to' => $policy->{$col}];
+            }
+        }
+        $user = auth()->user();
+        AuditEntry::create([
+            'tenant_id' => $policy->tenant_id,
+            'user_id' => $user?->id,
+            'occurred_at' => now(),
+            'actor' => $user?->name ?? 'system',
+            'action' => 'policy.years_updated',
+            'target' => 'policy:'.$policy->id,
+            'ip' => request()?->ip(),
+            'result' => 'success',
+            'metadata' => $changes,
+        ]);
+    }
+
+    private function syncInstallments(Policy $policy): void
+    {
+        try {
+            app(InstallmentSchedule::class)->sync($policy);
+        } catch (\Throwable $e) {
+            // Never block the policy write — `policies:backfill-installments`
+            // can rebuild a missed schedule.
+            Log::warning('Installment schedule sync failed', [
+                'policy_id' => $policy->id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    private function captureCommissionSnapshot(Policy $policy): void
     {
         if ($policy->product_id === null || $policy->commission_snapshot !== null) {
             return;

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 // Product detail drawer — full spec + two-panel commission-rate editor.
 import { ref, watch, computed, onMounted, reactive } from 'vue'
-import { fetchProduct, fetchProductTaxonomy, type ProductDetail, type ProductTaxonomyRow, type ProductCommissionRatePanel, type ProductCommissionBandRow } from '../../api/products'
+import { fetchProduct, fetchProductTaxonomy, PREMIUM_MODES, type PremiumMode, type ProductDetail, type ProductTaxonomyRow, type ProductCommissionRatePanel, type ProductCommissionBandRow } from '../../api/products'
 import { fetchCommissionTiers, type CommissionTier } from '../../api/mgm'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
@@ -214,6 +214,50 @@ async function saveCommissionRates(): Promise<void> {
   }
 }
 
+// ── งวดการชำระที่รองรับ ──────────────────────────────────────────────────
+// Unset (null) = insure-type default: Life → every mode, Non-Life/Tax →
+// annual. Ticking modes pins the product's own list, e.g. a motor product
+// the carrier lets customers pay monthly.
+const PREMIUM_MODE_LABELS: Record<PremiumMode, string> = {
+  monthly: 'รายเดือน (12 งวด)',
+  quarterly: 'ราย 3 เดือน (4 งวด)',
+  semiannual: 'ราย 6 เดือน (2 งวด)',
+  annual: 'รายปี',
+  single: 'จ่ายครั้งเดียว',
+}
+const premiumModesDraft = ref<PremiumMode[]>([])
+const savingModes = ref(false)
+const modesError = ref<string | null>(null)
+const modesFlash = ref<string | null>(null)
+const premiumModesDirty = computed(() => {
+  const current = product.value?.effectivePremiumModes ?? []
+  return PREMIUM_MODES.some((m) => current.includes(m) !== premiumModesDraft.value.includes(m))
+})
+function resetPremiumModesDraft(): void {
+  premiumModesDraft.value = [...(product.value?.effectivePremiumModes ?? [])]
+}
+async function savePremiumModes(useDefault: boolean): Promise<void> {
+  if (!product.value) return
+  if (!useDefault && premiumModesDraft.value.length === 0) {
+    modesError.value = 'เลือกอย่างน้อย 1 งวด'
+    return
+  }
+  savingModes.value = true
+  modesError.value = null
+  try {
+    const allowedPremiumModes = useDefault ? null : PREMIUM_MODES.filter((m) => premiumModesDraft.value.includes(m))
+    const res = await api.patch<{ data: ProductDetail }>(`products/${product.value.id}`, { allowedPremiumModes })
+    product.value = res.data
+    resetPremiumModesDraft()
+    modesFlash.value = 'บันทึกงวดการชำระแล้ว'
+    setTimeout(() => { modesFlash.value = null }, 2000)
+  } catch (e: unknown) {
+    modesError.value = e instanceof ApiError ? (e.body?.message ?? `HTTP ${e.status}`) : (e instanceof Error ? e.message : 'Save failed')
+  } finally {
+    savingModes.value = false
+  }
+}
+
 // ── Delete ────────────────────────────────────────────────────────────────
 const showDelete = ref(false)
 const deleting = ref(false)
@@ -273,6 +317,7 @@ watch(
       Object.assign(hubToAgent, panelFromApi(prod.data.commissionRates?.hubToAgent ?? null))
       carrierToHubBands.value = (prod.data.commissionBands?.carrierToHub ?? []).map(bandFromApi)
       hubToAgentBands.value = (prod.data.commissionBands?.hubToAgent ?? []).map(bandFromApi)
+      resetPremiumModesDraft()
     } catch (e: unknown) {
       errorMsg.value = e instanceof Error ? e.message : 'Failed to load product detail.'
     } finally {
@@ -423,6 +468,37 @@ watch(
             <div>
               <div class="text-xs text-slate-400">Max age (0–99)</div>
               <EditableField entity="products" :id="product.id" field="maxAge" type="number" :value="product.maxAge" @update="v => apply('maxAge', v)" />
+            </div>
+          </div>
+        </section>
+
+        <!-- งวดการชำระที่รองรับ — what the policy wizard lets operators pick. -->
+        <section>
+          <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">งวดการชำระที่รองรับ</h3>
+          <div class="card p-4 text-sm space-y-3">
+            <div class="flex flex-wrap gap-x-5 gap-y-2">
+              <label v-for="m in PREMIUM_MODES" :key="m" class="inline-flex items-center gap-2 text-slate-700">
+                <input v-model="premiumModesDraft" type="checkbox" :value="m"
+                  class="rounded border-slate-300 text-brand-600 focus:ring-brand-500" />
+                {{ PREMIUM_MODE_LABELS[m] }}
+              </label>
+            </div>
+            <p class="text-xs text-slate-500">
+              <template v-if="product.allowedPremiumModes">กำหนดเองสำหรับผลิตภัณฑ์นี้</template>
+              <template v-else>ใช้ค่าเริ่มต้นตามประเภทประกัน (ชีวิต = ทุกงวด, วินาศภัย/ภาษี = รายปี)</template>
+            </p>
+            <div class="flex items-center gap-2">
+              <button class="px-3 py-1.5 rounded-lg text-xs font-medium bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50"
+                :disabled="savingModes || !premiumModesDirty" @click="savePremiumModes(false)">
+                บันทึกงวดการชำระ
+              </button>
+              <button v-if="product.allowedPremiumModes"
+                class="px-3 py-1.5 rounded-lg text-xs font-medium border border-slate-200 text-slate-600 hover:bg-slate-50 disabled:opacity-50"
+                :disabled="savingModes" @click="savePremiumModes(true)">
+                ใช้ค่าเริ่มต้น
+              </button>
+              <span v-if="modesFlash" class="text-xs text-emerald-600">{{ modesFlash }}</span>
+              <span v-if="modesError" class="text-xs text-rose-600">{{ modesError }}</span>
             </div>
           </div>
         </section>

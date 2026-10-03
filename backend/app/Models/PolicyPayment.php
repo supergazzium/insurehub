@@ -4,12 +4,13 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Observers\PolicyPaymentInstallmentObserver;
 use App\Observers\PolicyPaymentObserver;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
-#[ObservedBy([PolicyPaymentObserver::class])]
+#[ObservedBy([PolicyPaymentObserver::class, PolicyPaymentInstallmentObserver::class])]
 class PolicyPayment extends Model
 {
     protected $guarded = ['id'];
@@ -25,6 +26,12 @@ class PolicyPayment extends Model
     public function policy(): BelongsTo
     {
         return $this->belongsTo(Policy::class);
+    }
+
+    /** The งวด this payment settles (null = applied oldest-unpaid-first). */
+    public function installment(): BelongsTo
+    {
+        return $this->belongsTo(PolicyInstallment::class, 'policy_installment_id');
     }
 
     public function user(): BelongsTo

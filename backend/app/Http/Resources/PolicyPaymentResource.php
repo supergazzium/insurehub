@@ -19,6 +19,7 @@ class PolicyPaymentResource extends JsonResource
         return [
             'id' => (string) $this->id,
             'policyId' => (string) $this->policy_id,
+            'policyInstallmentId' => $this->policy_installment_id !== null ? (string) $this->policy_installment_id : null,
             'paymentDate' => $this->payment_date?->toDateString() ?? '',
             'amount' => (float) $this->amount,
             'netAmount' => $this->net_amount !== null ? (float) $this->net_amount : null,

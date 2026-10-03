@@ -63,6 +63,8 @@ export type PolicyEventType =
   | 'reinstated'
   | 'backfillMigrated'
   | 'premiumPaid'
+  | 'fulfilmentUpdated'
+  | 'approvalUpdated'
   | 'detailsUpdated'
   | 'documentUploaded'
 
