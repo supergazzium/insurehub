@@ -7,10 +7,12 @@ namespace App\Http\Controllers\Api;
 use App\Http\Controllers\Controller;
 use App\Models\PaymentReminder;
 use App\Models\Policy;
+use App\Models\PolicyInstallment;
 use App\Services\Policy\InstallmentSchedule;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 /**
@@ -64,71 +66,21 @@ class CollectionsController extends Controller
             ->get();
 
         $today = Carbon::today();
+        $installments = PolicyInstallment::query()
+            ->whereIn('policy_id', $rows->pluck('id'))
+            ->orderBy('installment_no')
+            ->get()
+            ->groupBy('policy_id');
         $out = [];
         foreach ($rows as $r) {
-            $main = (float) ($r->main_premium ?? 0);
-            $compulsory = (float) ($r->compulsory_premium ?? 0);
-            // Total owed = main premium + พ.ร.บ.
-            $totalDue = round($main + $compulsory, 2);
-            // Amount already paid = the sum of recorded policy_payments rows —
-            // the auditable source of truth (one verifiable record per payment).
-            // Legacy imported balances were backfilled into policy_payments
-            // (method 'legacyImport') by `payments:backfill-legacy`, so this
-            // covers old and new alike. total_premium_paid is only a fallback if
-            // a policy somehow has no rows at all.
-            $paid = (float) $r->paid_total;
-            if ($paid <= 0 && (float) ($r->total_premium_paid ?? 0) > 0) {
-                $paid = (float) $r->total_premium_paid;
-            }
-            $paid = round($paid, 2);
-            // If we somehow have no main premium, treat the paid figure as the
-            // whole thing (nothing to chase).
-            if ($totalDue <= 0) {
-                $totalDue = $paid;
-            }
-            $outstanding = round($totalDue - $paid, 2);
-
-            // Treat anything under ฿1 as fully paid — that residue is only
-            // per-installment ceiling rounding, not a real balance owed.
-            if ($outstanding < 1.0) {
+            $row = $this->buildRow($r, $today, $installments->get($r->id, collect()));
+            if ($row['outstanding'] < 1.0) {
                 continue;
             }
-
-            $rowKind = $this->classify($r);
-            if ($kind !== 'all' && $rowKind !== $kind) {
+            if ($kind !== 'all' && $row['kind'] !== $kind) {
                 continue;
             }
-
-            $schedule = null;
-            $overdueCount = 0;
-            if (($rowKind === 'installment' || $rowKind === 'split') && $r->installment_mode !== null) {
-                $schedule = $this->buildSchedule($r, (int) $r->paid_count, $today);
-                $overdueCount = collect($schedule)->where('overdue', true)->count();
-            }
-
-            $out[] = [
-                'policyId' => (string) $r->id,
-                'policyNo' => $r->policy_no,
-                'applicationNo' => $r->application_no,
-                'status' => $r->status,
-                'kind' => $rowKind,
-                'customerCode' => $r->customer_code,
-                'customerName' => $r->customer_name,
-                'customerPhone' => $r->customer_phone,
-                'agentCode' => $r->agent_code,
-                'agentName' => $r->agent_name,
-                'totalDue' => $totalDue,
-                'paid' => $paid,
-                'outstanding' => $outstanding,
-                'installmentMode' => $r->installment_mode,
-                'installmentCount' => $r->installment_term !== null ? (int) $r->installment_term : null,
-                'paidCount' => (int) $r->paid_count,
-                'overdueCount' => $overdueCount,
-                'schedule' => $schedule,
-                'reminderCount' => (int) $r->reminder_count,
-                'lastReminderAt' => $r->last_reminder_at ? Carbon::parse($r->last_reminder_at)->toIso8601String() : null,
-                'effectiveDate' => $r->effective_date,
-            ];
+            $out[] = $row;
         }
 
         return response()->json([
@@ -173,7 +125,7 @@ class CollectionsController extends Controller
             abort(404);
         }
 
-        $row = $this->buildRow($r, Carbon::today());
+        $row = $this->buildRow($r, Carbon::today(), $policy->installments()->get());
 
         // Actual payment records (auditable source of truth).
         $payments = DB::table('policy_payments')
@@ -204,11 +156,13 @@ class CollectionsController extends Controller
      *
      * @return array<string, mixed>
      */
-    private function buildRow(object $r, Carbon $today): array
+    private function buildRow(object $r, Carbon $today, Collection $installments): array
     {
         $main = (float) ($r->main_premium ?? 0);
         $compulsory = (float) ($r->compulsory_premium ?? 0);
-        $totalDue = round($main + $compulsory, 2);
+        $totalDue = $installments->isNotEmpty()
+            ? round($installments->sum(fn (PolicyInstallment $i) => (float) $i->amount_due), 2)
+            : round($main + $compulsory, 2);
         $paid = (float) $r->paid_total;
         if ($paid <= 0 && (float) ($r->total_premium_paid ?? 0) > 0) {
             $paid = (float) $r->total_premium_paid;
@@ -222,7 +176,23 @@ class CollectionsController extends Controller
         $rowKind = $this->classify($r);
         $schedule = null;
         $overdueCount = 0;
-        if (($rowKind === 'installment' || $rowKind === 'split') && $r->installment_mode !== null) {
+        $paidCount = (int) $r->paid_count;
+        $installmentCount = $r->installment_term !== null ? (int) $r->installment_term : null;
+        if ($installments->count() > 1) {
+            $schedule = $installments->map(fn (PolicyInstallment $i): array => [
+                'no' => (int) $i->installment_no,
+                'installmentId' => (string) $i->id,
+                'amount' => (float) $i->amount_due,
+                'amountPaid' => (float) $i->amount_paid,
+                'status' => $i->status,
+                'paid' => $i->status === PolicyInstallment::STATUS_PAID,
+                'dueDate' => $i->due_date?->toDateString(),
+                'overdue' => $i->status !== PolicyInstallment::STATUS_PAID && $i->due_date !== null && $i->due_date->lte($today),
+            ])->values()->all();
+            $overdueCount = collect($schedule)->where('overdue', true)->count();
+            $paidCount = $installments->where('status', PolicyInstallment::STATUS_PAID)->count();
+            $installmentCount = $installments->count();
+        } elseif ($installments->isEmpty() && ($rowKind === 'installment' || $rowKind === 'split') && $r->installment_mode !== null) {
             $schedule = $this->buildSchedule($r, (int) $r->paid_count, $today);
             $overdueCount = collect($schedule)->where('overdue', true)->count();
         }
@@ -242,8 +212,8 @@ class CollectionsController extends Controller
             'paid' => $paid,
             'outstanding' => $outstanding,
             'installmentMode' => $r->installment_mode,
-            'installmentCount' => $r->installment_term !== null ? (int) $r->installment_term : null,
-            'paidCount' => (int) $r->paid_count,
+            'installmentCount' => $installmentCount,
+            'paidCount' => $paidCount,
             'overdueCount' => $overdueCount,
             'schedule' => $schedule,
             'reminderCount' => (int) $r->reminder_count,

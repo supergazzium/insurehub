@@ -12,8 +12,8 @@
 //           installment row (amount / date / note / proof); ยอดค้าง auto-
 //           computes as expected − Σ paid.
 
-import { computed, reactive, ref, watch } from 'vue'
-import { createPolicyPayments } from '../../api/policies'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { createPolicyPayments, fetchPolicyInstallments, type PolicyInstallmentRow } from '../../api/policies'
 import { ApiError } from '../../api/client'
 import { decomposeByFormula, type PremiumParts, type TaxFormula } from '../../utils/premiumBreakdown'
 import { calcInstallment, INSTALLMENT_MODES, type InstallmentMode, type InstallmentResult } from '../../utils/installmentCalc'
@@ -96,13 +96,13 @@ async function submitPayments(): Promise<void> {
     // Installment engine (spec): send the mode + agent costs so the backend can
     // book the agent-borne cost to commission settlement. Only when in a
     // multi-งวด mode with a valid computed schedule.
-    ...(isInstallment.value && res ? {
+    ...(isInstallment.value && res && !scheduleApplied.value ? {
       installmentMode: res.mode,
       agentFeeCost: res.agentFeeCost,
       agentInterestCost: res.agentInterestCost,
     } : {}),
     payments: rows
-      .filter((r) => r.amount !== null && r.amount !== undefined && r.date)
+      .filter((r) => !r.locked && r.amount !== null && r.amount !== undefined && r.date)
       .map((r) => {
         const b = breakdownOf(r.amount)
         return {
@@ -115,6 +115,7 @@ async function submitPayments(): Promise<void> {
           netAmount: b.net,
           dutyAmount: b.duty,
           vatAmount: b.vat,
+          ...(isInstallment.value && r.installmentId ? { installmentId: Number(r.installmentId) } : {}),
         }
       }),
   }
@@ -152,6 +153,9 @@ const payMode = ref<PayMode>('full')
 // จ่ายมีส่วนลด     = รวมเบี้ย − ส่วนลด
 // ผ่อน            = รวมเบี้ย (split across installments)
 const expectedAmount = computed<number>(() => {
+  if (isInstallment.value && schedule.value.length > 1) {
+    return round2(schedule.value.reduce((sum, i) => sum + i.amountDue, 0))
+  }
   const total = Number(props.expected.totalPremiumPaid) || 0
   if (payMode.value === 'less_commission') return round2(total - (Number(props.expected.commissionAmount) || 0))
   if (payMode.value === 'with_discount') return round2(total - (Number(props.expected.discountAmount) || 0))
@@ -182,6 +186,10 @@ interface PayRow {
   method: PayMethod
   note: string
   proofName: string // just the file name; no real upload in this FE-only build
+  installmentId?: string
+  dueDate?: string | null
+  paidAmount?: number
+  locked?: boolean
 }
 /** Today's date as YYYY-MM-DD for the <input type=date>. */
 function todayStr(): string {
@@ -196,7 +204,7 @@ function blankRow(): PayRow { return { expected: null, amount: null, date: today
 /** Per-installment reconciliation: actual − expected.
  *  status: 'exact' (ครบ) | 'over' (เกิน) | 'short' (ขาด) | 'pending' (ยังไม่จ่าย). */
 function rowDiff(r: PayRow): { status: 'exact' | 'over' | 'short' | 'pending'; diff: number } {
-  const exp = Number(r.expected) || 0
+  const exp = round2((Number(r.expected) || 0) - (r.paidAmount || 0))
   const act = Number(r.amount)
   if (!r.amount && r.amount !== 0) return { status: 'pending', diff: -exp }
   const diff = round2(act - exp)
@@ -219,7 +227,7 @@ function onProofPick(idx: number, e: Event): void {
 }
 
 const paidTotal = computed<number>(() =>
-  round2(rows.reduce((sum, r) => sum + (Number(r.amount) || 0), 0)),
+  round2(rows.reduce((sum, r) => sum + (Number(r.amount) || 0) + (r.paidAmount || 0), 0)),
 )
 const outstanding = computed<number>(() => round2(expectedAmount.value - paidTotal.value))
 
@@ -248,7 +256,53 @@ const installmentResult = computed<InstallmentResult | null>(() => {
 /** Build installment rows from the spec calculator when possible; otherwise
  *  fall back to an even split of the expected total. Each row's ยอดที่ต้องชำระ
  *  is the computed งวด amount; ยอดชำระจริง stays blank until the customer pays. */
+const schedule = ref<PolicyInstallmentRow[]>([])
+const scheduleApplied = computed(() => schedule.value.some((i) => i.amountPaid > 0))
+
+function rowsFromSchedule(): PayRow[] {
+  return schedule.value.map((i) => ({
+    ...blankRow(),
+    expected: i.amountDue,
+    installmentId: i.id,
+    dueDate: i.dueDate,
+    paidAmount: i.amountPaid,
+    locked: i.status === 'paid',
+  }))
+}
+
 function buildInstallmentRows(n: number): PayRow[] {
+  if (schedule.value.length > 1 && (scheduleApplied.value || !installmentResult.value)) {
+    return rowsFromSchedule()
+  }
+  const built = buildPlannedRows(n)
+  if (schedule.value.length === built.length) {
+    built.forEach((r, i) => {
+      r.installmentId = schedule.value[i].id
+      r.dueDate = schedule.value[i].dueDate
+    })
+  }
+  return built
+}
+
+async function loadSchedule(): Promise<void> {
+  schedule.value = []
+  if (!props.policyId) return
+  try {
+    const res = await fetchPolicyInstallments(props.policyId)
+    schedule.value = res.data
+  } catch {
+    schedule.value = []
+  }
+  if (schedule.value.length > 1) {
+    if (payMode.value !== 'installment' && payMode.value !== 'split') {
+      payMode.value = 'installment'
+    } else {
+      rows.splice(0, rows.length, ...buildInstallmentRows(schedule.value.length))
+    }
+  }
+}
+
+function buildPlannedRows(n: number): PayRow[] {
   const count = Math.max(1, Math.floor(n) || 1)
   const res = installmentResult.value
   if (res && res.installmentCount === count) {
@@ -282,31 +336,33 @@ watch(payMode, (mode) => {
 
 // Reset everything each time the modal opens. If the wizard's plan has more
 // than one งวด, open directly in ผ่อน with the rows prefilled.
-watch(() => props.open, (v) => {
-  if (v) {
-    payee.value = 'insurehub'
-    taxFormula.value = inferFormula()
-    saveError.value = null
-    // Seed the installment engine from the policy.
-    const savedMode = (props.installmentMode as InstallmentMode) || 'A'
-    instMode.value = (['A', 'B', 'C'] as const).includes(savedMode) ? savedMode : 'A'
-    instCompulsory.value = Number(props.compulsoryPremium) || 0
-    const n = props.installmentCount ?? 1
-    instCount.value = Math.min(10, Math.max(2, n > 1 ? n : 2))
-    if (n > 1) {
-      payMode.value = 'installment'
-      rows.splice(0, rows.length, ...buildInstallmentRows(n))
-    } else {
-      payMode.value = 'full'
-      rows.splice(0, rows.length, blankRow())
-    }
+function resetOnOpen(): void {
+  payee.value = 'insurehub'
+  taxFormula.value = inferFormula()
+  saveError.value = null
+  // Seed the installment engine from the policy.
+  const savedMode = (props.installmentMode as InstallmentMode) || 'A'
+  instMode.value = (['A', 'B', 'C'] as const).includes(savedMode) ? savedMode : 'A'
+  instCompulsory.value = Number(props.compulsoryPremium) || 0
+  const n = props.installmentCount ?? 1
+  instCount.value = Math.min(10, Math.max(2, n > 1 ? n : 2))
+  if (n > 1) {
+    payMode.value = 'installment'
+    rows.splice(0, rows.length, ...buildInstallmentRows(n))
+  } else {
+    payMode.value = 'full'
+    rows.splice(0, rows.length, blankRow())
   }
-})
+  void loadSchedule()
+}
+watch(() => props.open, (v) => { if (v) resetOnOpen() })
+onMounted(() => { if (props.open) resetOnOpen() })
 
 // Rebuild the งวด rows whenever the installment inputs change (mode / พ.ร.บ. /
 // count), but only while in a multi-งวด mode so single-payment modes are left
 // alone.
 watch([instMode, instCompulsory, instCount], () => {
+  if (scheduleApplied.value) return
   if (payMode.value === 'installment' || payMode.value === 'split') {
     rows.splice(0, rows.length, ...buildInstallmentRows(instCount.value))
   }
@@ -409,7 +465,11 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
         <!-- ── Installment engine controls (per the installment spec) ────── -->
         <div v-if="isInstallment" class="rounded-lg border border-indigo-200 bg-indigo-50/40 p-3">
           <div class="mb-2 text-[11px] font-medium text-indigo-800">คำนวณงวดผ่อน (ตามสูตร Insurehub)</div>
-          <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
+          <p v-if="scheduleApplied" class="text-[11px] text-amber-700">
+            <i class="pi pi-lock mr-1" />มีการรับชำระแล้ว แผนผ่อนและจำนวนเงินต่องวดจึงล็อกตามตารางงวดของกรมธรรม์
+          </p>
+          <template v-else>
+          <fieldset class="grid grid-cols-2 sm:grid-cols-4 gap-3">
             <div>
               <label class="block text-[10px] text-slate-500 mb-0.5">รูปแบบ (Mode)</label>
               <select v-model="instMode" class="w-full border border-slate-300 rounded-md px-2 py-1 text-xs">
@@ -431,7 +491,7 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
               <input v-model.number="instCompulsory" type="number" min="0" step="0.01"
                 class="w-full border border-slate-300 rounded-md px-2 py-1 text-xs" />
             </div>
-          </div>
+          </fieldset>
           <p class="mt-1 text-[10px] text-slate-500">
             {{ INSTALLMENT_MODES.find((m) => m.value === instMode)?.hint }}
           </p>
@@ -446,6 +506,7 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
             <span v-if="installmentResult.agentInterestCost > 0" class="text-amber-700">ดอกเบี้ยตัวแทนรับภาระ <span class="float-right tabular-nums">฿{{ fmt(installmentResult.agentInterestCost) }}</span></span>
           </div>
           <p v-else class="mt-2 text-[10px] text-rose-600">กรอกเบี้ยหลัก &gt; 0 และจำนวนงวด 2–10 เพื่อคำนวณ</p>
+          </template>
         </div>
 
         <!-- Payment rows -->
@@ -505,11 +566,18 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
 
           <!-- ── Installment mode: one card per งวด (fits any width) ──────── -->
           <div v-else class="space-y-2">
-            <div v-for="(row, idx) in rows" :key="idx" class="rounded-lg border border-slate-200 p-3">
+            <div v-for="(row, idx) in rows" :key="idx"
+              :class="['rounded-lg border p-3', row.locked ? 'border-emerald-200 bg-emerald-50/40' : 'border-slate-200']">
               <!-- Card header: งวด number + per-งวด status + delete -->
               <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-2">
-                  <span class="text-xs font-medium text-slate-600">งวดที่ {{ idx + 1 }}</span>
+                  <span class="text-xs font-medium text-slate-600">งวดที่ {{ idx + 1 }}/{{ rows.length }}</span>
+                  <span v-if="row.dueDate" class="text-[11px] text-slate-400">ครบกำหนด {{ row.dueDate }}</span>
+                  <span v-if="row.locked" class="inline-flex items-center gap-1 text-xs text-emerald-700">
+                    <i class="pi pi-check-circle" /> ชำระแล้ว ฿{{ fmt(row.paidAmount || 0) }}
+                  </span>
+                  <span v-else-if="row.paidAmount" class="text-xs text-amber-700">ชำระแล้วบางส่วน ฿{{ fmt(row.paidAmount) }}</span>
+                  <template v-if="!row.locked">
                   <span v-if="rowDiff(row).status === 'exact'" class="inline-flex items-center gap-1 text-xs text-emerald-600">
                     <i class="pi pi-check-circle" /> ครบ
                   </span>
@@ -519,20 +587,24 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
                   <span v-else-if="rowDiff(row).status === 'short'" class="inline-flex items-center gap-1 text-xs text-amber-600">
                     <i class="pi pi-exclamation-triangle" /> ขาด {{ fmt(Math.abs(rowDiff(row).diff)) }}
                   </span>
+                  <span v-else-if="row.paidAmount" class="inline-flex items-center gap-1 text-xs text-slate-500">
+                    คงค้าง ฿{{ fmt(Math.abs(rowDiff(row).diff)) }}
+                  </span>
                   <span v-else class="inline-flex items-center gap-1 text-xs text-slate-400">
                     <i class="pi pi-clock" /> ยังไม่จ่าย
                   </span>
+                  </template>
                 </div>
-                <button type="button" @click="removeRow(idx)" class="text-slate-400 hover:text-rose-500">
+                <button v-if="!(scheduleApplied && row.installmentId)" type="button" @click="removeRow(idx)" class="text-slate-400 hover:text-rose-500">
                   <i class="pi pi-trash text-xs" />
                 </button>
               </div>
               <!-- Fields grid: wraps to fit; no horizontal scroll -->
-              <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
+              <fieldset v-if="!row.locked" class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
                 <div>
                   <label class="block text-[10px] text-slate-400 mb-0.5">ยอดที่ต้องชำระ</label>
-                  <input v-model.number="row.expected" type="number" min="0" step="0.01" placeholder="0.00"
-                    class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                  <input v-model.number="row.expected" type="number" min="0" step="0.01" placeholder="0.00" :readonly="scheduleApplied"
+                    class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400 read-only:bg-slate-50 read-only:text-slate-500" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-slate-400 mb-0.5">ยอดชำระจริง</label>
@@ -564,7 +636,7 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
                   <input v-model.trim="row.note" type="text" placeholder="—"
                     class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
                 </div>
-              </div>
+              </fieldset>
               <!-- ถอดภาษีของงวดนี้ จากยอดที่จ่ายจริง (สัดส่วนตามกรมธรรม์) -->
               <div v-if="row.amount" class="mt-2 pt-2 border-t border-dashed border-slate-200 flex flex-wrap gap-x-4 gap-y-0.5 text-[11px] text-slate-500">
                 <span>เบี้ยสุทธิ <span class="tabular-nums text-slate-800">฿{{ fmt(breakdownOf(row.amount).net) }}</span></span>

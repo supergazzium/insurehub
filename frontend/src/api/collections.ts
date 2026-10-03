@@ -9,6 +9,9 @@ export interface ScheduleLine {
   paid: boolean
   dueDate: string | null
   overdue: boolean
+  installmentId?: string
+  amountPaid?: number
+  status?: 'pending' | 'partial' | 'paid'
 }
 
 export interface CollectionRow {

@@ -87,10 +87,25 @@ class PolicyPaymentController extends ApiController
         $payee = $data['payee'] ?? 'insurehub';
 
         $created = DB::transaction(function () use ($policy, $data, $payMode, $payee, $request) {
+            $instMode = $data['installmentMode'] ?? null;
+            $installmentIds = [];
+            if ($instMode !== null && $policy->installment_mode !== $instMode) {
+                $noById = $policy->installments()->pluck('installment_no', 'id');
+                $policy->update(['installment_mode' => $instMode]);
+                $idByNo = $policy->installments()->pluck('id', 'installment_no');
+                foreach ($noById as $oldId => $no) {
+                    $installmentIds[$oldId] = $idByNo[$no] ?? null;
+                }
+            }
+
             $rows = collect();
             foreach ($data['payments'] as $p) {
+                $installmentId = $p['installmentId'] ?? null;
+                if ($installmentId !== null && array_key_exists($installmentId, $installmentIds)) {
+                    $installmentId = $installmentIds[$installmentId];
+                }
                 $payment = $policy->payments()->create([
-                    'policy_installment_id' => $p['installmentId'] ?? null,
+                    'policy_installment_id' => $installmentId,
                     'payment_date' => $p['paymentDate'],
                     'amount' => $p['amount'],
                     'net_amount' => $p['netAmount'] ?? null,
@@ -109,7 +124,7 @@ class PolicyPaymentController extends ApiController
                     'by_user_id' => $request->user()->id,
                     'payload' => [
                         'paymentId' => (string) $payment->id,
-                        'installmentId' => isset($p['installmentId']) ? (string) $p['installmentId'] : null,
+                        'installmentId' => $installmentId !== null ? (string) $installmentId : null,
                         'amount' => (float) $p['amount'],
                         'method' => self::normalizeMethod($p['method']),
                         'payMode' => $payMode,
@@ -132,11 +147,7 @@ class PolicyPaymentController extends ApiController
             // policy and book the cost the AGENT bears (fee/interest) to
             // commission settlement as a negative-amount ledger row. Anchored
             // on the batch's first payment so it books exactly once.
-            $instMode = $data['installmentMode'] ?? null;
             if ($instMode !== null && $rows->isNotEmpty()) {
-                if ($policy->installment_mode !== $instMode) {
-                    $policy->update(['installment_mode' => $instMode]);
-                }
                 app(\App\Services\Commission\InstallmentAgentCost::class)->record(
                     $policy,
                     $rows->first(),

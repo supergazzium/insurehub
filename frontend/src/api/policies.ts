@@ -246,6 +246,7 @@ export interface PaymentRowInput {
   netAmount?: number
   dutyAmount?: number
   vatAmount?: number
+  installmentId?: number
 }
 export interface CreatePaymentsPayload {
   payMode: string
@@ -257,6 +258,22 @@ export function fetchPolicyPayments(policyId: string) {
 }
 export function createPolicyPayments(policyId: string, payload: CreatePaymentsPayload) {
   return api.post<{ data: PolicyPaymentRow[] }>(`policies/${policyId}/payments`, payload)
+}
+export interface PolicyInstallmentRow {
+  id: string
+  policyId: string
+  installmentNo: number
+  installmentTotal: number
+  label: string
+  dueDate: string | null
+  amountDue: number
+  amountPaid: number
+  outstanding: number
+  status: 'pending' | 'partial' | 'paid'
+  paidDate: string | null
+}
+export function fetchPolicyInstallments(policyId: string) {
+  return api.get<{ data: PolicyInstallmentRow[] }>(`policies/${policyId}/installments`)
 }
 export function deletePolicyPayment(policyId: string, paymentId: string) {
   return api.delete<{ message: string }>(`policies/${policyId}/payments/${paymentId}`)
