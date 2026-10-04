@@ -24,6 +24,7 @@ class PolicyPaymentController extends ApiController
 
         return PolicyPaymentResource::collection(
             $policy->payments()->orderByDesc('payment_date')->orderByDesc('id')->get()
+                ->each(fn ($p) => $p->setRelation('policy', $policy))
         );
     }
 
@@ -32,7 +33,9 @@ class PolicyPaymentController extends ApiController
     {
         $this->authorizeTenant($request, $policy);
 
-        return PolicyInstallmentResource::collection($policy->installments()->get());
+        return PolicyInstallmentResource::collection(
+            $policy->installments()->get()->each(fn ($i) => $i->setRelation('policy', $policy))
+        );
     }
 
     /**
@@ -178,6 +181,16 @@ class PolicyPaymentController extends ApiController
         $this->authorizeTenant($request, $policy);
         if ((int) $payment->policy_id !== (int) $policy->id) {
             abort(404);
+        }
+        $locked = DB::table('commission_ledgers')
+            ->where('policy_payment_id', $payment->id)
+            ->where(fn ($q) => $q->whereNotNull('payout_batch_id')->orWhere('status', 'settled'))
+            ->exists();
+        if ($locked) {
+            return response()->json([
+                'code' => 'payment_commission_paid',
+                'message' => 'ลบการชำระนี้ไม่ได้ เพราะค่าคอมที่เกิดจากการชำระนี้อยู่ในรอบจ่ายค่าคอมแล้ว',
+            ], 409);
         }
         $payment->delete();
 

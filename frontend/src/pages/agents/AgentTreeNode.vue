@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useAgentStore, type Agent } from '../../stores/agents'
+import { levelBadgeClass } from '../../utils/agentLevel'
 
 /** Per-agent rollup entry (from GET /agents/hierarchy-rollup). */
 export interface RollupEntry {
@@ -31,15 +32,7 @@ const roll = computed<RollupEntry | undefined>(() => props.rollup[props.agent.id
 
 const money = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 0 })
 
-// Level badge classes now cover l1–l10.
-const LEVEL_CLASS: Record<string, string> = {
-  l1: 'bg-slate-100 text-slate-600', l2: 'bg-sky-50 text-sky-700',
-  l3: 'bg-violet-50 text-violet-700', l4: 'bg-amber-50 text-amber-700',
-  l5: 'bg-rose-50 text-rose-700', l6: 'bg-orange-50 text-orange-700',
-  l7: 'bg-emerald-50 text-emerald-700', l8: 'bg-teal-50 text-teal-700',
-  l9: 'bg-indigo-50 text-indigo-700', l10: 'bg-fuchsia-50 text-fuchsia-700',
-}
-const levelClass = computed(() => LEVEL_CLASS[props.agent.level] ?? 'bg-slate-100 text-slate-600')
+const levelClass = computed(() => levelBadgeClass(props.agent.level))
 const levelShort = computed(() => (props.agent.level ? props.agent.level.toUpperCase() : '—'))
 </script>
 

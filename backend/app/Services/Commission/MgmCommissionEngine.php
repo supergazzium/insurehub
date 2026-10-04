@@ -80,14 +80,24 @@ class MgmCommissionEngine
         // tax-inclusive payment never over-accrues, while genuine partial
         // payments (< net premium) still pro-rate. Falls back to the raw
         // payment amount when net_premium is unset (legacy policies).
-        $paid = (float) $payment->amount;
+        $paid = (float) ($payment->net_amount !== null && (float) $payment->net_amount > 0 ? $payment->net_amount : $payment->amount);
         if ($paid <= 0) {
             return [];
         }
         $netPremium = $policy->net_premium !== null ? (float) $policy->net_premium : null;
-        $basePremium = ($netPremium !== null && $netPremium > 0)
-            ? min($paid, $netPremium)
-            : $paid;
+        if ($netPremium !== null && $netPremium > 0) {
+            $accrued = (float) CommissionLedger::query()
+                ->where('policy_id', $policy->id)
+                ->where('payout_type', CommissionLedger::TYPE_DIRECT_COMMISSION)
+                ->where('policy_payment_id', '!=', $payment->id)
+                ->sum('base_premium');
+            $basePremium = round(min($paid, max(0.0, $netPremium - $accrued)), 2);
+        } else {
+            $basePremium = $paid;
+        }
+        if ($basePremium <= 0) {
+            return [];
+        }
 
         $seller = Agent::query()->find($policy->writing_agent_id);
         if ($seller === null) {
@@ -247,6 +257,7 @@ class MgmCommissionEngine
             mgmtFeeRate: $sellerMgmtFee,
             tierId: $tierId,
             rankIdAtAccrual: $seller->rank_id !== null ? (int) $seller->rank_id : null,
+            mgmtFeeAmount: round($basePremium * $sellerMgmtFee, 2),
         );
     }
 
@@ -416,6 +427,7 @@ class MgmCommissionEngine
         ?float $mgmtFeeRate,
         ?int $tierId,
         ?int $rankIdAtAccrual,
+        ?float $mgmtFeeAmount = null,
     ): CommissionLedger {
         $key = "payment:{$payment->id}:{$payoutType}:{$beneficiaryAgentId}";
 
@@ -435,6 +447,7 @@ class MgmCommissionEngine
             'base_premium' => $basePremium,
             'rate_applied' => $rateApplied,
             'amount' => $amount,
+            'mgmt_fee_amount' => $mgmtFeeAmount,
             'standard_rate' => $standardRate,
             'mgmt_fee_rate' => $mgmtFeeRate,
             'tier_id' => $tierId,

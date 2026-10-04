@@ -11,7 +11,7 @@ import { fmtDate } from '../../util/dateFormat'
 const router = useRouter()
 
 const agents = ref<AgentOutstandingRow[]>([])
-const totals = ref({ totalAgents: 0, totalItems: 0, totalAmount: 0 })
+const totals = ref<{ totalAgents: number; totalItems: number; totalAmount: number; totalWaiting?: number; totalNet?: number }>({ totalAgents: 0, totalItems: 0, totalAmount: 0 })
 const loading = ref(true)
 const error = ref<string | null>(null)
 
@@ -98,25 +98,39 @@ onMounted(load)
 <template>
   <div class="mx-auto max-w-6xl px-4 py-6">
     <header class="mb-5">
-      <h1 class="text-xl font-semibold text-slate-800">ทำจ่ายค่าคอม — ตัวแทน</h1>
-      <p class="mt-1 text-sm text-slate-500">
-        รายชื่อตัวแทนพร้อมยอดค่าคอมค้างจ่าย คลิกที่ตัวแทนเพื่อดูรายละเอียดและทำจ่าย
-      </p>
+      <div class="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h1 class="text-xl font-semibold text-slate-800">ทำจ่ายค่าคอม — ตัวแทน</h1>
+          <p class="mt-1 text-sm text-slate-500">
+            ค่าคอมพื้นฐาน + ค่าแนะนำ + ค่าบริหารสายงาน ของตัวแทนทุกคน หักภาษี ณ ที่จ่ายแล้ว คลิกที่ตัวแทนเพื่อดูรายละเอียดและทำจ่าย
+          </p>
+        </div>
+        <button type="button" data-testid="open-wht-report" class="rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm text-slate-700 hover:bg-slate-50"
+          @click="router.push({ name: 'commission-wht-report' })">
+          <i class="pi pi-file mr-1 text-xs" /> รายงาน ภ.ง.ด.3 / 53
+        </button>
+      </div>
     </header>
 
     <!-- Summary cards -->
-    <div class="mb-5 grid grid-cols-1 gap-3 sm:grid-cols-3">
+    <div class="mb-5 grid grid-cols-2 gap-3 lg:grid-cols-4">
       <div class="rounded-xl border border-slate-200 bg-white p-4">
-        <div class="text-xs text-slate-500">ตัวแทนที่มียอดค้างจ่าย</div>
+        <div class="text-xs text-slate-500">ตัวแทนที่พร้อมจ่าย</div>
         <div class="mt-1 text-2xl font-semibold text-slate-800">{{ payableCount }}</div>
+        <div class="text-[11px] text-slate-400">{{ totals.totalItems }} รายการ</div>
       </div>
       <div class="rounded-xl border border-slate-200 bg-white p-4">
-        <div class="text-xs text-slate-500">รายการค้างจ่าย</div>
-        <div class="mt-1 text-2xl font-semibold text-slate-800">{{ totals.totalItems }}</div>
+        <div class="text-xs text-slate-500">ยอดพร้อมจ่าย (ก่อนภาษี)</div>
+        <div class="mt-1 text-2xl font-semibold text-slate-800">฿{{ money(totals.totalAmount) }}</div>
       </div>
-      <div class="rounded-xl border border-slate-200 bg-white p-4">
-        <div class="text-xs text-slate-500">ยอดค้างจ่ายรวม</div>
-        <div class="mt-1 text-2xl font-semibold text-emerald-700">฿{{ money(totals.totalAmount) }}</div>
+      <div class="rounded-xl border border-amber-200 bg-amber-50 p-4">
+        <div class="text-xs text-amber-700">รอเงื่อนไข</div>
+        <div class="mt-1 text-2xl font-semibold text-amber-800">฿{{ money(totals.totalWaiting ?? 0) }}</div>
+        <div class="text-[11px] text-amber-600">Freelook / รอรับค่าคอมจากบริษัท / รอลูกค้าชำระ</div>
+      </div>
+      <div class="rounded-xl border border-emerald-200 bg-emerald-50 p-4">
+        <div class="text-xs text-emerald-700">ยอดโอนสุทธิ (หลังหัก ณ ที่จ่าย)</div>
+        <div class="mt-1 text-2xl font-semibold text-emerald-800">฿{{ money(totals.totalNet ?? 0) }}</div>
       </div>
     </div>
 
@@ -168,15 +182,17 @@ onMounted(load)
           <tr>
             <th class="px-4 py-3">รหัสตัวแทน</th>
             <th class="px-4 py-3">ชื่อตัวแทน</th>
-            <th class="px-4 py-3">VAT</th>
-            <th class="px-4 py-3 text-right">รายการ</th>
-            <th class="px-4 py-3 text-right">ยอดค้างจ่าย</th>
+            <th class="px-4 py-3">VAT / หัก ณ ที่จ่าย</th>
+            <th class="px-4 py-3 text-right">ค่าคอมพื้นฐาน</th>
+            <th class="px-4 py-3 text-right">ค่าแนะนำ / สายงาน</th>
+            <th class="px-4 py-3 text-right">รอเงื่อนไข</th>
+            <th class="px-4 py-3 text-right">โอนสุทธิ</th>
             <th class="px-4 py-3"></th>
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          <tr v-if="loading"><td colspan="6" class="px-4 py-10 text-center text-slate-400">กำลังโหลด…</td></tr>
-          <tr v-else-if="filteredAgents.length === 0"><td colspan="6" class="px-4 py-10 text-center text-slate-400">ไม่มีตัวแทนที่มีค่าคอมค้างจ่าย</td></tr>
+          <tr v-if="loading"><td colspan="8" class="px-4 py-10 text-center text-slate-400">กำลังโหลด…</td></tr>
+          <tr v-else-if="filteredAgents.length === 0"><td colspan="8" class="px-4 py-10 text-center text-slate-400">ไม่มีตัวแทนที่มีค่าคอมค้างจ่าย</td></tr>
           <tr
             v-for="a in filteredAgents" :key="a.agentId ?? a.agentCode ?? ''"
             class="cursor-pointer hover:bg-slate-50"
@@ -185,11 +201,20 @@ onMounted(load)
             <td class="px-4 py-3 font-medium text-slate-700">{{ a.agentCode ?? '—' }}</td>
             <td class="px-4 py-3 text-slate-700">{{ a.agentName }}</td>
             <td class="px-4 py-3 text-xs text-slate-500">
-              {{ a.vatType === '3' ? 'รวม VAT' : a.vatType === '2' ? 'บวก VAT' : 'ไม่มี' }}
+              {{ a.vatType === '3' ? 'รวม VAT' : a.vatType === '2' ? 'บวก VAT' : 'ไม่มี VAT' }} · {{ a.whtRate ?? 3 }}%
             </td>
-            <td class="px-4 py-3 text-right text-slate-600">{{ a.itemCount }}</td>
-            <td class="px-4 py-3 text-right font-semibold" :class="a.amount > 0 ? 'text-emerald-700' : 'text-slate-400'">
-              ฿{{ money(a.amount) }}
+            <td class="px-4 py-3 text-right text-slate-600">
+              ฿{{ money((a.byType?.base ?? 0) + (a.byType?.self_mgmt ?? 0)) }}
+              <div class="text-[11px] text-slate-400">{{ a.itemCount }} รายการ</div>
+            </td>
+            <td class="px-4 py-3 text-right text-slate-600">฿{{ money((a.byType?.referral ?? 0) + (a.byType?.override ?? 0)) }}</td>
+            <td class="px-4 py-3 text-right" :class="(a.waitingAmount ?? 0) > 0 ? 'text-amber-700' : 'text-slate-300'">
+              ฿{{ money(a.waitingAmount ?? 0) }}
+              <div v-if="(a.waitingCount ?? 0) > 0" class="text-[11px]">{{ a.waitingCount }} รายการ</div>
+            </td>
+            <td class="px-4 py-3 text-right font-semibold" :class="(a.netAmount ?? 0) > 0 ? 'text-emerald-700' : 'text-slate-400'">
+              ฿{{ money(a.netAmount ?? 0) }}
+              <div v-if="(a.pendingDeduction ?? 0) > 0" class="text-[11px] font-normal text-rose-600">หักคืน −฿{{ money(a.pendingDeduction ?? 0) }}</div>
             </td>
             <td class="px-4 py-3 text-right"><i class="pi pi-chevron-right text-slate-300" /></td>
           </tr>
@@ -216,12 +241,14 @@ onMounted(load)
               <th class="px-4 py-3 text-right">ตัวแทน</th>
               <th class="px-4 py-3 text-right">รายการ</th>
               <th class="px-4 py-3 text-right">ยอดรวม</th>
+              <th class="px-4 py-3 text-right">หัก ณ ที่จ่าย</th>
+              <th class="px-4 py-3 text-right">โอนสุทธิ</th>
               <th class="px-4 py-3">วันที่จ่าย</th>
               <th class="px-4 py-3"></th>
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-if="batches.length === 0"><td colspan="7" class="px-4 py-8 text-center text-slate-400">ยังไม่มีรอบจ่าย</td></tr>
+            <tr v-if="batches.length === 0"><td colspan="9" class="px-4 py-8 text-center text-slate-400">ยังไม่มีรอบจ่าย</td></tr>
             <tr v-for="b in batches" :key="b.id" class="cursor-pointer hover:bg-slate-50" @click="openBatch(b)">
               <td class="px-4 py-3 text-slate-700">{{ fmtDate(b.fromDate) }} – {{ fmtDate(b.toDate) }}</td>
               <td class="px-4 py-3">
@@ -230,6 +257,8 @@ onMounted(load)
               <td class="px-4 py-3 text-right text-slate-600">{{ b.totalAgents }}</td>
               <td class="px-4 py-3 text-right text-slate-600">{{ b.totalItems }}</td>
               <td class="px-4 py-3 text-right font-medium text-slate-800">฿{{ money(b.totalAmount) }}</td>
+              <td class="px-4 py-3 text-right text-slate-600">{{ b.whtTotal == null ? '—' : `฿${money(b.whtTotal)}` }}</td>
+              <td class="px-4 py-3 text-right font-medium text-emerald-700">{{ b.netTotal == null ? '—' : `฿${money(b.netTotal)}` }}</td>
               <td class="px-4 py-3 text-slate-600">{{ b.paymentDate ? fmtDate(b.paymentDate) : '—' }}</td>
               <td class="px-4 py-3 text-right"><i class="pi pi-chevron-right text-slate-300" /></td>
             </tr>

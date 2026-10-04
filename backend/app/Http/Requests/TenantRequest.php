@@ -35,6 +35,20 @@ class TenantRequest extends FormRequest
             'payout.autoApprove' => ['sometimes', 'boolean'],
             'brandColor' => ['sometimes', 'string', 'max:16'],
             'emailSignature' => ['sometimes', 'nullable', 'string'],
+            'paymentChannels' => ['sometimes', 'nullable', 'string', 'max:2000'],
+            'policyVerifyRequired' => ['sometimes', 'boolean'],
+            'freelookDaysStandard' => ['sometimes', 'integer', 'min:1', 'max:120'],
+            'freelookDaysRemote' => ['sometimes', 'integer', 'min:1', 'max:120'],
+            'noCommissionWindowDays' => ['sometimes', 'integer', 'min:7', 'max:3650'],
+            'payoutRequireFreelook' => ['sometimes', 'boolean'],
+            'payoutRequireInsurerReceived' => ['sometimes', 'boolean'],
+            'payoutRequireCustomerPaid' => ['sometimes', 'boolean'],
+            'whtRateIndividual' => ['sometimes', 'numeric', 'min:0', 'max:15'],
+            'whtRateCorporate' => ['sometimes', 'numeric', 'min:0', 'max:15'],
+            'customerTiers' => ['sometimes', 'array', 'max:3'],
+            'customerTiers.*.key' => ['required_with:customerTiers', 'string', 'in:'.implode(',', \App\Support\CustomerTier::KEYS)],
+            'customerTiers.*.label' => ['nullable', 'string', 'max:32'],
+            'customerTiers.*.min' => ['nullable', 'numeric', 'min:0'],
         ];
     }
 
@@ -58,6 +72,16 @@ class TenantRequest extends FormRequest
             'commissionMode' => 'commission_mode',
             'brandColor' => 'brand_color',
             'emailSignature' => 'email_signature',
+            'paymentChannels' => 'payment_channels',
+            'policyVerifyRequired' => 'policy_verify_required',
+            'freelookDaysStandard' => 'freelook_days_standard',
+            'freelookDaysRemote' => 'freelook_days_remote',
+            'noCommissionWindowDays' => 'no_commission_window_days',
+            'payoutRequireFreelook' => 'payout_require_freelook',
+            'payoutRequireInsurerReceived' => 'payout_require_insurer_received',
+            'payoutRequireCustomerPaid' => 'payout_require_customer_paid',
+            'whtRateIndividual' => 'wht_rate_individual',
+            'whtRateCorporate' => 'wht_rate_corporate',
         ];
         $out = [];
         foreach ($map as $camel => $snake) {
@@ -76,6 +100,13 @@ class TenantRequest extends FormRequest
             if (array_key_exists('autoApprove', $p)) {
                 $out['payout_auto_approve'] = $p['autoApprove'];
             }
+        }
+        if (array_key_exists('customerTiers', $v)) {
+            $out['customer_tiers'] = array_map(fn ($t) => [
+                'key' => $t['key'],
+                'label' => $t['label'] ?? null,
+                'min' => isset($t['min']) && $t['min'] !== '' ? (float) $t['min'] : null,
+            ], $v['customerTiers']);
         }
         return $out;
     }

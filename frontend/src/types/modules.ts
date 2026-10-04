@@ -215,7 +215,7 @@ export const MODULES: ModuleDef[] = [
     i18nKey: 'followUps',
     group: 'business',
     functions: [
-      'ติดตามงานค้าง แยกตามประเภท (รออนุมัติ / เลขกรมธรรม์ / จัดส่ง / Freelook / ค่าคอม / ยกเลิก)',
+      'ติดตามงานค้าง แยกตามประเภท (รออนุมัติ / เลขกรมธรรม์ / จัดส่ง / Freelook / ยังไม่ชำระ / ค่าคอม / ยกเลิก / รอ Verify)',
     ],
   },
   // NOTE: `commission-engine` and `commission-ledger` module entries removed

@@ -43,6 +43,7 @@ class PolicyObserver
     {
         $this->captureCommissionSnapshot($policy);
         $this->seedYears($policy);
+        $this->auditYearOverride($policy);
 
         // Rows imported / seeded straight into issued|active get their
         // schedule now; normal policies get it when they're issued (below).
@@ -59,6 +60,7 @@ class PolicyObserver
     public function updated(Policy $policy): void
     {
         $this->auditYearChange($policy);
+        $this->auditYearOverride($policy);
         $this->logTrackedChange($policy, 'fulfilmentUpdated', Policy::FULFILMENT_COLUMNS);
         if (! $policy->wasChanged('status')) {
             $this->logTrackedChange($policy, 'approvalUpdated', Policy::APPROVAL_COLUMNS);
@@ -79,6 +81,9 @@ class PolicyObserver
      */
     private function seedYears(Policy $policy): void
     {
+        if ($policy->yearsResolved) {
+            return;
+        }
         try {
             $suggested = PolicyYears::suggest($policy);
             if ($policy->customer_year === null) {
@@ -168,6 +173,30 @@ class PolicyObserver
             'ip' => request()?->ip(),
             'result' => 'success',
             'metadata' => $changes,
+        ]);
+    }
+
+    private function auditYearOverride(Policy $policy): void
+    {
+        $pending = $policy->pendingYearsAudit;
+        if ($pending === null) {
+            return;
+        }
+        $policy->pendingYearsAudit = null;
+        if ($pending['suggested'] === $pending['chosen']) {
+            return;
+        }
+        $user = auth()->user();
+        AuditEntry::create([
+            'tenant_id' => $policy->tenant_id,
+            'user_id' => $user?->id,
+            'occurred_at' => now(),
+            'actor' => $user?->name ?? 'system',
+            'action' => 'policy.years_overridden',
+            'target' => 'policy:'.$policy->id,
+            'ip' => request()?->ip(),
+            'result' => 'success',
+            'metadata' => $pending,
         ]);
     }
 

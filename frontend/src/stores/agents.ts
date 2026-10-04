@@ -4,7 +4,7 @@
 // mutating actions) so existing pages don't have to change. Differences:
 //   - `agents` and `links` start empty; call `load()` once on app boot or
 //     when the agents module mounts.
-//   - The mutating actions (`createAgent`, `updateAgent`, `setLevel`,
+//   - The mutating actions (`createAgent`, `updateAgent`,
 //     `setActive`, `transferUpline`, `generateLink`, `revokeLink`) are now
 //     `async` and return Promises. Existing call sites that ignored the
 //     return value keep working — they just now resolve when the server
@@ -88,13 +88,6 @@ export interface RecruitmentLink {
   signups: number
   pendingSignups: number
   revoked: boolean
-}
-
-// Legacy commission-percent-by-level fallback. Real commission now comes from
-// commission_tier_rank_rates; this is kept only for the unused setLevel helper.
-const LEVEL_PCT: Record<AgentLevel, number> = {
-  l1: 25, l2: 35, l3: 45, l4: 55, l5: 65,
-  l6: 70, l7: 75, l8: 80, l9: 85, l10: 90,
 }
 
 export const useAgentStore = defineStore('agents', () => {
@@ -271,10 +264,6 @@ export const useAgentStore = defineStore('agents', () => {
     agents.value = agents.value.map((a) => (a.id === id ? updated : a))
   }
 
-  async function setLevel(id: string, level: AgentLevel): Promise<void> {
-    await updateAgent(id, { level, commissionPct: LEVEL_PCT[level] })
-  }
-
   async function setActive(id: string, active: boolean): Promise<void> {
     await updateAgent(id, { active })
   }
@@ -338,14 +327,11 @@ export const useAgentStore = defineStore('agents', () => {
     // mutations
     createAgent,
     updateAgent,
-    setLevel,
     setActive,
     transferUpline,
     // recruitment
     getLinkForAgent,
     generateLink,
     revokeLink,
-    // constants
-    LEVEL_PCT,
   }
 })

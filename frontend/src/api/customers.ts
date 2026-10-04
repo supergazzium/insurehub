@@ -21,8 +21,12 @@ export interface CustomerListRow {
   taxId: string
   passport: string
   phone: string
+  telPhone?: string
   email: string
   province: string
+  gender?: 'M' | 'F' | '' | null
+  totalPremium?: number
+  tier?: { key: string; label: string } | null
   assignedAgentId: string | null
   assignedAgentCode: string | null
   assignedAgentName: string
@@ -39,9 +43,11 @@ export interface CustomerListFilters {
   active?: boolean
   withPolicies?: boolean
   customerType?: string
+  gender?: 'M' | 'F' | 'none'
+  tier?: string
   page?: number
   perPage?: number
-  sortBy?: 'customerCode' | 'firstName' | 'lastName' | 'province' | 'registeredAt' | 'newest'
+  sortBy?: 'customerCode' | 'firstName' | 'lastName' | 'gender' | 'totalPremium' | 'registeredAt' | 'newest'
   sortDir?: 'asc' | 'desc'
 }
 
@@ -55,6 +61,18 @@ export function fetchCustomerList(filters: CustomerListFilters = {}) {
  *  and callers here only need a handful. */
 export function fetchCustomer(id: string) {
   return api.get<{ data: Record<string, unknown> }>(`customers/${id}`)
+}
+
+export interface CustomerAuditEntry {
+  id: string
+  occurredAt: string | null
+  actor: string
+  action: string
+  changes: Record<string, { from: unknown; to: unknown }>
+}
+
+export function fetchCustomerAudit(id: string) {
+  return api.get<{ data: CustomerAuditEntry[] }>(`customers/${id}/audit`)
 }
 
 // ── C-12 Prior assets ─────────────────────────────────────────────────

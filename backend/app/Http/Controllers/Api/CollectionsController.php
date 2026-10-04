@@ -9,6 +9,7 @@ use App\Models\PaymentReminder;
 use App\Models\Policy;
 use App\Models\PolicyInstallment;
 use App\Services\Policy\InstallmentSchedule;
+use App\Support\PolicyPeriodLabel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -52,7 +53,7 @@ class CollectionsController extends Controller
                 'p.main_premium', 'p.compulsory_premium', 'p.total_premium_paid',
                 'p.installment_mode', 'p.installment_term',
                 'p.effective_date', 'p.first_due_inst_date',
-                'c.customer_code', 'c.phone as customer_phone',
+                'c.customer_code', DB::raw("COALESCE(NULLIF(c.phone, ''), c.tel_phone) as customer_phone"),
                 DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
                 'a.agent_code',
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
@@ -110,7 +111,7 @@ class CollectionsController extends Controller
                 'p.main_premium', 'p.compulsory_premium', 'p.total_premium_paid',
                 'p.installment_mode', 'p.installment_term',
                 'p.effective_date', 'p.first_due_inst_date',
-                'c.customer_code', 'c.phone as customer_phone',
+                'c.customer_code', DB::raw("COALESCE(NULLIF(c.phone, ''), c.tel_phone) as customer_phone"),
                 DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
                 'a.agent_code',
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
@@ -126,6 +127,18 @@ class CollectionsController extends Controller
         }
 
         $row = $this->buildRow($r, Carbon::today(), $policy->installments()->get());
+        $row['periodLabel'] = PolicyPeriodLabel::forPolicy($policy);
+        if (is_array($row['schedule'])) {
+            $total = count($row['schedule']);
+            foreach ($row['schedule'] as $k => $s) {
+                $row['schedule'][$k]['periodLabel'] = PolicyPeriodLabel::format(
+                    (int) $policy->policy_year,
+                    PolicyPeriodLabel::endorsementNo($policy->id, $s['dueDate'] ?? null),
+                    (int) $s['no'],
+                    $total,
+                );
+            }
+        }
 
         // Actual payment records (auditable source of truth).
         $payments = DB::table('policy_payments')

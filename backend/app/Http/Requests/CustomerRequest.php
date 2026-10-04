@@ -51,7 +51,7 @@ class CustomerRequest extends FormRequest
         // Three customer types: Thai individual, foreign individual (passport
         // instead of Thai national ID), or corporate. `is*` flags below drive
         // the required-vs-optional decisions on each field.
-        $customerType = $this->input('customerType', 'individual');
+        $customerType = $this->input('customerType', $this->route('customer')?->customer_type ?? 'individual');
         $isIndividual = $customerType === 'individual';
         $isForeign = $customerType === 'foreign_individual';
         $isPerson = $isIndividual || $isForeign;
@@ -165,6 +165,23 @@ class CustomerRequest extends FormRequest
             'notes' => ['sometimes', 'nullable', 'string'],
             'active' => ['sometimes', 'boolean'],
         ];
+    }
+
+    protected function prepareForValidation(): void
+    {
+        $clean = fn ($v) => is_string($v) ? preg_replace('/(?!^\+)[^\d]/', '', trim($v)) : $v;
+        $merge = [];
+        foreach (['phone', 'telPhone'] as $key) {
+            if ($this->has($key)) {
+                $merge[$key] = $clean($this->input($key));
+            }
+        }
+        if (is_array($this->input('contactPerson')) && array_key_exists('phone', $this->input('contactPerson'))) {
+            $merge['contactPerson'] = array_merge($this->input('contactPerson'), ['phone' => $clean($this->input('contactPerson.phone'))]);
+        }
+        if ($merge !== []) {
+            $this->merge($merge);
+        }
     }
 
     /**

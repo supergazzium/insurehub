@@ -17,6 +17,8 @@ class CommissionLedger extends Model
         'amount' => 'decimal:2',
         'standard_rate' => 'decimal:5',
         'mgmt_fee_rate' => 'decimal:5',
+        'mgmt_fee_amount' => 'decimal:2',
+        'paid_at' => 'datetime',
     ];
 
     /** MGM payout type values. String constants rather than an enum so the DB
@@ -38,6 +40,8 @@ class CommissionLedger extends Model
     public const STATUS_SETTLED = 'settled';
 
     public const STATUS_REVERSED = 'reversed';
+
+    public const PAYABLE_TYPES = [self::TYPE_DIRECT_COMMISSION, self::TYPE_REFERRAL_FEE, self::TYPE_MANAGEMENT_DIFFERENTIAL];
 
     public const PAYER_INSURER = 'INSURER';
 

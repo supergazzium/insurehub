@@ -12,6 +12,7 @@ export interface ScheduleLine {
   installmentId?: string
   amountPaid?: number
   status?: 'pending' | 'partial' | 'paid'
+  periodLabel?: string
 }
 
 export interface CollectionRow {
@@ -81,6 +82,7 @@ export interface CollectionDetail extends CollectionRow {
   carrierName: string | null
   productName: string | null
   payments: PaymentRecord[]
+  periodLabel?: string
 }
 export function fetchCollection(policyId: string) {
   return api.get<{ data: CollectionDetail }>(`collections/${policyId}`)

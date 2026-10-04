@@ -42,9 +42,14 @@ export interface KycDoc {
 export interface AssignmentHistoryEntry {
   id: string
   fromAgentId: string | null
+  fromAgentCode?: string | null
+  fromAgentName?: string | null
   toAgentId: string | null
+  toAgentCode?: string | null
+  toAgentName?: string | null
   reason: string
   byUserId: string
+  byUserName?: string | null
   at: string
 }
 
@@ -117,9 +122,26 @@ export interface Customer {
   notes: string
   activePolicyCount: number
   totalPolicyCount: number
+  policyCounts?: CustomerPolicyCounts
+  salesSummary?: CustomerSalesSummary
   kycDocs: KycDoc[]
   assignmentHistory: AssignmentHistoryEntry[]
   active: boolean
+}
+
+export interface CustomerPolicyCounts {
+  inForce: number
+  inProgress: number
+  ended: number
+  total: number
+}
+
+export interface CustomerSalesSummary {
+  totalPremium: number
+  premiumThisYear: number
+  policyCount: number
+  year: number
+  tier: { key: string; label: string } | null
 }
 
 export interface CustomerReferralLink {

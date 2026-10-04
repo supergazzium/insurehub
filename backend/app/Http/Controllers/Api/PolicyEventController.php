@@ -8,6 +8,7 @@ use App\Http\Resources\PolicyEventResource;
 use App\Http\Resources\PolicyResource;
 use App\Models\Policy;
 use App\Models\PolicyEvent;
+use App\Services\Policy\PolicyVerification;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\ValidationException;
@@ -101,6 +102,23 @@ class PolicyEventController extends ApiController
 
         // Assert (from, to) is in the matrix.
         $this->assertTransitionAllowed($policy->status, $type);
+        PolicyVerification::assertNotLocked($policy);
+
+        if (PolicyVerification::enabled((int) $policy->tenant_id)) {
+            $updates = $this->updatesForTransition($type, $payload);
+            $to = $updates['status'] ?? null;
+            $action = null;
+            if (PolicyVerification::isCreateTransition($policy, $to)) {
+                $action = 'create';
+            } elseif ($to !== null && ! in_array($policy->status, PolicyVerification::CREATE_FROM, true)) {
+                $action = 'update';
+            }
+            if ($action !== null) {
+                $change = PolicyVerification::submit($policy, $action, $updates, [['type' => $type, 'payload' => $payload]], $request->user());
+
+                return PolicyVerification::pendingResponse($policy, $change);
+            }
+        }
 
         DB::transaction(function () use ($policy, $type, $payload, $request): void {
             $updates = $this->updatesForTransition($type, $payload);
@@ -173,6 +191,26 @@ class PolicyEventController extends ApiController
                     ],
                 ], 409));
             }
+        }
+
+        PolicyVerification::assertNotLocked($policy);
+        if (PolicyVerification::enabled((int) $policy->tenant_id)) {
+            $updates = [
+                'status' => 'issued',
+                'policy_no' => $data['policyNo'],
+                'issue_date' => $data['issueDate'],
+            ];
+            foreach (['periodPaidEnd' => 'period_paid_end', 'policyEnd' => 'policy_end',
+                      'mailingAddByPolicy' => 'mailing_add_by_policy', 'mailingDate' => 'mailing_date',
+                      'mailingNote' => 'mailing_note'] as $camel => $snake) {
+                if (array_key_exists($camel, $data)) {
+                    $updates[$snake] = $data[$camel];
+                }
+            }
+
+            return PolicyVerification::pendingResponse($policy, PolicyVerification::submit(
+                $policy, 'update', $updates, [['type' => 'issued', 'payload' => $data]], $request->user(),
+            ));
         }
 
         DB::transaction(function () use ($policy, $data, $request): void {

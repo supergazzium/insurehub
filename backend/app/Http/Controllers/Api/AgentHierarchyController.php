@@ -6,7 +6,6 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\Agent;
-use App\Models\Rank;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -21,7 +20,7 @@ class AgentHierarchyController extends Controller
 {
     /**
      * PATCH /agents/{agent}/hierarchy
-     * Body (all optional): parentAgentId, level (l1..l10).
+     * Body (all optional): parentAgentId.
      */
     public function update(Request $request, Agent $agent): JsonResponse
     {
@@ -58,20 +57,10 @@ class AgentHierarchyController extends Controller
             }
         }
 
-        // ── Level (manual override) — keeps rank_id in sync ─────────────────
         if (array_key_exists('level', $data)) {
-            if ($data['level'] === null) {
-                $changes['level'] = null;
-                $changes['rank_id'] = null;
-            } else {
-                $levelNum = (int) substr($data['level'], 1);
-                $rank = Rank::query()->where('level', $levelNum)->first();
-                if ($rank === null) {
-                    throw ValidationException::withMessages(['level' => 'ไม่พบระดับนี้']);
-                }
-                $changes['level'] = $data['level'];
-                $changes['rank_id'] = $rank->id;
-            }
+            throw ValidationException::withMessages([
+                'level' => 'เปลี่ยนระดับโดยตรงไม่ได้ ให้ส่งคำขอปรับระดับเพื่อให้ InsureHub อนุมัติ',
+            ]);
         }
 
         if ($changes !== []) {

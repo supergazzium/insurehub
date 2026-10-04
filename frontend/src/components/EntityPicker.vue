@@ -53,7 +53,7 @@ const emit = defineEmits<{
   /** Fires with the full row when a pick happens (or null on clear). */
   (e: 'picked', row: T | null): void
   /** Fires when the "+ New" button is clicked. Parent opens their modal. */
-  (e: 'newClick'): void
+  (e: 'newClick', query: string): void
 }>()
 
 const q = ref(props.initialLabel ?? '')
@@ -134,7 +134,7 @@ watch(() => props.modelValue, (id) => {
 // External hydrate: initialLabel arriving late (e.g. after ensureDetail)
 // updates the input if the operator hasn't typed anything.
 watch(() => props.initialLabel, (label) => {
-  if (label && props.modelValue !== '' && q.value === '') q.value = label
+  if (label && props.modelValue !== '') q.value = label
 })
 
 const showClear = computed(() => props.modelValue !== '' || q.value !== '')
@@ -159,8 +159,8 @@ onBeforeUnmount(() => window.clearTimeout(debounceTimer))
         <i class="pi pi-spin pi-spinner mr-1" /> กำลังค้นหา…
       </div>
       <template v-else>
-        <div v-if="results.length === 0 && !newLabel" class="px-3 py-3 text-xs text-slate-500 text-center">
-          ไม่พบข้อมูล
+        <div v-if="results.length === 0" class="px-3 py-3 text-xs text-slate-500 text-center" data-testid="entity-picker-empty">
+          ไม่พบข้อมูล<template v-if="newLabel && q.trim()"> "{{ q.trim() }}"</template>
         </div>
         <!-- `r as T` casts through Vue's UnwrapRefSimple<T> which strips
              optional properties. The row shape is unchanged at runtime;
@@ -180,10 +180,11 @@ onBeforeUnmount(() => window.clearTimeout(debounceTimer))
         <!-- "+ New" affordance rendered last so it stays out of the way of
              pick suggestions but is always available. Parent handles the
              actual create flow (modal, popup + BroadcastChannel, etc). -->
-        <button v-if="newLabel" type="button"
-          @mousedown.prevent="emit('newClick')"
-          class="w-full text-left px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50 border-t border-slate-100">
-          <i class="pi pi-plus text-[10px] mr-1" /> {{ newLabel }}
+        <button v-if="newLabel" type="button" data-testid="entity-picker-new"
+          @mousedown.prevent="open = false; emit('newClick', q.trim())"
+          :class="['w-full text-left px-3 py-1.5 text-xs text-brand-600 hover:bg-brand-50 border-t border-slate-100',
+            results.length === 0 ? 'font-semibold bg-brand-50/60' : '']">
+          <i class="pi pi-plus text-[10px] mr-1" /> {{ newLabel }}<template v-if="results.length === 0 && q.trim()"> "{{ q.trim() }}"</template>
         </button>
       </template>
     </div>

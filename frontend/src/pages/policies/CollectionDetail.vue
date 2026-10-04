@@ -8,6 +8,7 @@ import {
 import { ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
 import PolicyPaymentModal from './PolicyPaymentModal.vue'
+import PolicyPeriodBadge from '../../components/PolicyPeriodBadge.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -170,7 +171,10 @@ onMounted(load)
           </thead>
           <tbody class="divide-y divide-slate-100">
             <tr v-for="s in data.schedule" :key="s.no" :class="s.overdue ? 'bg-rose-50/40' : ''">
-              <td class="px-4 py-2 text-slate-700">งวดที่ {{ s.no }}/{{ data.schedule.length }}</td>
+              <td class="px-4 py-2 text-slate-700">
+                งวดที่ {{ s.no }}/{{ data.schedule.length }}
+                <PolicyPeriodBadge v-if="s.periodLabel" :label="s.periodLabel" class="ml-1" />
+              </td>
               <td class="px-4 py-2 text-right text-slate-700">฿{{ money(s.amount) }}</td>
               <td class="px-4 py-2 text-right text-slate-500">{{ s.amountPaid ? '฿' + money(s.amountPaid) : '—' }}</td>
               <td class="px-4 py-2 text-slate-500">{{ s.dueDate ? fmtDate(s.dueDate) : '—' }}</td>

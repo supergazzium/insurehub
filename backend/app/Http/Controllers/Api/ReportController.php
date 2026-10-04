@@ -4,6 +4,8 @@ declare(strict_types=1);
 
 namespace App\Http\Controllers\Api;
 
+use App\Support\PolicyPeriodLabel;
+use App\Support\RenewalFollowUpOptions;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Database\Query\Builder;
 use Illuminate\Http\JsonResponse;
@@ -47,8 +49,12 @@ class ReportController extends ApiController
         // Base query — same joins as before, plus the renewal-event
         // sub-selects used by the UI's "contacted / notice sent / started"
         // status chips.
-        $base = $this->expiringSoonBaseQuery($tenantId, $from, $to);
+        $followupDue = $request->boolean('followupDue');
+        $base = $this->expiringSoonBaseQuery($tenantId, $from, $to, ! $followupDue);
         $this->applyExpiringSoonFilters($base, $request);
+        if ($followupDue) {
+            $this->onlyFollowupDue($base);
+        }
 
         // Summary is computed against the FILTERED query (before pagination).
         // We clone and REPLACE the SELECT list — otherwise the base's row-
@@ -59,6 +65,12 @@ class ReportController extends ApiController
         $summary = $summaryQ
             ->selectRaw('COUNT(*) as total, SUM(CASE WHEN DATEDIFF(p.expiry_date, CURDATE()) <= 7 THEN 1 ELSE 0 END) as urgent')
             ->first();
+
+        $dueQ = $this->expiringSoonBaseQuery($tenantId, $from, $to, false);
+        $this->applyExpiringSoonFilters($dueQ, $request);
+        $this->onlyFollowupDue($dueQ);
+        $dueQ->columns = null;
+        $followupDueCount = (int) $dueQ->count();
 
         // Sortable columns — whitelisted so callers can't order by arbitrary
         // SQL. Default is expiry-date ascending (soonest first).
@@ -76,8 +88,14 @@ class ReportController extends ApiController
             ->orderBy('p.id') // deterministic tiebreak within equal sort values
             ->paginate($perPage);
 
+        $labels = PolicyPeriodLabel::forListRows($paginator->items());
         $items = collect($paginator->items())->map(fn ($r) => [
             'policyId' => (string) $r->id,
+            'policyYear' => (int) ($r->policy_year ?? 1),
+            'periodLabel' => $labels[(string) $r->id] ?? null,
+            'renewedPolicyId' => $r->renewed_policy_id !== null ? (string) $r->renewed_policy_id : null,
+            'renewedApplicationNo' => $r->renewed_application_no,
+            'renewedStatus' => $r->renewed_status,
             'applicationNo' => $r->application_no,
             'policyNo' => $r->policy_no,
             'expiryDate' => $r->expiry_date,
@@ -101,7 +119,21 @@ class ReportController extends ApiController
             'productName' => $r->product_name,
             'productType' => $r->product_type,
             'productMainRider' => $r->product_main_rider,
+            'productCategory' => $r->product_category,
+            'productSubCategory' => $r->product_sub_category,
             'motorLicenseNo' => $r->motor_license_no,
+            'motorVehicle' => trim(($r->motor_vehicle_brand ?? '').' '.($r->motor_vehicle_model ?? '')) ?: null,
+            'lastFollowup' => $r->lf_id !== null ? [
+                'id' => (string) $r->lf_id,
+                'at' => $r->lf_created_at,
+                'channel' => $r->lf_channel,
+                'result' => $r->lf_result,
+                'reasonCode' => $r->lf_reason_code,
+                'reasonLabel' => RenewalFollowUpOptions::reasonLabel($r->lf_reason_code),
+                'note' => $r->lf_note,
+                'nextAt' => $r->lf_next_at,
+                'byName' => $r->lf_by_name,
+            ] : null,
             'lastContactedAt' => $r->last_contacted_at,
             'lastNoticeSentAt' => $r->last_notice_sent_at,
             'renewalStartedAt' => $r->renewal_started_at,
@@ -127,6 +159,7 @@ class ReportController extends ApiController
             'summary' => [
                 'totalInWindow' => (int) ($summary->total ?? 0),
                 'urgentCount' => (int) ($summary->urgent ?? 0),
+                'followupDueCount' => $followupDueCount,
             ],
         ]);
     }
@@ -135,7 +168,7 @@ class ReportController extends ApiController
      * Build the base joined query for the renewal-pipeline endpoints. Keeps
      * the FROM/JOIN chain identical between the JSON and PDF exports.
      */
-    private function expiringSoonBaseQuery(int $tenantId, string $from, string $to): Builder
+    private function expiringSoonBaseQuery(int $tenantId, string $from, string $to, bool $withWindow = true): Builder
     {
         $latestContacted = DB::table('policy_events')
             ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
@@ -169,11 +202,26 @@ class ReportController extends ApiController
             ->where('type', 'renewalQuoteSent')
             ->groupBy('policy_id');
         $latestDeclined = DB::table('policy_events')
-            ->select('policy_id', DB::raw('MAX(occurred_at) as latest'))
+            ->select('policy_id', DB::raw('MAX(occurred_at) as latest'), DB::raw('MAX(id) as latest_id'))
             ->where('type', 'renewalDeclined')
             ->groupBy('policy_id');
+        $latestReopened = DB::table('policy_events')
+            ->select('policy_id', DB::raw('MAX(id) as latest_id'))
+            ->where('type', 'renewalReopened')
+            ->groupBy('policy_id');
+        $latestFollowup = DB::table('renewal_followups')
+            ->select('policy_id', DB::raw('MAX(id) as last_id'))
+            ->groupBy('policy_id');
+        $renewalChildren = DB::table('policies')
+            ->whereNotNull('ref_app_to_id')
+            ->select(
+                'ref_app_to_id',
+                DB::raw('COUNT(*) as any_children'),
+                DB::raw("MAX(CASE WHEN deleted_at IS NULL AND status NOT IN ('cancelled','rejected') THEN id END) as live_child_id"),
+            )
+            ->groupBy('ref_app_to_id');
 
-        return DB::table('policies as p')
+        $query = DB::table('policies as p')
             ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
             ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
             ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
@@ -186,17 +234,22 @@ class ReportController extends ApiController
             ->leftJoinSub($latestQuotePrepared, 'ev_qp', fn ($j) => $j->on('ev_qp.policy_id', '=', 'p.id'))
             ->leftJoinSub($latestQuoteSent, 'ev_qs', fn ($j) => $j->on('ev_qs.policy_id', '=', 'p.id'))
             ->leftJoinSub($latestDeclined, 'ev_dc', fn ($j) => $j->on('ev_dc.policy_id', '=', 'p.id'))
+            ->leftJoinSub($latestReopened, 'ev_ro', fn ($j) => $j->on('ev_ro.policy_id', '=', 'p.id'))
+            ->leftJoinSub($latestFollowup, 'lfm', fn ($j) => $j->on('lfm.policy_id', '=', 'p.id'))
+            ->leftJoin('renewal_followups as lf', 'lf.id', '=', 'lfm.last_id')
+            ->leftJoin('users as lfu', 'lfu.id', '=', 'lf.created_by_user_id')
+            ->leftJoinSub($renewalChildren, 'rn', fn ($j) => $j->on('rn.ref_app_to_id', '=', 'p.id'))
+            ->leftJoin('policies as rnp', 'rnp.id', '=', 'rn.live_child_id')
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->where('p.status', 'active')
-            ->whereBetween('p.expiry_date', [$from, $to])
             ->select([
                 'p.id', 'p.application_no', 'p.policy_no',
                 'p.expiry_date', 'p.annual_premium',
                 'p.motor_license_no', 'p.motor_vehicle_brand', 'p.motor_vehicle_model',
                 DB::raw('DATEDIFF(p.expiry_date, CURDATE()) as days_remaining'),
                 'c.customer_code', 'c.email as customer_email',
-                'c.phone as customer_phone', 'c.customer_type',
+                DB::raw("COALESCE(NULLIF(c.phone, ''), c.tel_phone) as customer_phone"), 'c.customer_type',
                 DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
                 'a.agent_code', 'a.email as agent_email',
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
@@ -206,6 +259,11 @@ class ReportController extends ApiController
                 'pr.id as product_id_out', 'pr.code as product_code',
                 'pr.name as product_name', 'pr.type as product_type',
                 'pr.main_rider as product_main_rider',
+                'pr.category as product_category', 'pr.sub_category as product_sub_category',
+                'lf.id as lf_id', 'lf.created_at as lf_created_at', 'lf.channel as lf_channel',
+                'lf.result as lf_result', 'lf.reason_code as lf_reason_code', 'lf.note as lf_note',
+                'lf.next_followup_at as lf_next_at', 'lfu.name as lf_by_name',
+                'ev_dc.latest_id as renewal_declined_id', 'ev_ro.latest_id as renewal_reopened_id',
                 'ev_c.latest as last_contacted_at',
                 'ev_n.latest as last_notice_sent_at',
                 'ev_r.latest as renewal_started_at',
@@ -214,7 +272,25 @@ class ReportController extends ApiController
                 'ev_qp.latest as quote_prepared_at',
                 'ev_qs.latest as quote_sent_at',
                 'ev_dc.latest as renewal_declined_at',
+                'p.policy_year', 'p.installment_term', 'p.premium_mode',
+                DB::raw('COALESCE(rn.any_children, 0) as renewal_children'),
+                'rn.live_child_id as renewed_policy_id',
+                'rnp.application_no as renewed_application_no',
+                'rnp.status as renewed_status',
             ]);
+
+        if ($withWindow) {
+            $query->whereBetween('p.expiry_date', [$from, $to]);
+        }
+
+        return $query;
+    }
+
+    private function onlyFollowupDue(Builder $q): void
+    {
+        $q->whereNotNull('lf.next_followup_at')
+            ->whereRaw('lf.next_followup_at <= CURDATE()')
+            ->whereNull('rn.live_child_id');
     }
 
     /**
@@ -235,11 +311,13 @@ class ReportController extends ApiController
     private function renewalStage(object $r): string
     {
         // Renewed is the happy terminal — a new-term draft/policy was started.
-        if ($r->renewal_started_at !== null) {
+        if ($r->renewed_policy_id !== null
+            || ($r->renewal_started_at !== null && (int) $r->renewal_children === 0)) {
             return 'renewed';
         }
         // Declined is terminal unless renewed (handled above).
-        if ($r->renewal_declined_at !== null) {
+        if ($r->renewal_declined_at !== null
+            && ($r->renewal_reopened_id === null || (int) $r->renewal_declined_id > (int) $r->renewal_reopened_id)) {
             return 'declined';
         }
         // Walk the quotation ladder from furthest-reached back to earliest.
@@ -287,6 +365,24 @@ class ReportController extends ApiController
         }
         if ($insureType = $request->input('insureType')) {
             $q->where('ca.insure_type', $insureType);
+        }
+        if ($category = $request->input('productCategory')) {
+            $q->where('pr.category', $category);
+        }
+        $subCategory = (string) $request->input('productSubCategory', '');
+        if ($subCategory === '__none') {
+            $q->where(function ($w): void {
+                $w->whereNull('pr.sub_category')
+                    ->orWhere('pr.sub_category', '')
+                    ->orWhereNotExists(function ($e): void {
+                        $e->select(DB::raw(1))
+                            ->from('product_taxonomy as tx')
+                            ->whereColumn('tx.category', 'pr.category')
+                            ->whereColumn('tx.subcategory', 'pr.sub_category');
+                    });
+            });
+        } elseif ($subCategory !== '') {
+            $q->where('pr.sub_category', $subCategory);
         }
         $search = trim((string) $request->input('q', ''));
         if ($search !== '') {
@@ -354,9 +450,16 @@ class ReportController extends ApiController
 
         // Same base query + filter chain as the JSON endpoint — the PDF is
         // guaranteed to match what the user just saw on screen.
-        $q = $this->expiringSoonBaseQuery($tenantId, $from, $to);
+        $followupDue = $request->boolean('followupDue');
+        $q = $this->expiringSoonBaseQuery($tenantId, $from, $to, ! $followupDue);
         $this->applyExpiringSoonFilters($q, $request);
+        if ($followupDue) {
+            $this->onlyFollowupDue($q);
+        }
         $rows = $q->orderBy('p.expiry_date')->limit(2000)->get();
+        $rows->each(fn ($r) => $r->lf_summary = $r->lf_id !== null ? self::followupSummary($r) : null);
+        $labels = PolicyPeriodLabel::forListRows($rows);
+        $rows->each(fn ($r) => $r->period_label = $labels[(string) $r->id] ?? null);
 
         // Filename per spec — always includes the effective window.
         $filename = "Renewals-{$days}d-{$from}-to-{$to}.pdf";
@@ -376,15 +479,48 @@ class ReportController extends ApiController
                 'filters' => array_filter([
                     'ค้นหา' => $request->input('q') ?: null,
                     'ช่วงวันหมดอายุ' => "{$from} → {$to}",
-                    'บริษัท' => $request->input('carrierId') ?: null,
-                    'แผน' => $request->input('productId') ?: null,
+                    'บริษัท' => $this->lookupName('carriers', $request->input('carrierId'), "CONCAT(code, ' · ', name)"),
+                    'แผน' => $this->lookupName('products', $request->input('productId'), "CONCAT(code, ' · ', name)"),
+                    'ตัวแทน' => $this->lookupName('agents', $request->input('writingAgentId'), "CONCAT(agent_code, ' · ', first_name, ' ', last_name)"),
+                    'หมวดผลิตภัณฑ์' => $request->input('productCategory') ?: null,
+                    'หมวดย่อย' => $request->input('productSubCategory') === '__none' ? 'ยังไม่ระบุหมวดย่อย' : ($request->input('productSubCategory') ?: null),
                     'ประเภทผลิตภัณฑ์' => $request->input('productType') ?: null,
                     'ประเภทประกัน' => $request->input('insureType') ?: null,
+                    'ติดตาม' => $followupDue ? 'ถึงกำหนดติดตาม' : null,
                 ]),
             ],
         ])->setPaper('a4', 'landscape');
 
         return $pdf->download($filename);
+    }
+
+    private function lookupName(string $table, mixed $id, string $expr): ?string
+    {
+        if ($id === null || $id === '') {
+            return null;
+        }
+        $name = DB::table($table)->where('id', $id)->value(DB::raw($expr));
+
+        return $name !== null ? trim((string) $name) : (string) $id;
+    }
+
+    private static function followupSummary(object $r): string
+    {
+        $result = [
+            'unreachable' => 'ติดต่อไม่ได้',
+            'interested' => 'สนใจต่ออายุ',
+            'thinking' => 'ขอคิดก่อน',
+            'not_renewing' => 'ไม่ต่ออายุ',
+        ][$r->lf_result] ?? (string) $r->lf_result;
+        $parts = [substr((string) $r->lf_created_at, 0, 10).' '.$result];
+        if ($r->lf_reason_code) {
+            $parts[] = RenewalFollowUpOptions::reasonLabel($r->lf_reason_code);
+        }
+        if ($r->lf_next_at) {
+            $parts[] = 'นัด '.substr((string) $r->lf_next_at, 0, 10);
+        }
+
+        return implode(' · ', $parts);
     }
 
     /**

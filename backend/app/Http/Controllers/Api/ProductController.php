@@ -63,6 +63,15 @@ class ProductController extends ApiController
         if ($mainRider = $request->input('mainRider')) {
             $q->where('pr.main_rider', $mainRider);
         }
+        if ($request->input('taxonomy') === 'unmatched') {
+            $q->whereNotExists(function ($e): void {
+                $e->select(DB::raw(1))
+                    ->from('product_taxonomy as tx')
+                    ->where('tx.active', true)
+                    ->whereColumn('tx.category', 'pr.category')
+                    ->whereColumn('tx.subcategory', 'pr.sub_category');
+            });
+        }
         // Insurance-type filter — narrows by the carrier's insure_type
         // (life / non-life / tax). Composes with carrierId, type, mainRider.
         // The `type` param above filters pr.type (Life/Motor/etc.) — a
@@ -295,5 +304,36 @@ class ProductController extends ApiController
                 ]);
             }
         }
+    }
+
+    public function taxonomyGaps(Request $request): JsonResponse
+    {
+        $tenantId = $this->tenantId($request);
+        $rows = DB::table('products as pr')
+            ->where('pr.tenant_id', $tenantId)
+            ->whereNull('pr.deleted_at')
+            ->whereNotExists(function ($e): void {
+                $e->select(DB::raw(1))
+                    ->from('product_taxonomy as tx')
+                    ->where('tx.active', true)
+                    ->whereColumn('tx.category', 'pr.category')
+                    ->whereColumn('tx.subcategory', 'pr.sub_category');
+            })
+            ->groupBy('pr.category', 'pr.sub_category')
+            ->orderByDesc(DB::raw('COUNT(*)'))
+            ->get(['pr.category', 'pr.sub_category', DB::raw('COUNT(*) as n')]);
+        $total = DB::table('products')->where('tenant_id', $tenantId)->whereNull('deleted_at')->count();
+
+        return response()->json([
+            'data' => $rows->map(fn ($r) => [
+                'category' => $r->category,
+                'subCategory' => $r->sub_category,
+                'count' => (int) $r->n,
+            ])->values(),
+            'meta' => [
+                'unmatched' => (int) $rows->sum('n'),
+                'total' => $total,
+            ],
+        ]);
     }
 }

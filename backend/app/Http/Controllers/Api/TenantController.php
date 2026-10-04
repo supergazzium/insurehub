@@ -8,6 +8,7 @@ use App\Http\Requests\TenantRequest;
 use App\Http\Resources\TenantResource;
 use App\Models\Tenant;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 
 class TenantController extends ApiController
 {
@@ -21,6 +22,13 @@ class TenantController extends ApiController
     /** PATCH /tenant — update the current user's tenant. */
     public function update(TenantRequest $request): TenantResource
     {
+        if ($request->hasAny([
+            'policyVerifyRequired', 'freelookDaysStandard', 'freelookDaysRemote', 'noCommissionWindowDays',
+            'payoutRequireFreelook', 'payoutRequireInsurerReceived', 'payoutRequireCustomerPaid', 'whtRateIndividual', 'whtRateCorporate',
+            'payout',
+        ])) {
+            Gate::authorize('admin.settings');
+        }
         $tenant = Tenant::findOrFail($this->tenantId($request));
         $tenant->update($request->toModel());
         return new TenantResource($tenant->fresh());

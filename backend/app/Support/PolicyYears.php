@@ -86,6 +86,45 @@ final class PolicyYears
         return $user !== null && in_array($user->role, self::ADMIN_ROLES, true);
     }
 
+    public const BASIS_COLUMNS = ['product_id', 'ref_app_to_id', 'customer_id'];
+
+    public static function resolve(Policy $policy, ?User $user, ?array $override = null): void
+    {
+        $policy->yearsResolved = true;
+        $basisChanged = ! $policy->exists || $policy->isDirty(self::BASIS_COLUMNS);
+        $suggested = self::suggest($policy);
+
+        if ($override !== null && self::canOverride($user)) {
+            $chosen = [];
+            foreach (['policy_year' => 'policyYear', 'customer_year' => 'customerYear'] as $col => $key) {
+                $val = $override[$col] ?? null;
+                $chosen[$col] = ($val === null || $val === '') ? $suggested[$key] : max(1, (int) $val);
+                $policy->{$col} = $chosen[$col];
+            }
+            $policy->years_overridden = true;
+            $wasFree = ! $policy->exists || in_array($policy->getOriginal('status'), self::FREE_EDIT_STATUSES, true);
+            if ($wasFree) {
+                $policy->pendingYearsAudit = [
+                    'suggested' => ['policy_year' => $suggested['policyYear'], 'customer_year' => $suggested['customerYear']],
+                    'chosen' => $chosen,
+                ];
+            }
+
+            return;
+        }
+
+        if ($policy->years_overridden && ! $basisChanged) {
+            return;
+        }
+
+        $free = in_array($policy->status ?? 'draft', self::FREE_EDIT_STATUSES, true);
+        if ($basisChanged || $free) {
+            $policy->policy_year = $suggested['policyYear'];
+            $policy->customer_year = $suggested['customerYear'];
+            $policy->years_overridden = false;
+        }
+    }
+
     /**
      * Error message when `$user` tries to change a stored year they may not
      * touch, null when the change is allowed.

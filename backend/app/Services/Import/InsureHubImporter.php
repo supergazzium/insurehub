@@ -685,7 +685,7 @@ class InsureHubImporter
                 'title_en' => $row->title_en,
                 'first_name_en' => $row->name_en,
                 'last_name_en' => $row->surname_en,
-                'gender' => $row->gender,
+                'gender' => \App\Support\GenderFromTitle::normalize($row->gender) ?? \App\Support\GenderFromTitle::guess($row->title_th),
                 'id_card' => $row->national_id,
                 'national_id_expiry' => $this->parseDate($row->national_id_expiry),
                 'passport' => $row->passport,

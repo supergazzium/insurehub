@@ -13,7 +13,6 @@ class Rank extends Model
 
     protected $casts = [
         'level' => 'integer',
-        'monthly_avg_target' => 'decimal:2',
         'three_month_accum_target' => 'decimal:2',
         'license_required' => 'boolean',
     ];

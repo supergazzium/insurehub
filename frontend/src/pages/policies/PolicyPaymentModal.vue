@@ -15,6 +15,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { createPolicyPayments, fetchPolicyInstallments, type PolicyInstallmentRow } from '../../api/policies'
 import { ApiError } from '../../api/client'
+import PolicyPeriodBadge from '../../components/PolicyPeriodBadge.vue'
 import { decomposeByFormula, type PremiumParts, type TaxFormula } from '../../utils/premiumBreakdown'
 import { calcInstallment, INSTALLMENT_MODES, type InstallmentMode, type InstallmentResult } from '../../utils/installmentCalc'
 
@@ -572,6 +573,7 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
               <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-medium text-slate-600">งวดที่ {{ idx + 1 }}/{{ rows.length }}</span>
+                  <PolicyPeriodBadge v-if="schedule[idx]?.periodLabel" :label="schedule[idx]?.periodLabel" />
                   <span v-if="row.dueDate" class="text-[11px] text-slate-400">ครบกำหนด {{ row.dueDate }}</span>
                   <span v-if="row.locked" class="inline-flex items-center gap-1 text-xs text-emerald-700">
                     <i class="pi pi-check-circle" /> ชำระแล้ว ฿{{ fmt(row.paidAmount || 0) }}
