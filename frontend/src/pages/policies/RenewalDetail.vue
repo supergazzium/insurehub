@@ -233,7 +233,7 @@ function eventLabel(type: string): string {
     renewalQuoteSent: 'ส่งใบเสนอราคาให้ลูกค้า', renewalStarted: 'เริ่มต่ออายุ',
     renewalDeclined: 'ลูกค้าปฏิเสธการต่ออายุ', paymentRecorded: 'บันทึกการชำระเงิน',
     renewalReopened: 'เปิดติดตามต่ออายุใหม่', renewalTermsConfirmed: 'ยืนยันเงื่อนไขต่ออายุ',
-    documentUploaded: 'อัปโหลดเอกสาร', premiumPaid: 'รับชำระเบี้ย', draftCreated: 'สร้างฉบับร่าง',
+    documentUploaded: 'อัปโหลดเอกสาร', premiumPaid: 'รับชำระเบี้ย', premiumPaymentVoided: 'ยกเลิกรายการชำระเบี้ย', draftCreated: 'สร้างฉบับร่าง',
     submittedFromDraft: 'ส่งพิจารณา', activated: 'เริ่มคุ้มครอง', expired: 'หมดอายุ', cancelled: 'ยกเลิก',
     approvalUpdated: 'อัปเดตการอนุมัติ', fulfilmentUpdated: 'อัปเดตการจัดส่ง',
   }

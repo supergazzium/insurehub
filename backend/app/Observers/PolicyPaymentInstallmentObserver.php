@@ -23,7 +23,7 @@ class PolicyPaymentInstallmentObserver
 
     public function updated(PolicyPayment $payment): void
     {
-        if ($payment->wasChanged(['amount', 'payment_date', 'policy_installment_id'])) {
+        if ($payment->wasChanged(['amount', 'payment_date', 'policy_installment_id', 'voided_at', 'adjustment_amount'])) {
             $this->reallocate($payment);
         }
     }

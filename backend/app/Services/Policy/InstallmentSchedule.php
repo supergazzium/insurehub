@@ -181,7 +181,7 @@ class InstallmentSchedule
 
         $payments = $policy->payments()->orderBy('payment_date')->orderBy('id')->get();
         foreach ($payments as $payment) {
-            $left = (int) round((float) $payment->amount * 100);
+            $left = (int) round($payment->creditAmount() * 100);
             $date = $payment->payment_date?->toDateString();
 
             $order = array_keys($remaining);

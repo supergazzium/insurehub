@@ -986,11 +986,13 @@ class ReportController extends ApiController
             ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
+            ->whereNull('pp.voided_at')
             ->whereBetween('pp.payment_date', [$from, $to])
             ->orderByDesc('pp.payment_date')
             ->limit($this->perPage($request, 500, 5000))
             ->get([
                 'pp.id as payment_id', 'pp.payment_date', 'pp.amount', 'pp.method', 'pp.reference',
+                'pp.payee', 'pp.pay_mode', 'pp.adjustment_amount', 'pp.adjustment_kind',
                 'p.id as policy_id', 'p.application_no', 'p.policy_no',
                 'c.customer_code',
                 DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
@@ -1000,6 +1002,7 @@ class ReportController extends ApiController
             ]);
 
         $totalAmount = $rows->sum(fn ($r) => (float) $r->amount);
+        $toCarrier = $rows->where('payee', 'carrier')->sum(fn ($r) => (float) $r->amount);
 
         return response()->json([
             'data' => $rows->map(fn ($r) => [
@@ -1007,6 +1010,10 @@ class ReportController extends ApiController
                 'paymentDate' => $r->payment_date,
                 'amount' => (float) $r->amount,
                 'method' => $r->method,
+                'payee' => $r->payee,
+                'payMode' => $r->pay_mode,
+                'adjustmentAmount' => (float) $r->adjustment_amount,
+                'adjustmentKind' => $r->adjustment_kind,
                 'reference' => $r->reference,
                 'policyId' => (string) $r->policy_id,
                 'applicationNo' => $r->application_no,
@@ -1021,6 +1028,8 @@ class ReportController extends ApiController
                 'from' => $from, 'to' => $to,
                 'total' => $rows->count(),
                 'totalAmount' => round($totalAmount, 2),
+                'toInsureHub' => round($totalAmount - $toCarrier, 2),
+                'toCarrier' => round($toCarrier, 2),
             ],
         ]);
     }

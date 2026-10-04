@@ -40,7 +40,8 @@ import RenewalSourceSearchModal from '../../components/RenewalSourceSearchModal.
 import CustomerCreateModal from '../customers/CustomerCreateModal.vue'
 import { splitCustomerQuery } from '../../utils/genderFromTitle'
 import { INSTALLMENT_MODES } from '../../utils/installmentCalc'
-import PolicyPaymentModal, { type ExpectedPremium } from './PolicyPaymentModal.vue'
+import PolicyPaymentPanel from './PolicyPaymentPanel.vue'
+import type { ExpectedPremium } from './PolicyPaymentModal.vue'
 import PolicyEndorsementModal, { type EndorsementInitial, type EndorsementSubmit } from './PolicyEndorsementModal.vue'
 import {
   fetchEndorsements,
@@ -880,8 +881,7 @@ const visibleFormulas = computed<(1 | 2 | 3 | 4)[]>(() =>
   form.insureType === 'Life' ? [2] : [1, 2, 3, 4],
 )
 
-// ── Payment tracking (C-24, frontend-only skeleton) ──────────────────────
-const showPaymentModal = ref(false)
+// ── Payment tracking ─────────────────────────────────────────────────────
 /** Human label for the picked carrier (for the payment modal's payee radio). */
 const carrierLabel = computed<string>(() => {
   const c = carriers.value.find((x) => String(x.id) === String(form.carrierId))
@@ -1471,15 +1471,29 @@ function collectSubmitProblems(): string[] {
 
 // ── Action buttons ────────────────────────────────────────────────────────
 
-/** Open the payment modal — ensure a draft exists first so the payment can
- *  actually be saved (the modal needs a policy id). Auto-saves a draft when
- *  none exists yet. */
-async function openPaymentModal(): Promise<void> {
-  if (!draftId.value) {
-    if (!form.customerId) return
-    await saveDraftNow()
+async function ensureDraftForPayment(): Promise<void> {
+  if (draftId.value) return
+  if (!form.customerId) throw new Error('customer required')
+  await saveDraftNow()
+  if (!draftId.value) throw new Error('draft not created')
+}
+
+async function onPaymentsChanged(): Promise<void> {
+  if (!draftId.value) return
+  try {
+    const res = await fetchPolicy(draftId.value)
+    const status = String(res.data.status ?? '')
+    hydrating.value = true
+    if (status) {
+      form.status = status
+      loadedStatus.value = status
+    }
+    applyServerState(res.data)
+    window.setTimeout(() => { hydrating.value = false }, 100)
+  } catch {
+    flash.value = 'บันทึกการชำระเงินแล้ว แต่รีเฟรชสถานะกรมธรรม์ไม่สำเร็จ กรุณากดโหลดหน้าใหม่'
+    window.setTimeout(() => { flash.value = null }, 4000)
   }
-  showPaymentModal.value = true
 }
 
 async function saveDraftNow(): Promise<void> {
@@ -2705,19 +2719,19 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </p>
     </section>
 
-    <!-- ── Section: การชำระเงิน (payment tracking, C-24 FE-only) ─────────── -->
-    <section class="card p-5">
-      <div class="flex items-center justify-between">
-        <div>
-          <h2 class="font-semibold text-slate-900">การชำระเงิน</h2>
-          <p class="text-xs text-slate-500 mt-0.5">บันทึกการชำระเงินจากลูกค้า — จ่ายเต็ม / หักคอมมิสชั่น / มีส่วนลด / ผ่อน</p>
-        </div>
-        <button type="button" @click="openPaymentModal" :disabled="!form.customerId"
-          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1.5">
-          <i class="pi pi-wallet text-xs" /> บันทึกการชำระเงิน
-        </button>
-      </div>
-    </section>
+    <PolicyPaymentPanel
+      :policy-id="draftId"
+      :disabled="!form.customerId"
+      :expected="expectedPremium"
+      :carrier-label="carrierLabel"
+      :installment-count="Number(form.installmentCount) || 1"
+      :frequency-label="t(`policyCreate.premiumModes.${form.premiumMode}`)"
+      :main-premium="Number(form.mainPremium) || 0"
+      :compulsory-premium="Number(form.compulsoryPremium) || 0"
+      :installment-mode="form.installmentMode"
+      :ensure-draft="ensureDraftForPayment"
+      @changed="onPaymentsChanged"
+    />
 
     <section v-if="canEndorse" class="card p-5" data-testid="endorsement-section">
       <div class="flex items-center justify-between">
@@ -2969,21 +2983,6 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </FormField>
     </section>
     </fieldset>
-
-    <!-- Payment modal (frontend-only skeleton). installmentCount prefills the
-         ผ่อน rows; premiumMode label shown as the plan. -->
-    <PolicyPaymentModal
-      :open="showPaymentModal"
-      :policy-id="draftId"
-      :expected="expectedPremium"
-      :carrier-label="carrierLabel"
-      :installment-count="Number(form.installmentCount) || 1"
-      :frequency-label="t(`policyCreate.premiumModes.${form.premiumMode}`)"
-      :main-premium="Number(form.mainPremium) || 0"
-      :compulsory-premium="Number(form.compulsoryPremium) || 0"
-      :installment-mode="form.installmentMode"
-      @close="showPaymentModal = false"
-    />
 
     <PolicyEndorsementModal
       :open="showEndorsementModal"

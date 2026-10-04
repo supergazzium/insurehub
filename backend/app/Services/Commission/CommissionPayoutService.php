@@ -354,21 +354,23 @@ class CommissionPayoutService
         $costs = DB::table('commission_ledgers as l')
             ->leftJoin('policies as p', 'p.id', '=', 'l.policy_id')
             ->where('l.tenant_id', $tenantId)
-            ->where('l.payout_type', CommissionLedger::TYPE_INSTALLMENT_AGENT_COST)
+            ->whereIn('l.payout_type', CommissionLedger::DEDUCTION_TYPES)
             ->where('l.status', CommissionLedger::STATUS_UNSETTLED)
             ->whereNull('l.payout_batch_id')
             ->where('l.amount', '<', 0)
             ->when($agentId !== null, fn ($q) => $q->where('l.beneficiary_agent_id', $agentId))
             ->orderBy('l.id')
-            ->get(['l.id', 'l.beneficiary_agent_id', 'l.amount', 'l.policy_id', 'l.created_at', 'p.policy_no', 'p.application_no'])
+            ->get(['l.id', 'l.payout_type', 'l.beneficiary_agent_id', 'l.amount', 'l.policy_id', 'l.created_at', 'p.policy_no', 'p.application_no'])
             ->map(fn ($l): array => [
                 'id' => 'ledger:'.$l->id,
                 'source' => 'ledger',
                 'agentId' => (int) $l->beneficiary_agent_id,
-                'type' => CommissionPayoutAdjustment::TYPE_INSTALLMENT_COST,
-                'typeLabel' => CommissionPayoutAdjustment::TYPE_LABELS[CommissionPayoutAdjustment::TYPE_INSTALLMENT_COST],
+                'type' => CommissionPayoutAdjustment::LEDGER_TYPES[$l->payout_type],
+                'typeLabel' => CommissionPayoutAdjustment::TYPE_LABELS[CommissionPayoutAdjustment::LEDGER_TYPES[$l->payout_type]],
                 'amount' => -PayoutTax::satang($l->amount),
-                'reason' => 'ค่าธรรมเนียม/ดอกเบี้ยผ่อนชำระที่ตัวแทนรับภาระ',
+                'reason' => $l->payout_type === CommissionLedger::TYPE_COMMISSION_PAID_AT_SOURCE
+                    ? 'ตัวแทนหักค่าคอมจากเบี้ยไปแล้วตอนรับชำระ จึงหักออกจากรอบจ่ายนี้'
+                    : 'ค่าธรรมเนียม/ดอกเบี้ยผ่อนชำระที่ตัวแทนรับภาระ',
                 'policyId' => (string) $l->policy_id,
                 'policyNo' => $l->policy_no ?: $l->application_no,
                 'createdAt' => $l->created_at ? CarbonImmutable::parse($l->created_at)->toIso8601String() : null,
@@ -739,13 +741,13 @@ class CommissionPayoutService
             $costs = DB::table('commission_ledgers')
                 ->where('tenant_id', $tenantId)
                 ->where('beneficiary_agent_id', $agentId)
-                ->where('payout_type', CommissionLedger::TYPE_INSTALLMENT_AGENT_COST)
+                ->whereIn('payout_type', CommissionLedger::DEDUCTION_TYPES)
                 ->where('status', CommissionLedger::STATUS_UNSETTLED)
                 ->whereNull('payout_batch_id')
                 ->where('amount', '<', 0)
                 ->orderBy('id')
                 ->lockForUpdate()
-                ->get(['id', 'amount', 'policy_id']);
+                ->get(['id', 'payout_type', 'amount', 'policy_id']);
             foreach ($costs as $cost) {
                 $amount = -PayoutTax::satang($cost->amount);
                 if ($amount > $available) {
@@ -759,11 +761,11 @@ class CommissionPayoutService
                     'agent_code' => Agent::query()->whereKey($agentId)->value('agent_code'),
                     'policy_id' => $cost->policy_id,
                     'ledger_id' => $cost->id,
-                    'type' => CommissionPayoutAdjustment::TYPE_INSTALLMENT_COST,
+                    'type' => CommissionPayoutAdjustment::LEDGER_TYPES[$cost->payout_type],
                     'status' => CommissionPayoutAdjustment::STATUS_APPLIED,
                     'applied_at' => now(),
                     'amount' => PayoutTax::baht($amount),
-                    'reason' => CommissionPayoutAdjustment::TYPE_LABELS[CommissionPayoutAdjustment::TYPE_INSTALLMENT_COST],
+                    'reason' => CommissionPayoutAdjustment::TYPE_LABELS[CommissionPayoutAdjustment::LEDGER_TYPES[$cost->payout_type]],
                 ]);
                 $available -= $amount;
             }
@@ -1072,7 +1074,7 @@ class CommissionPayoutService
             DB::table('commission_ledgers')->where('payout_batch_id', $batch->id)->update(['payout_batch_id' => null]);
             CommissionPayoutAdjustment::query()
                 ->where('batch_id', $batch->id)
-                ->where('type', CommissionPayoutAdjustment::TYPE_INSTALLMENT_COST)
+                ->whereIn('type', [CommissionPayoutAdjustment::TYPE_INSTALLMENT_COST, CommissionPayoutAdjustment::TYPE_COMMISSION_DEDUCTED])
                 ->delete();
             $released = CommissionPayoutAdjustment::query()
                 ->where('batch_id', $batch->id)

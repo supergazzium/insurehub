@@ -183,8 +183,9 @@ class VolumeAccumulator
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->where('p.writing_agent_id', $agentId)
+            ->whereNull('pp.voided_at')
             ->whereBetween('pp.payment_date', [$from, $to])
-            ->sum('pp.amount');
+            ->sum(DB::raw(PolicyPayment::volumeSql('pp')));
     }
 
     /**
@@ -215,8 +216,9 @@ class VolumeAccumulator
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->whereIn('p.writing_agent_id', $downlineIds)
+            ->whereNull('pp.voided_at')
             ->whereBetween('pp.payment_date', [$from, $to])
-            ->sum('pp.amount');
+            ->sum(DB::raw(PolicyPayment::volumeSql('pp')));
 
         return $this->computePersonalVolume($tenantId, $agentId, $yearMonth) + $downlinesSum;
     }

@@ -6,12 +6,17 @@ namespace App\Services\Policy;
 
 use App\Models\Policy;
 use App\Models\PolicyInstallment;
+use App\Models\PolicyPayment;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 
 final class PremiumDue
 {
     public const ENDORSEMENT_TOTAL_SQL = "(SELECT COALESCE(SUM(CAST(JSON_UNQUOTE(JSON_EXTRACT(e.payload, '$.additionalTotal')) AS DECIMAL(15,2))), 0) FROM policy_events e WHERE e.policy_id = p.id AND e.type = 'endorsement.premium_change' AND e.voided_at IS NULL)";
+
+    public const PAID_TOTAL_SQL = '(SELECT COALESCE(SUM(pp.amount + pp.adjustment_amount),0) FROM policy_payments pp WHERE pp.policy_id = p.id AND pp.voided_at IS NULL)';
+
+    public const PAID_COUNT_SQL = '(SELECT COUNT(*) FROM policy_payments pp WHERE pp.policy_id = p.id AND pp.voided_at IS NULL)';
 
     public static function due(float $main, float $compulsory, float $totalPremiumPaid, Collection $installments, float $endorsementTotal): float
     {
@@ -52,8 +57,11 @@ final class PremiumDue
 
                 return (float) ($payload['additionalTotal'] ?? 0);
             });
-        $sum = (float) DB::table('policy_payments')->where('policy_id', $policy->id)->sum('amount');
-        $count = (int) DB::table('policy_payments')->where('policy_id', $policy->id)->count();
+        $live = DB::table('policy_payments')->where('policy_id', $policy->id)->whereNull('voided_at');
+        $sum = (float) (clone $live)->sum(DB::raw(PolicyPayment::creditSql()));
+        $count = (int) (clone $live)->count();
+        $cash = (float) (clone $live)->sum('amount');
+        $toCarrier = (float) (clone $live)->where('payee', PolicyPayment::PAYEE_CARRIER)->sum('amount');
         $due = self::due(
             (float) ($policy->main_premium ?? 0),
             (float) ($policy->compulsory_premium ?? 0),
@@ -62,10 +70,15 @@ final class PremiumDue
             $endorse,
         );
         $legacy = (bool) $policy->imported_from_legacy;
+        $paid = self::paid($sum, $count, $legacy, $due);
 
         return [
             'due' => $due,
-            'paid' => self::paid($sum, $count, $legacy, $due),
+            'paid' => $paid,
+            'outstanding' => round($due - $paid, 2),
+            'cashReceived' => round($cash, 2),
+            'toCarrier' => round($toCarrier, 2),
+            'toInsureHub' => round($cash - $toCarrier, 2),
             'paymentCount' => $count,
             'legacySettled' => self::legacySettled($legacy, $count),
         ];

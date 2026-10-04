@@ -83,7 +83,7 @@ class PolicyPaymentObserver
 
     public function updated(PolicyPayment $payment): void
     {
-        if (! $payment->wasChanged(['amount', 'payment_date', 'policy_id'])) {
+        if (! $payment->wasChanged(['amount', 'payment_date', 'policy_id', 'voided_at', 'adjustment_amount'])) {
             return;
         }
 

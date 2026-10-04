@@ -304,7 +304,7 @@ class CommissionPayoutV2Test extends TestCase
         $this->assertSame(['6000.00', '4000.00'], CommissionLedger::query()->where('policy_id', $policy->id)->where('payout_type', 'DIRECT_COMMISSION')->orderBy('id')->pluck('base_premium')->all());
     }
 
-    public function test_a_payment_whose_commission_is_in_a_payout_cannot_be_deleted(): void
+    public function test_a_payment_whose_commission_is_in_a_payout_cannot_be_voided(): void
     {
         $upline = $this->payoutAgent(1);
         $seller = $this->payoutAgent(1, $upline);
@@ -313,8 +313,10 @@ class CommissionPayoutV2Test extends TestCase
         $payment = $policy->payments()->firstOrFail();
 
         $this->actingAsAdmin();
-        $this->deleteJson("/api/v1/policies/{$policy->id}/payments/{$payment->id}")->assertStatus(409)->assertJsonPath('code', 'payment_commission_paid');
+        $this->postJson("/api/v1/policies/{$policy->id}/payments/{$payment->id}/void", ['reason' => 'บันทึกผิดยอด'])
+            ->assertStatus(409)->assertJsonPath('code', 'payment_commission_paid');
         $this->assertSame(3, CommissionLedger::query()->where('policy_payment_id', $payment->id)->count());
+        $this->assertNull(PolicyPayment::withoutGlobalScopes()->find($payment->id)->voided_at);
     }
 
     public function test_upline_clawback_follows_the_seller_ratio_and_is_zero_when_not_applicable(): void

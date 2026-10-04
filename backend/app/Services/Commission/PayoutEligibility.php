@@ -56,8 +56,9 @@ final class PayoutEligibility
             ->keyBy('policy_id');
         $payments = DB::table('policy_payments')
             ->whereIn('policy_id', $policyIds)
+            ->whereNull('voided_at')
             ->groupBy('policy_id')
-            ->selectRaw('policy_id, SUM(amount) as paid')
+            ->selectRaw('policy_id, SUM(amount + adjustment_amount) as paid')
             ->pluck('paid', 'policy_id')
             ->all();
         $overrides = PolicyPayoutOverride::query()

@@ -279,6 +279,10 @@ export function recomputeCommission(policyId: string) {
 }
 
 // ── Policy payments ────────────────────────────────────────────────────────
+export type PaymentPayee = 'insurehub' | 'carrier'
+export type PaymentAdjustmentKind = 'commission_deducted' | 'discount'
+export type PaymentSummaryStatus = 'unpaid' | 'partial' | 'paid' | 'overpaid' | 'legacy_settled' | 'unknown'
+
 export interface PolicyPaymentRow {
   id: string
   policyId: string
@@ -287,11 +291,41 @@ export interface PolicyPaymentRow {
   netAmount: number | null
   dutyAmount: number | null
   vatAmount: number | null
+  adjustmentAmount?: number
+  adjustmentKind?: PaymentAdjustmentKind | null
+  creditAmount?: number
   method: string
+  payee?: PaymentPayee
+  payMode?: string
   reference: string
+  note?: string
   recordedByUserId: string | null
+  recordedByName?: string | null
+  recordedAt?: string | null
+  proof?: { documentId: string; fileName: string } | null
+  voidedAt?: string | null
+  voidedByName?: string | null
+  voidReason?: string | null
   installmentNo?: number | null
   periodLabel?: string | null
+}
+
+export interface PaymentSummary {
+  due: number
+  paid: number
+  outstanding: number
+  cashReceived: number
+  toInsureHub: number
+  toCarrier: number
+  paymentCount: number
+  legacySettled: boolean
+  status: PaymentSummaryStatus
+  policyStatus: string
+  payable: boolean
+  blockedReason: string | null
+  canRecord: boolean
+  canVoid: boolean
+  installmentCount: number
 }
 /** One งวด row in a payment batch. `method` uses the modal values. The tax
  *  parts are the decomposition of THIS row's actual amount. */
@@ -300,6 +334,8 @@ export interface PaymentRowInput {
   amount: number
   method: 'transfer' | 'credit_card' | 'cash'
   note?: string
+  reference?: string
+  proofDocumentId?: number
   taxFormula?: number
   netAmount?: number
   dutyAmount?: number
@@ -308,16 +344,21 @@ export interface PaymentRowInput {
 }
 export interface CreatePaymentsPayload {
   payMode: string
-  payee: 'insurehub' | 'carrier'
+  payee: PaymentPayee
+  adjustmentAmount?: number
   payments: PaymentRowInput[]
   confirmDuplicate?: boolean
   confirmOverpay?: boolean
 }
-export function fetchPolicyPayments(policyId: string) {
-  return api.get<{ data: PolicyPaymentRow[] }>(`policies/${policyId}/payments`)
+export function fetchPolicyPayments(policyId: string, opts: { withVoided?: boolean } = {}) {
+  const qs = opts.withVoided ? '?withVoided=1' : ''
+  return api.get<{ data: PolicyPaymentRow[]; meta?: PaymentSummary }>(`policies/${policyId}/payments${qs}`)
 }
 export function createPolicyPayments(policyId: string, payload: CreatePaymentsPayload) {
-  return api.post<{ data: PolicyPaymentRow[] }>(`policies/${policyId}/payments`, payload)
+  return api.post<{ data: PolicyPaymentRow[]; meta?: PaymentSummary }>(`policies/${policyId}/payments`, payload)
+}
+export function voidPolicyPayment(policyId: string, paymentId: string, reason: string) {
+  return api.post<{ data: PolicyPaymentRow; meta?: PaymentSummary }>(`policies/${policyId}/payments/${paymentId}/void`, { reason })
 }
 export interface PolicyInstallmentRow {
   id: string
@@ -335,9 +376,6 @@ export interface PolicyInstallmentRow {
 }
 export function fetchPolicyInstallments(policyId: string) {
   return api.get<{ data: PolicyInstallmentRow[] }>(`policies/${policyId}/installments`)
-}
-export function deletePolicyPayment(policyId: string, paymentId: string) {
-  return api.delete<{ message: string }>(`policies/${policyId}/payments/${paymentId}`)
 }
 
 /** C-8 — Issue Policy modal payload. All strings ISO. `force=true`

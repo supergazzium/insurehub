@@ -483,6 +483,7 @@ export default {
       activated: 'Coverage activated',
       expired: 'Expired',
       premiumPaid: 'Premium paid',
+      premiumPaymentVoided: 'Premium payment voided',
       fulfilmentUpdated: 'Receipt / delivery updated',
       approvalUpdated: 'Approval details updated',
       renewed: 'Renewed',

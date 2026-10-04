@@ -80,7 +80,7 @@ class MgmCommissionEngine
         // tax-inclusive payment never over-accrues, while genuine partial
         // payments (< net premium) still pro-rate. Falls back to the raw
         // payment amount when net_premium is unset (legacy policies).
-        $paid = (float) ($payment->net_amount !== null && (float) $payment->net_amount > 0 ? $payment->net_amount : $payment->amount);
+        $paid = (float) ($payment->net_amount !== null && (float) $payment->net_amount > 0 ? $payment->net_amount : $payment->volumeAmount());
         if ($paid <= 0) {
             return [];
         }
@@ -89,6 +89,7 @@ class MgmCommissionEngine
             $accrued = (float) CommissionLedger::query()
                 ->where('policy_id', $policy->id)
                 ->where('payout_type', CommissionLedger::TYPE_DIRECT_COMMISSION)
+                ->where('status', '!=', CommissionLedger::STATUS_REVERSED)
                 ->where('policy_payment_id', '!=', $payment->id)
                 ->sum('base_premium');
             $basePremium = round(min($paid, max(0.0, $netPremium - $accrued)), 2);
