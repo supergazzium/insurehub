@@ -28,6 +28,7 @@ final class PermissionCatalog
             ['key' => 'agents.approve',  'module' => 'agents', 'name_th' => 'อนุมัติตัวแทน',            'name_en' => 'Approve agents',    'description' => null],
             ['key' => 'agents.reject',   'module' => 'agents', 'name_th' => 'ปฏิเสธตัวแทน',            'name_en' => 'Reject agents',     'description' => null],
             ['key' => 'agents.set_role', 'module' => 'agents', 'name_th' => 'กำหนดสิทธิ์ตัวแทน',        'name_en' => 'Assign agent role', 'description' => null],
+            ['key' => 'agents.rank_approve', 'module' => 'agents', 'name_th' => 'อนุมัติเลื่อนระดับ', 'name_en' => 'Approve rank changes', 'description' => 'อนุมัติ/ไม่อนุมัติคำขอเลื่อนหรือปรับระดับตัวแทน'],
 
             // ── Customers ────────────────────────────────────────────────
             ['key' => 'customers.view',      'module' => 'customers', 'name_th' => 'ดูข้อมูลลูกค้า',              'name_en' => 'View customers',       'description' => null],
@@ -35,6 +36,7 @@ final class PermissionCatalog
             ['key' => 'customers.update',    'module' => 'customers', 'name_th' => 'แก้ไขลูกค้า',                'name_en' => 'Update customers',     'description' => null],
             ['key' => 'customers.view_pii',  'module' => 'customers', 'name_th' => 'ดูข้อมูลส่วนบุคคลของลูกค้า',   'name_en' => 'View customer PII',    'description' => 'Unmasks ID card, phone, and email fields.'],
             ['key' => 'customers.export',    'module' => 'customers', 'name_th' => 'ส่งออกข้อมูลลูกค้า',           'name_en' => 'Export customers',     'description' => null],
+            ['key' => 'customers.delete',    'module' => 'customers', 'name_th' => 'ลบลูกค้า',                    'name_en' => 'Delete customers',     'description' => 'Only customers without policies can be deleted.'],
 
             // ── Policies ─────────────────────────────────────────────────
             ['key' => 'policies.view',    'module' => 'policies', 'name_th' => 'ดูกรมธรรม์',       'name_en' => 'View policies',    'description' => null],
@@ -42,6 +44,7 @@ final class PermissionCatalog
             ['key' => 'policies.update',  'module' => 'policies', 'name_th' => 'แก้ไขกรมธรรม์',    'name_en' => 'Update policies',  'description' => null],
             ['key' => 'policies.approve', 'module' => 'policies', 'name_th' => 'อนุมัติกรมธรรม์',  'name_en' => 'Approve policies', 'description' => null],
             ['key' => 'policies.cancel',  'module' => 'policies', 'name_th' => 'ยกเลิกกรมธรรม์',   'name_en' => 'Cancel policies',  'description' => null],
+            ['key' => 'policies.verify',  'module' => 'policies', 'name_th' => 'ตรวจสอบ (Verify) กรมธรรม์', 'name_en' => 'Verify policy changes', 'description' => 'อนุมัติ/ไม่อนุมัติคำขอสร้าง แก้ไข ลบกรมธรรม์ที่ผู้อื่นคีย์'],
 
             // ── Quotations ───────────────────────────────────────────────
             ['key' => 'quotes.view',    'module' => 'quotes', 'name_th' => 'ดูใบเสนอราคา',       'name_en' => 'View quotes',    'description' => null],
@@ -65,6 +68,10 @@ final class PermissionCatalog
             ['key' => 'finance.view_ledger', 'module' => 'finance', 'name_th' => 'ดูบัญชีแยกประเภท',    'name_en' => 'View ledger',       'description' => null],
             ['key' => 'finance.export',      'module' => 'finance', 'name_th' => 'ส่งออกข้อมูลการเงิน',  'name_en' => 'Export finance',    'description' => null],
             ['key' => 'finance.reconcile',   'module' => 'finance', 'name_th' => 'กระทบยอดการเงิน',      'name_en' => 'Reconcile finance', 'description' => null],
+
+            ['key' => 'receipts.view',   'module' => 'receipts', 'name_th' => 'ดูการรับค่าคอมจากบริษัทประกัน',        'name_en' => 'View insurer commission receipts',   'description' => null],
+            ['key' => 'receipts.record', 'module' => 'receipts', 'name_th' => 'บันทึกรับค่าคอมจากบริษัทประกัน',       'name_en' => 'Record insurer commission receipts', 'description' => null],
+            ['key' => 'receipts.reopen', 'module' => 'receipts', 'name_th' => 'เปิดรายการรับค่าคอมที่รับแล้วกลับมาแก้', 'name_en' => 'Reopen received commission',         'description' => null],
 
             // ── Reports ──────────────────────────────────────────────────
             ['key' => 'reports.view_operational', 'module' => 'reports', 'name_th' => 'ดูรายงานปฏิบัติการ', 'name_en' => 'View operational reports', 'description' => null],

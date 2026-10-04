@@ -37,6 +37,7 @@ class BackfillLegacyPayments extends Command
 
         $q = DB::table('policies as p')
             ->whereNull('p.deleted_at')
+            ->where('p.imported_from_legacy', true)
             ->whereRaw('COALESCE(p.total_premium_paid, 0) > 0')
             ->whereNotExists(function ($sub): void {
                 $sub->select(DB::raw(1))->from('policy_payments as pp')->whereColumn('pp.policy_id', 'p.id');

@@ -20,6 +20,7 @@ class AgentNoteController extends Controller
     {
         $this->authorizeTenant($request, $agent);
         $rows = AgentNote::query()
+            ->with('createdBy:id,name')
             ->where('agent_id', $agent->id)
             ->orderByDesc('created_at')
             ->get()
@@ -28,6 +29,7 @@ class AgentNoteController extends Controller
                 'note' => $n->note,
                 'kind' => $n->kind,
                 'createdAt' => $n->created_at?->toIso8601String(),
+                'createdByName' => $n->createdBy?->name,
             ]);
 
         return response()->json(['data' => $rows]);

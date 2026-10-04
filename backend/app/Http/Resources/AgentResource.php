@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\Agent;
+use App\Support\AgentDocuments;
+use App\Support\AgentLicense;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -59,6 +61,9 @@ class AgentResource extends JsonResource
             'parentAgentCode' => $this->parent?->agent_code,
             'level' => $this->level,
             'rankId' => $this->rank_id !== null ? (string) $this->rank_id : null,
+            'rankLevel' => $this->rank?->level,
+            'licenseValid' => AgentLicense::isValid($this->resource),
+            'documents' => AgentDocuments::presence($this->resource),
             'commissionPct' => (float) $this->commission_pct,
             'joinedAt' => $this->joined_at?->toDateString() ?? '',
             'headStatus' => $this->head_status ?? '',
@@ -69,6 +74,7 @@ class AgentResource extends JsonResource
             'active' => (bool) $this->active,
             'hasVat' => (bool) $this->has_vat,
             'vatMode' => $this->vat_mode,
+            'whtRate' => $this->wht_rate !== null ? (float) $this->wht_rate : null,
             'approvalStatus' => $this->approval_status ?? 'approved',
         ];
     }

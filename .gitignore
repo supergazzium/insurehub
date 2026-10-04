@@ -67,3 +67,9 @@ Thumbs.db
 
 # Vue type-check stamp
 /frontend/*.tsbuildinfo
+
+/docs/tasks/**/*.png
+/docs/tasks/**/*.gif
+/docs/tasks/**/*.jpg
+/docs/tasks/**/*.jpeg
+/docs/tasks/**/*.webp

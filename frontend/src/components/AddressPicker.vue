@@ -28,6 +28,7 @@ const props = defineProps<{
   district: string | null
   subDistrict: string | null
   postcode: string | null
+  deferred?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -67,6 +68,10 @@ const saveError = ref<string | null>(null)
 /** PATCH one field (dotted keys expand to a nested object) and notify parent. */
 async function patch(field: string, value: string | null): Promise<void> {
   saveError.value = null
+  if (props.deferred) {
+    emit('update', field, value)
+    return
+  }
   const parts = field.split('.')
   const root: Record<string, unknown> = {}
   let cursor = root

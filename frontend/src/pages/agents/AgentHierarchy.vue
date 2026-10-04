@@ -1,12 +1,13 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useAgentStore, type Agent } from '../../stores/agents'
+import { useAgentStore } from '../../stores/agents'
 import AgentsSubnav from './AgentsSubnav.vue'
 import AgentTreeNode, { type RollupEntry } from './AgentTreeNode.vue'
 import AgentPicker from '../../components/AgentPicker.vue'
 import { fetchHierarchyRollup, updateAgentHierarchy } from '../../api/agents'
 import { ApiError } from '../../api/client'
+import { levelBadgeClass } from '../../utils/agentLevel'
 
 const { t } = useI18n()
 const store = useAgentStore()
@@ -102,21 +103,6 @@ function selectAgent(id: string) {
   expanded.value = new Set([id])
 }
 
-function levelBadgeClass(lv: Agent['level']): string {
-  const map: Record<string, string> = {
-    l1: 'bg-slate-100 text-slate-600',
-    l2: 'bg-sky-50 text-sky-700',
-    l3: 'bg-violet-50 text-violet-700',
-    l4: 'bg-amber-50 text-amber-700',
-    l5: 'bg-rose-50 text-rose-700',
-    l6: 'bg-emerald-50 text-emerald-700',
-    l7: 'bg-teal-50 text-teal-700',
-    l8: 'bg-indigo-50 text-indigo-700',
-    l9: 'bg-fuchsia-50 text-fuchsia-700',
-    l10: 'bg-orange-50 text-orange-700',
-  }
-  return map[lv] ?? 'bg-slate-100 text-slate-600'
-}
 </script>
 
 <template>

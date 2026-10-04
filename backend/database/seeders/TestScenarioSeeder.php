@@ -12,9 +12,12 @@ use App\Models\PolicyPayment;
 use App\Models\Product;
 use App\Models\ProductType;
 use App\Models\Rank;
+use App\Models\Role;
 use App\Models\Tenant;
+use App\Models\User;
 use Illuminate\Database\Seeder;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Hash;
 
 /**
  * TestScenarioSeeder — a labelled, idempotent cohort covering every case in
@@ -88,6 +91,31 @@ class TestScenarioSeeder extends Seeder
         $pending = $this->agent('TST-A05', 'ธนพล', 'รอการอนุมัติ', 1, $head, vatType: '1', approval: 'pending', active: false);
 
         $this->agents = compact('head', 'mid', 'sell', 'mid2', 'pending');
+
+        User::updateOrCreate(
+            ['email' => 'tst-a02@insurehub.co.th'],
+            [
+                'tenant_id' => $this->tenantId,
+                'agent_id' => $mid->id,
+                'name' => 'สมหญิง รักการขาย',
+                'password' => Hash::make('insurehub'),
+                'role' => 'agent',
+                'role_id' => Role::query()->where('key', 'agent')->value('id'),
+                'locale' => 'th',
+                'active' => true,
+            ],
+        );
+    }
+
+    private function testIdCard(string $code): string
+    {
+        $prefix = '31009'.str_pad((string) (abs(crc32($code)) % 10000000), 7, '0', STR_PAD_LEFT);
+        $sum = 0;
+        foreach (str_split($prefix) as $i => $d) {
+            $sum += (int) $d * (13 - $i);
+        }
+
+        return $prefix.((11 - $sum % 11) % 10);
     }
 
     private function agent(string $code, string $first, string $last, int $level, ?Agent $parent, string $vatType = '1', ?string $vatMode = null, bool $hasVat = false, string $approval = 'approved', bool $active = true): Agent
@@ -111,6 +139,16 @@ class TestScenarioSeeder extends Seeder
                 'has_license' => $level >= 7,
                 'approval_status' => $approval,
                 'joined_at' => now()->subYears(1)->toDateString(),
+                'id_card' => $this->testIdCard($code),
+                'address' => '99/'.substr($code, -2).' อาคารทดสอบ',
+                'road' => 'พหลโยธิน',
+                'sub_district' => 'ลาดยาว',
+                'district' => 'จตุจักร',
+                'province' => 'กรุงเทพมหานคร',
+                'postcode' => '10900',
+                'bank_name_text' => 'ธนาคารกสิกรไทย',
+                'bank_account_no' => '123456'.substr($code, -2).'00',
+                'bank_account_name' => $first.' '.$last,
             ],
         );
     }

@@ -9,6 +9,8 @@ use App\Models\PaymentReminder;
 use App\Models\Policy;
 use App\Models\PolicyInstallment;
 use App\Services\Policy\InstallmentSchedule;
+use App\Services\Policy\PremiumDue;
+use App\Support\PolicyPeriodLabel;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
@@ -25,19 +27,39 @@ use Illuminate\Support\Facades\DB;
  */
 class CollectionsController extends Controller
 {
+    private const MAX_ROWS = 500;
+
+    private function rowColumns(): array
+    {
+        return [
+            'p.id', 'p.policy_no', 'p.application_no', 'p.status',
+            'p.main_premium', 'p.compulsory_premium', 'p.total_premium_paid', 'p.imported_from_legacy',
+            'p.installment_mode', 'p.installment_term',
+            'p.effective_date', 'p.first_due_inst_date',
+            DB::raw('(SELECT COALESCE(SUM(pp.amount),0) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_total'),
+            DB::raw('(SELECT COUNT(*) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_count'),
+            DB::raw('(SELECT COUNT(*) FROM payment_reminders pr WHERE pr.policy_id = p.id) as reminder_count'),
+            DB::raw('(SELECT MAX(pr.created_at) FROM payment_reminders pr WHERE pr.policy_id = p.id) as last_reminder_at'),
+            DB::raw(PremiumDue::ENDORSEMENT_TOTAL_SQL.' as endorsement_total'),
+        ];
+    }
+
     public function index(Request $request): JsonResponse
     {
         $tenantId = (int) $request->attributes->get('tenant_id', $request->user()->tenant_id);
         $kind = (string) $request->input('kind', 'all'); // all|cash|installment|split
         $search = trim((string) $request->input('q', ''));
 
-        $rows = DB::table('policies as p')
+        $query = DB::table('policies as p')
             ->leftJoin('customers as c', 'c.id', '=', 'p.customer_id')
             ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
-            ->where('p.status', '!=', 'cancelled')        // ยกเลิกแล้วไม่เตือน
-            ->whereIn('p.status', ['active', 'issued'])     // must be in force / issued
+            ->whereIn('p.status', ['active', 'issued'])
+            ->where(function ($w): void {
+                $w->where('p.imported_from_legacy', false)
+                    ->orWhereExists(fn ($e) => $e->select(DB::raw(1))->from('policy_payments as px')->whereColumn('px.policy_id', 'p.id'));
+            })
             ->when($search !== '', function ($q) use ($search) {
                 $like = "%{$search}%";
                 $q->where(function ($w) use ($like) {
@@ -47,41 +69,37 @@ class CollectionsController extends Controller
                         ->orWhere('c.customer_code', 'like', $like);
                 });
             })
-            ->select([
-                'p.id', 'p.policy_no', 'p.application_no', 'p.status',
-                'p.main_premium', 'p.compulsory_premium', 'p.total_premium_paid',
-                'p.installment_mode', 'p.installment_term',
-                'p.effective_date', 'p.first_due_inst_date',
-                'c.customer_code', 'c.phone as customer_phone',
+            ->select(array_merge($this->rowColumns(), [
+                'c.customer_code', DB::raw("COALESCE(NULLIF(c.phone, ''), c.tel_phone) as customer_phone"),
                 DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
                 'a.agent_code',
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
-                DB::raw('(SELECT COALESCE(SUM(pp.amount),0) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_total'),
-                DB::raw('(SELECT COUNT(*) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_count'),
-                DB::raw('(SELECT COUNT(*) FROM payment_reminders pr WHERE pr.policy_id = p.id) as reminder_count'),
-                DB::raw('(SELECT MAX(pr.created_at) FROM payment_reminders pr WHERE pr.policy_id = p.id) as last_reminder_at'),
-            ])
-            ->orderByDesc('p.id')
-            ->limit(500)
-            ->get();
+            ]));
 
         $today = Carbon::today();
-        $installments = PolicyInstallment::query()
-            ->whereIn('policy_id', $rows->pluck('id'))
-            ->orderBy('installment_no')
-            ->get()
-            ->groupBy('policy_id');
         $out = [];
-        foreach ($rows as $r) {
-            $row = $this->buildRow($r, $today, $installments->get($r->id, collect()));
-            if ($row['outstanding'] < 1.0) {
-                continue;
+        $query->chunkByIdDesc(500, function (Collection $rows) use (&$out, $today, $kind): bool {
+            $installments = PolicyInstallment::query()
+                ->whereIn('policy_id', $rows->pluck('id'))
+                ->orderBy('installment_no')
+                ->get()
+                ->groupBy('policy_id');
+            foreach ($rows as $r) {
+                $row = $this->buildRow($r, $today, $installments->get($r->id, collect()));
+                if ($row['outstanding'] < 1.0) {
+                    continue;
+                }
+                if ($kind !== 'all' && $row['kind'] !== $kind) {
+                    continue;
+                }
+                $out[] = $row;
+                if (count($out) >= self::MAX_ROWS) {
+                    return false;
+                }
             }
-            if ($kind !== 'all' && $row['kind'] !== $kind) {
-                continue;
-            }
-            $out[] = $row;
-        }
+
+            return true;
+        }, 'p.id', 'id');
 
         return response()->json([
             'data' => $out,
@@ -105,27 +123,31 @@ class CollectionsController extends Controller
             ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
             ->leftJoin('products as pr', 'pr.id', '=', 'p.product_id')
             ->where('p.id', $policy->id)
-            ->select([
-                'p.id', 'p.policy_no', 'p.application_no', 'p.status',
-                'p.main_premium', 'p.compulsory_premium', 'p.total_premium_paid',
-                'p.installment_mode', 'p.installment_term',
-                'p.effective_date', 'p.first_due_inst_date',
-                'c.customer_code', 'c.phone as customer_phone',
+            ->select(array_merge($this->rowColumns(), [
+                'c.customer_code', DB::raw("COALESCE(NULLIF(c.phone, ''), c.tel_phone) as customer_phone"),
                 DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
                 'a.agent_code',
                 DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
                 'ca.name as carrier_name', 'pr.name as product_name',
-                DB::raw('(SELECT COALESCE(SUM(pp.amount),0) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_total'),
-                DB::raw('(SELECT COUNT(*) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_count'),
-                DB::raw('(SELECT COUNT(*) FROM payment_reminders pr WHERE pr.policy_id = p.id) as reminder_count'),
-                DB::raw('(SELECT MAX(pr.created_at) FROM payment_reminders pr WHERE pr.policy_id = p.id) as last_reminder_at'),
-            ])
+            ]))
             ->first();
         if ($r === null) {
             abort(404);
         }
 
         $row = $this->buildRow($r, Carbon::today(), $policy->installments()->get());
+        $row['periodLabel'] = PolicyPeriodLabel::forPolicy($policy);
+        if (is_array($row['schedule'])) {
+            $total = count($row['schedule']);
+            foreach ($row['schedule'] as $k => $s) {
+                $row['schedule'][$k]['periodLabel'] = PolicyPeriodLabel::format(
+                    (int) $policy->policy_year,
+                    PolicyPeriodLabel::endorsementNo($policy->id, $s['dueDate'] ?? null),
+                    (int) $s['no'],
+                    $total,
+                );
+            }
+        }
 
         // Actual payment records (auditable source of truth).
         $payments = DB::table('policy_payments')
@@ -158,16 +180,15 @@ class CollectionsController extends Controller
      */
     private function buildRow(object $r, Carbon $today, Collection $installments): array
     {
-        $main = (float) ($r->main_premium ?? 0);
-        $compulsory = (float) ($r->compulsory_premium ?? 0);
-        $totalDue = $installments->isNotEmpty()
-            ? round($installments->sum(fn (PolicyInstallment $i) => (float) $i->amount_due), 2)
-            : round($main + $compulsory, 2);
-        $paid = (float) $r->paid_total;
-        if ($paid <= 0 && (float) ($r->total_premium_paid ?? 0) > 0) {
-            $paid = (float) $r->total_premium_paid;
-        }
-        $paid = round($paid, 2);
+        $legacy = (bool) ($r->imported_from_legacy ?? false);
+        $totalDue = PremiumDue::due(
+            (float) ($r->main_premium ?? 0),
+            (float) ($r->compulsory_premium ?? 0),
+            (float) ($r->total_premium_paid ?? 0),
+            $installments,
+            (float) ($r->endorsement_total ?? 0),
+        );
+        $paid = PremiumDue::paid((float) $r->paid_total, (int) $r->paid_count, $legacy, $totalDue);
         if ($totalDue <= 0) {
             $totalDue = $paid;
         }
@@ -232,6 +253,7 @@ class CollectionsController extends Controller
             'agentName' => $r->agent_name,
             'totalDue' => $totalDue,
             'paid' => $paid,
+            'legacySettled' => PremiumDue::legacySettled($legacy, (int) $r->paid_count),
             'outstanding' => $outstanding,
             'dueToDate' => $dueToDate,
             'nextDue' => $nextDue,

@@ -16,6 +16,7 @@ import { api, ApiError, getToken } from '../../api/client'
 // New Policy and Resume Draft both navigate via router.push.
 import AgentPicker from '../../components/AgentPicker.vue'
 import DateInput from '../../components/DateInput.vue'
+import PolicyPeriodBadge from '../../components/PolicyPeriodBadge.vue'
 import { CURRENT_STATUSES, statusBadgeClass } from '../../utils/policyStatus'
 
 const { t } = useI18n()
@@ -602,6 +603,10 @@ const rangeText = computed(() => {
               <td class="px-4 py-2 font-mono text-xs text-slate-700">
                 <div>{{ p.applicationNo ?? '—' }}</div>
                 <div v-if="p.policyNo" class="text-[10px] text-slate-400">{{ p.policyNo }}</div>
+                <div v-if="p.periodLabel || p.refAppToId" class="mt-0.5 flex items-center gap-1">
+                  <PolicyPeriodBadge :label="p.periodLabel" />
+                  <i v-if="p.refAppToId" class="pi pi-replay text-[10px] text-teal-600" :title="t('policyCreate.renewal.renewedFrom')" />
+                </div>
               </td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ p.customerName || p.customerCode }}</div>

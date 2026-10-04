@@ -1,27 +1,172 @@
 <script setup lang="ts">
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { fetchTenant, updateCustomerTiers, updateFollowUpSettings, updatePayoutSettings, updateTenantProfile, type CustomerTierSetting, type TenantSettingsRow } from '../../api/tenant'
+import { ApiError } from '../../api/client'
 
 const { t } = useI18n()
 
-type Tab = 'profile' | 'commission' | 'payout' | 'branding' | 'audit'
+type Tab = 'profile' | 'commission' | 'payout' | 'branding' | 'customers' | 'followups' | 'audit'
 const tab = ref<Tab>('profile')
+
+const tierRows = ref<Array<{ key: CustomerTierSetting['key']; label: string; min: string }>>([])
+const tiersLoading = ref(false)
+const tiersSaving = ref(false)
+const tiersSaved = ref(false)
+const tiersError = ref<string | null>(null)
+let tiersLoaded = false
+
+function toTierRows(rows: CustomerTierSetting[]): Array<{ key: CustomerTierSetting['key']; label: string; min: string }> {
+  return rows.map((r) => ({ key: r.key, label: r.label, min: r.min === null ? '' : String(r.min) }))
+}
+
+async function loadTiers(): Promise<void> {
+  tiersLoading.value = true
+  tiersError.value = null
+  try {
+    tierRows.value = toTierRows((await fetchTenant()).data.customerTiers ?? [])
+    tiersLoaded = true
+  } catch (e: unknown) {
+    tiersError.value = e instanceof ApiError ? (e.body?.message ?? `HTTP ${e.status}`) : 'โหลดเกณฑ์ไม่สำเร็จ'
+  } finally {
+    tiersLoading.value = false
+  }
+}
+
+const tierValidation = computed<string | null>(() => {
+  const mins = tierRows.value.map((r) => r.min.trim()).filter((m) => m !== '').map(Number)
+  if (mins.some((n) => !Number.isFinite(n) || n < 0)) return 'กรุณากรอกตัวเลขตั้งแต่ 0 ขึ้นไป'
+  if (new Set(mins).size !== mins.length) return 'เกณฑ์แต่ละเกรดต้องไม่ซ้ำกัน'
+  return null
+})
+
+async function saveTiers(): Promise<void> {
+  if (tierValidation.value) return
+  tiersSaving.value = true
+  tiersError.value = null
+  try {
+    const payload: CustomerTierSetting[] = tierRows.value.map((r) => ({
+      key: r.key,
+      label: r.label.trim(),
+      min: r.min.trim() === '' ? null : Number(r.min),
+    }))
+    tierRows.value = toTierRows((await updateCustomerTiers(payload)).data.customerTiers ?? [])
+    tiersSaved.value = true
+    setTimeout(() => (tiersSaved.value = false), 2000)
+  } catch (e: unknown) {
+    tiersError.value = e instanceof ApiError ? (e.body?.message ?? `HTTP ${e.status}`) : 'บันทึกไม่สำเร็จ'
+  } finally {
+    tiersSaving.value = false
+  }
+}
+
+const followUp = reactive({ policyVerifyRequired: false, freelookDaysStandard: 15, freelookDaysRemote: 30, noCommissionWindowDays: 180 })
+const followUpLoading = ref(false)
+const followUpSaving = ref(false)
+const followUpSaved = ref(false)
+const followUpError = ref<string | null>(null)
+const confirmVerifyOff = ref(false)
+let followUpLoaded = false
+let followUpVerifyWas = false
+
+function fillFollowUp(row: TenantSettingsRow): void {
+  followUp.policyVerifyRequired = !!row.policyVerifyRequired
+  followUp.freelookDaysStandard = Number(row.freelookDaysStandard ?? 15)
+  followUp.freelookDaysRemote = Number(row.freelookDaysRemote ?? 30)
+  followUp.noCommissionWindowDays = Number(row.noCommissionWindowDays ?? 180)
+  followUpVerifyWas = followUp.policyVerifyRequired
+}
+
+async function loadFollowUp(): Promise<void> {
+  followUpLoading.value = true
+  followUpError.value = null
+  try {
+    fillFollowUp((await fetchTenant()).data)
+    followUpLoaded = true
+  } catch (e: unknown) {
+    followUpError.value = e instanceof ApiError ? (e.body?.message ?? `HTTP ${e.status}`) : 'โหลดการตั้งค่าไม่สำเร็จ'
+  } finally {
+    followUpLoading.value = false
+  }
+}
+
+async function saveFollowUp(): Promise<void> {
+  if (followUpVerifyWas && !followUp.policyVerifyRequired && !confirmVerifyOff.value) {
+    confirmVerifyOff.value = true
+    return
+  }
+  confirmVerifyOff.value = false
+  followUpSaving.value = true
+  followUpError.value = null
+  try {
+    fillFollowUp((await updateFollowUpSettings({ ...followUp })).data)
+    followUpSaved.value = true
+    setTimeout(() => (followUpSaved.value = false), 2000)
+  } catch (e: unknown) {
+    if (e instanceof ApiError) {
+      const errs = (e.body?.errors ?? {}) as Record<string, string[]>
+      followUpError.value = Object.values(errs)[0]?.[0] ?? e.body?.message ?? `HTTP ${e.status}`
+    } else {
+      followUpError.value = 'บันทึกไม่สำเร็จ'
+    }
+  } finally {
+    followUpSaving.value = false
+  }
+}
+
+watch(tab, (v) => {
+  if (v === 'customers' && !tiersLoaded) void loadTiers()
+  if (v === 'followups' && !followUpLoaded) void loadFollowUp()
+  if (v === 'payout' && !payoutLoaded) void loadPayout()
+})
 
 // ── Profile ───────────────────────────────────────────────────────────────
 const profile = reactive({
-  name: 'บริษัท เอบีซี อินชัวรันส์ จำกัด',
-  nameEn: 'ABC Insurance Co., Ltd.',
-  taxId: '0105561234567',
-  oicLicense: 'ค-2567-001',
-  phone: '02-555-0100',
-  email: 'contact@abc-insure.co.th',
-  website: 'https://abc-insure.co.th',
-  address: '123 อาคารเอบีซี ชั้น 15 ถนนสีลม',
-  district: 'สีลม',
-  amphoe: 'บางรัก',
-  province: 'กรุงเทพมหานคร',
-  postcode: '10500',
+  name: '',
+  nameEn: '',
+  taxId: '',
+  oicLicense: '',
+  phone: '',
+  email: '',
+  website: '',
+  address: '',
+  district: '',
+  amphoe: '',
+  province: '',
+  postcode: '',
+  paymentChannels: '',
 })
+const profileLoading = ref(false)
+const profileError = ref<string | null>(null)
+
+function fillProfile(row: TenantSettingsRow): void {
+  profile.name = row.name ?? ''
+  profile.nameEn = row.nameEn ?? ''
+  profile.taxId = row.taxId ?? ''
+  profile.oicLicense = row.oicLicense ?? ''
+  profile.phone = row.phone ?? ''
+  profile.email = row.email ?? ''
+  profile.website = row.website ?? ''
+  profile.address = row.address ?? ''
+  profile.district = row.district ?? ''
+  profile.amphoe = row.amphoe ?? ''
+  profile.province = row.province ?? ''
+  profile.postcode = row.postcode ?? ''
+  profile.paymentChannels = row.paymentChannels ?? ''
+}
+
+async function loadProfile(): Promise<void> {
+  profileLoading.value = true
+  profileError.value = null
+  try {
+    fillProfile((await fetchTenant()).data)
+  } catch (e: unknown) {
+    profileError.value = e instanceof ApiError ? (e.body?.message ?? `HTTP ${e.status}`) : 'โหลดข้อมูลหน่วยงานไม่สำเร็จ'
+  } finally {
+    profileLoading.value = false
+  }
+}
+onMounted(loadProfile)
 const logoPreview = ref<string | null>(null)
 const logoInput = ref<HTMLInputElement | null>(null)
 const profileSaving = ref(false)
@@ -45,10 +190,37 @@ function removeLogo() {
 }
 async function saveProfile() {
   profileSaving.value = true
-  await new Promise((r) => setTimeout(r, 500))
-  profileSaving.value = false
-  profileSaved.value = true
-  setTimeout(() => (profileSaved.value = false), 2000)
+  profileError.value = null
+  try {
+    const nullable = (v: string) => (v.trim() === '' ? null : v.trim())
+    const res = await updateTenantProfile({
+      name: profile.name.trim(),
+      nameEn: nullable(profile.nameEn),
+      taxId: nullable(profile.taxId),
+      oicLicense: nullable(profile.oicLicense),
+      phone: nullable(profile.phone),
+      email: nullable(profile.email),
+      website: nullable(profile.website),
+      address: nullable(profile.address),
+      district: nullable(profile.district),
+      amphoe: nullable(profile.amphoe),
+      province: nullable(profile.province),
+      postcode: nullable(profile.postcode),
+      paymentChannels: nullable(profile.paymentChannels),
+    })
+    fillProfile(res.data)
+    profileSaved.value = true
+    setTimeout(() => (profileSaved.value = false), 2000)
+  } catch (e: unknown) {
+    if (e instanceof ApiError) {
+      const errs = e.body?.errors ?? {}
+      profileError.value = Object.values(errs)[0]?.[0] ?? e.body?.message ?? `HTTP ${e.status}`
+    } else {
+      profileError.value = 'บันทึกไม่สำเร็จ'
+    }
+  } finally {
+    profileSaving.value = false
+  }
 }
 
 // ── Commission mode ───────────────────────────────────────────────────────
@@ -60,6 +232,63 @@ const payout = reactive({
   minBalance: 500,
   autoApprove: false,
 })
+const payoutRules = reactive({
+  payoutRequireFreelook: true,
+  payoutRequireInsurerReceived: true,
+  payoutRequireCustomerPaid: true,
+  whtRateIndividual: 3,
+  whtRateCorporate: 3,
+})
+const payoutLoading = ref(false)
+const payoutSaving = ref(false)
+const payoutSaved = ref(false)
+const payoutError = ref<string | null>(null)
+let payoutLoaded = false
+
+function fillPayout(row: TenantSettingsRow): void {
+  payoutRules.payoutRequireFreelook = row.payoutRequireFreelook !== false
+  payoutRules.payoutRequireInsurerReceived = row.payoutRequireInsurerReceived !== false
+  payoutRules.payoutRequireCustomerPaid = row.payoutRequireCustomerPaid !== false
+  payoutRules.whtRateIndividual = Number(row.whtRateIndividual ?? 3)
+  payoutRules.whtRateCorporate = Number(row.whtRateCorporate ?? 3)
+  if (row.payout) {
+    payout.cycle = row.payout.cycle ?? 'monthly'
+    payout.minBalance = Number(row.payout.minBalance ?? 0)
+    payout.autoApprove = row.payout.autoApprove === true
+  }
+}
+
+async function loadPayout(): Promise<void> {
+  payoutLoading.value = true
+  payoutError.value = null
+  try {
+    fillPayout((await fetchTenant()).data)
+    payoutLoaded = true
+  } catch (e: unknown) {
+    payoutError.value = e instanceof ApiError ? (e.body?.message ?? `HTTP ${e.status}`) : 'โหลดการตั้งค่าไม่สำเร็จ'
+  } finally {
+    payoutLoading.value = false
+  }
+}
+
+async function savePayout(): Promise<void> {
+  payoutSaving.value = true
+  payoutError.value = null
+  try {
+    fillPayout((await updatePayoutSettings({ ...payoutRules, payout: { ...payout } })).data)
+    payoutSaved.value = true
+    setTimeout(() => (payoutSaved.value = false), 2000)
+  } catch (e: unknown) {
+    if (e instanceof ApiError) {
+      const errs = (e.body?.errors ?? {}) as Record<string, string[]>
+      payoutError.value = Object.values(errs)[0]?.[0] ?? e.body?.message ?? `HTTP ${e.status}`
+    } else {
+      payoutError.value = 'บันทึกไม่สำเร็จ'
+    }
+  } finally {
+    payoutSaving.value = false
+  }
+}
 
 const next3Payouts = computed(() => {
   const dates: { cutoff: string; pay: string }[] = []
@@ -170,7 +399,7 @@ function exportAuditCsv() {
     <!-- Tabs -->
     <div class="border-b border-slate-200 flex items-center gap-1 overflow-x-auto">
       <button
-        v-for="tk in (['profile', 'commission', 'payout', 'branding', 'audit'] as Tab[])"
+        v-for="tk in (['profile', 'commission', 'payout', 'branding', 'customers', 'followups', 'audit'] as Tab[])"
         :key="tk"
         type="button"
         @click="tab = tk"
@@ -281,13 +510,24 @@ function exportAuditCsv() {
             </div>
           </div>
 
+          <div class="border-t border-slate-100 pt-4">
+            <label class="block text-sm font-medium text-slate-700 mb-1.5">ช่องทางชำระเงิน (แสดงบนใบเตือนต่ออายุ)</label>
+            <textarea v-model="profile.paymentChannels" rows="4" maxlength="2000" data-testid="tenant-payment-channels"
+              placeholder="เช่น&#10;โอนเข้าบัญชี ธนาคารกสิกรไทย เลขที่ 123-4-56789-0 ชื่อบัญชี บริษัท ... จำกัด&#10;พร้อมเพย์ 0105561234567"
+              class="w-full px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100" />
+            <p class="text-xs text-slate-500 mt-1">ข้อความนี้ รวมถึงชื่อ ที่อยู่ เบอร์โทร เลขผู้เสียภาษี และใบอนุญาต คปภ. ด้านบน จะพิมพ์บนใบเตือนต่ออายุที่สร้างจากระบบ</p>
+          </div>
+
+          <p v-if="profileError" class="text-sm text-rose-600">{{ profileError }}</p>
           <div class="flex items-center justify-end gap-3 pt-2 border-t border-slate-100">
+            <span v-if="profileLoading" class="text-slate-400 text-sm">กำลังโหลด…</span>
             <span v-if="profileSaved" class="text-emerald-600 text-sm flex items-center gap-1">
               <i class="pi pi-check-circle" /> {{ t('settings.profile.saved') }}
             </span>
             <button
               type="submit"
-              :disabled="profileSaving"
+              :disabled="profileSaving || profileLoading || !profile.name.trim()"
+              data-testid="tenant-profile-save"
               class="px-5 py-2.5 bg-brand-600 text-white rounded-lg font-medium hover:bg-brand-700 transition disabled:opacity-50 flex items-center gap-2"
             >
               <i v-if="profileSaving" class="pi pi-spin pi-spinner" />
@@ -362,7 +602,42 @@ function exportAuditCsv() {
     </section>
 
     <!-- Payout cycle tab -->
-    <section v-if="tab === 'payout'" class="space-y-6">
+    <section v-if="tab === 'payout'" class="space-y-6" data-testid="tenant-payout">
+      <div v-if="payoutLoading" class="card p-6 text-sm text-slate-500">กำลังโหลด…</div>
+      <div class="card p-6" data-testid="payout-conditions">
+        <h3 class="font-semibold text-slate-900">เงื่อนไขก่อนจ่ายค่าคอม</h3>
+        <p class="text-xs text-slate-500 mt-1 max-w-3xl">
+          รายการที่ไม่ผ่านเงื่อนไขจะขึ้นเป็น "รอเงื่อนไข" พร้อมเหตุผลและไม่เข้ารอบจ่าย · ผู้มีสิทธิ์ "ปรับแต่งค่าคอมมิชชัน" ยกเว้นรายกรมธรรม์ได้โดยต้องใส่เหตุผล (บันทึกใน audit)
+        </p>
+        <div class="mt-4 space-y-3">
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input v-model="payoutRules.payoutRequireFreelook" type="checkbox" data-testid="cond-freelook" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600" />
+            <span><span class="text-sm font-medium text-slate-700">พ้นระยะ Freelook แล้ว</span><span class="block text-xs text-slate-500">เฉพาะประกันชีวิต ต้องมีวันที่ลูกค้าได้รับกรมธรรม์และพ้นวันสิ้นสุด Freelook</span></span>
+          </label>
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input v-model="payoutRules.payoutRequireInsurerReceived" type="checkbox" data-testid="cond-insurer" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600" />
+            <span><span class="text-sm font-medium text-slate-700">ได้รับค่าคอมจากบริษัทประกันแล้ว</span><span class="block text-xs text-slate-500">รายการค่าคอมหลักของกรมธรรม์ในหน้า "รับค่าคอม" ต้องเป็นสถานะ "รับแล้ว"</span></span>
+          </label>
+          <label class="flex items-start gap-3 cursor-pointer">
+            <input v-model="payoutRules.payoutRequireCustomerPaid" type="checkbox" data-testid="cond-customer" class="mt-0.5 h-4 w-4 rounded border-slate-300 text-brand-600" />
+            <span><span class="text-sm font-medium text-slate-700">ลูกค้าชำระเบี้ยแล้ว</span><span class="block text-xs text-slate-500">กรมธรรม์ผ่อนจ่ายค่าคอมพื้นฐานตามสัดส่วนงวดที่ชำระครบ (เช่น 3/10 งวด = 30%) ปิดข้อนี้ = จ่ายเต็มทันที</span></span>
+          </label>
+        </div>
+      </div>
+
+      <div class="card p-6 grid grid-cols-1 md:grid-cols-2 gap-4" data-testid="payout-wht">
+        <div class="md:col-span-2">
+          <h3 class="font-semibold text-slate-900">ภาษีหัก ณ ที่จ่าย (ค่าเริ่มต้น)</h3>
+          <p class="text-xs text-slate-500 mt-1">คิดจากยอดก่อนภาษีมูลค่าเพิ่ม หลังหักรายการหัก · กำหนดอัตรารายตัวแทนได้ที่หน้าแก้ไขตัวแทน · ควรยืนยันอัตราและแบบที่ยื่นกับฝ่ายบัญชี/ผู้สอบบัญชี</p>
+        </div>
+        <label class="text-sm text-slate-700">บุคคลธรรมดา (ยื่น ภ.ง.ด.3) %
+          <input v-model.number="payoutRules.whtRateIndividual" type="number" min="0" max="15" step="0.01" data-testid="wht-individual" class="mt-1 w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-right" />
+        </label>
+        <label class="text-sm text-slate-700">นิติบุคคล (ยื่น ภ.ง.ด.53) %
+          <input v-model.number="payoutRules.whtRateCorporate" type="number" min="0" max="15" step="0.01" data-testid="wht-corporate" class="mt-1 w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-right" />
+        </label>
+      </div>
+
       <div>
         <h3 class="font-semibold text-slate-900">{{ t('settings.payout.title') }}</h3>
         <p class="text-sm text-slate-500 mt-1">{{ t('settings.payout.subtitle') }}</p>
@@ -436,6 +711,13 @@ function exportAuditCsv() {
             </div>
           </div>
         </div>
+      </div>
+
+      <p v-if="payoutError" class="text-xs text-rose-600">{{ payoutError }}</p>
+      <div class="flex items-center justify-end gap-3">
+        <span v-if="payoutSaved" class="text-xs text-emerald-600"><i class="pi pi-check" /> บันทึกแล้ว</span>
+        <button type="button" data-testid="payout-save" class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
+          :disabled="payoutSaving || payoutLoading" @click="savePayout">บันทึก</button>
       </div>
     </section>
 
@@ -542,6 +824,104 @@ function exportAuditCsv() {
           </div>
         </div>
       </div>
+    </section>
+
+    <section v-if="tab === 'customers'" class="space-y-4" data-testid="tenant-customer-tiers">
+      <div class="card p-6">
+        <h3 class="font-semibold text-slate-900">{{ t('settings.customerTiers.title') }}</h3>
+        <p class="text-xs text-slate-500 mt-1">{{ t('settings.customerTiers.subtitle') }}</p>
+        <div v-if="tiersLoading" class="text-sm text-slate-500 mt-4">กำลังโหลด…</div>
+        <table v-else class="w-full text-sm mt-4">
+          <thead class="text-xs text-slate-500">
+            <tr>
+              <th class="text-left font-medium py-2 w-24">Key</th>
+              <th class="text-left font-medium py-2 pr-3">{{ t('settings.customerTiers.label') }}</th>
+              <th class="text-left font-medium py-2">{{ t('settings.customerTiers.min') }}</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr v-for="r in tierRows" :key="r.key">
+              <td class="py-2 font-mono text-xs text-slate-500 uppercase">{{ r.key }}</td>
+              <td class="py-2 pr-3">
+                <input v-model="r.label" maxlength="32"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400" />
+              </td>
+              <td class="py-2">
+                <input v-model="r.min" inputmode="decimal" :placeholder="t('settings.customerTiers.disabledHint')"
+                  :data-testid="`tier-min-${r.key}`"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white text-right tabular-nums focus:outline-none focus:border-brand-400" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <p class="text-[11px] text-slate-400 mt-2">{{ t('settings.customerTiers.disabledHint') }}</p>
+        <p v-if="tierValidation" class="text-xs text-rose-600 mt-2">{{ tierValidation }}</p>
+        <p v-if="tiersError" class="text-xs text-rose-600 mt-2">{{ tiersError }}</p>
+        <div class="flex items-center justify-end gap-3 mt-4">
+          <span v-if="tiersSaved" class="text-xs text-emerald-600"><i class="pi pi-check" /> {{ t('settings.customerTiers.saved') }}</span>
+          <button type="button" data-testid="tier-save"
+            class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
+            :disabled="tiersSaving || tiersLoading || !!tierValidation" @click="saveTiers">
+            {{ t('settings.customerTiers.save') }}
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="tab === 'followups'" class="space-y-4" data-testid="tenant-followups">
+      <div v-if="followUpLoading" class="card p-6 text-sm text-slate-500">กำลังโหลด…</div>
+      <template v-else>
+        <div class="card p-6">
+          <div class="flex items-start justify-between gap-4">
+            <div>
+              <h3 class="font-semibold text-slate-900">ตรวจสอบ 2 ชั้น (Maker-Checker / Verify)</h3>
+              <p class="text-xs text-slate-500 mt-1 max-w-2xl">
+                เมื่อเปิด การสร้างกรมธรรม์ การแก้ข้อมูลสำคัญ (ลูกค้า ตัวแทน บริษัท สินค้า เลขกรมธรรม์ วันที่ ทุน เบี้ย ค่าคอม งวดชำระ สถานะ) และการลบ
+                จะเป็น "คำขอ" ที่ต้องให้ผู้ใช้อีกคนที่มีสิทธิ์ "ตรวจสอบ (Verify) กรมธรรม์" อนุมัติก่อน ข้อมูลจริงจะไม่เปลี่ยนจนกว่าจะอนุมัติ · ผู้ส่งคำขออนุมัติเองไม่ได้
+              </p>
+            </div>
+            <label class="inline-flex shrink-0 cursor-pointer items-center gap-2">
+              <input v-model="followUp.policyVerifyRequired" type="checkbox" data-testid="verify-toggle"
+                class="h-4 w-4 rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+              <span :class="['text-sm font-medium', followUp.policyVerifyRequired ? 'text-emerald-700' : 'text-slate-500']">
+                {{ followUp.policyVerifyRequired ? 'เปิดใช้งาน' : 'ปิดอยู่' }}
+              </span>
+            </label>
+          </div>
+          <p class="mt-3 text-[11px] text-slate-400">กำหนดผู้มีสิทธิ์ตรวจได้ที่ ผู้ใช้และสิทธิ์ › บทบาท › กรมธรรม์ › ตรวจสอบ (Verify) กรมธรรม์</p>
+        </div>
+
+        <div class="card p-6 grid grid-cols-1 md:grid-cols-3 gap-4">
+          <div class="md:col-span-3">
+            <h3 class="font-semibold text-slate-900">กติกาการติดตามงานค้าง</h3>
+          </div>
+          <label class="text-sm text-slate-700">Freelook ขายตรง (วัน)
+            <input v-model.number="followUp.freelookDaysStandard" type="number" min="1" max="120" data-testid="freelook-days-standard"
+              class="mt-1 w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-right tabular-nums" />
+            <span class="mt-0.5 block text-[11px] text-slate-400">นับจากวันที่ลูกค้าได้รับกรมธรรม์</span>
+          </label>
+          <label class="text-sm text-slate-700">Freelook ขายทางโทรศัพท์/ออนไลน์ (วัน)
+            <input v-model.number="followUp.freelookDaysRemote" type="number" min="1" max="120" data-testid="freelook-days-remote"
+              class="mt-1 w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-right tabular-nums" />
+          </label>
+          <label class="text-sm text-slate-700">ติดตาม "ยังไม่บันทึกค่าคอม" ย้อนหลัง (วัน)
+            <input v-model.number="followUp.noCommissionWindowDays" type="number" min="7" max="3650" data-testid="no-commission-days"
+              class="mt-1 w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm text-right tabular-nums" />
+            <span class="mt-0.5 block text-[11px] text-slate-400">นับจากวันเริ่มคุ้มครอง</span>
+          </label>
+        </div>
+
+        <div v-if="confirmVerifyOff" class="card p-4 bg-amber-50 border border-amber-300 text-sm text-amber-900" data-testid="verify-off-confirm">
+          ปิดการตรวจสอบ 2 ชั้น? คำขอที่ค้างอยู่จะยังรอตรวจตามเดิม แต่การแก้ไขต่อจากนี้จะบันทึกทันทีโดยไม่มีคนตรวจ · กด "บันทึก" อีกครั้งเพื่อยืนยัน
+        </div>
+        <p v-if="followUpError" class="text-xs text-rose-600">{{ followUpError }}</p>
+        <div class="flex items-center justify-end gap-3">
+          <span v-if="followUpSaved" class="text-xs text-emerald-600"><i class="pi pi-check" /> บันทึกแล้ว</span>
+          <button type="button" data-testid="followups-save"
+            class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
+            :disabled="followUpSaving" @click="saveFollowUp">บันทึก</button>
+        </div>
+      </template>
     </section>
 
     <!-- Audit log tab -->

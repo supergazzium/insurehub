@@ -28,18 +28,44 @@ export interface BatchRow {
   paymentDate: string | null
   paymentReference: string | null
   approvedAt?: string | null
+  calcVersion?: number
+  netTotal?: number | null
+  whtTotal?: number | null
   note: string | null
   paidAt: string | null
   createdAt: string | null
 }
 
+export type LineType = 'base' | 'self_mgmt' | 'referral' | 'override'
+
 export interface BatchItemRow {
   policyId: string
   policyNo: string | null
   applicationNo: string | null
+  lineType?: LineType
+  lineLabel?: string
+  sourceAgent?: string | null
+  ratioLabel?: string | null
+  override?: boolean
   amount: number
   source: string | null
   status: string
+}
+export interface PayeeTax {
+  base: number
+  selfMgmt: number
+  referral: number
+  override: number
+  taxable: number
+  vat: number
+  total: number
+  whtRate: number
+  whtForm: string | null
+  wht: number
+  net: number
+  certificate: string | null
+  bankName: string | null
+  hasBankAccount: boolean
 }
 export interface BatchAgentRow {
   agentId: string | null
@@ -50,6 +76,9 @@ export interface BatchAgentRow {
   commission: number
   deduct: number
   net: number
+  payeeId?: string | null
+  payeeKind?: string | null
+  tax?: PayeeTax
   items: BatchItemRow[]
 }
 export interface BatchAdjustment {
@@ -57,6 +86,8 @@ export interface BatchAdjustment {
   agentId: string | null
   agentCode: string | null
   type: string
+  typeLabel?: string
+  policyNo?: string | null
   amount: number
   reason: string
   createdAt: string | null
@@ -64,6 +95,10 @@ export interface BatchAdjustment {
 export interface BatchDetail extends BatchRow {
   agents: BatchAgentRow[]
   adjustments: BatchAdjustment[]
+}
+export interface BatchMeta {
+  canApprove: boolean
+  canPay: boolean
 }
 
 export function previewPayout(fromDate: string, toDate: string) {
@@ -78,26 +113,93 @@ export interface AgentOutstandingRow {
   vatType: string | null
   itemCount: number
   amount: number
+  whtRate?: number
+  byType?: Record<LineType, number>
+  waitingCount?: number
+  waitingAmount?: number
+  netAmount?: number
+  pendingDeduction?: number
 }
 export interface AgentOutstandingResult {
   agents: AgentOutstandingRow[]
-  totals: { totalAgents: number; totalItems: number; totalAmount: number }
+  totals: { totalAgents: number; totalItems: number; totalAmount: number; totalWaiting?: number; totalNet?: number }
+  warnings?: string[]
+}
+export interface LineReason {
+  code: string
+  label: string
+}
+export interface LineOverride {
+  id: string
+  reason: string
+  by: string | null
+  at: string | null
+  bypassed: LineReason[]
 }
 export interface AgentDetailItem {
+  key: string
+  lineType: LineType
+  lineLabel: string
   policyId: number
   policyNo: string | null
   applicationNo: string | null
+  customerName: string | null
+  policyDate: string | null
+  sourceAgent: string | null
   basePremium: number
   agentCommission: number
   riderCommission: number
   amount: number
+  entitlement: number
+  ratioLabel: string | null
   amountSource: string
-  policyDate: string | null
+  override: LineOverride | null
+  reasons: LineReason[]
+}
+export interface PendingDeduction {
+  id: string
+  type: string
+  typeLabel?: string
+  amount: number
+  reason: string | null
+  policyId: string | null
+  policyNo: string | null
+  createdAt: string | null
+}
+export interface AgentDetailTotals {
+  itemCount: number
+  totalAmount: number
+  byType: Record<LineType, number>
+  pendingDeduction: number
+  appliedDeduction: number
+  carryForward: number
+  taxableAmount: number
+  vatAmount: number
+  grossWithVat: number
+  whtAmount: number
+  netAmount: number
+  waitingCount: number
+  waitingAmount: number
 }
 export interface AgentDetailResult {
-  agent: { agentId: string; agentCode: string | null; agentName: string; vatType: string | null } | null
+  agent: {
+    agentId: string
+    agentCode: string | null
+    agentName: string
+    vatType: string | null
+    kind?: string
+    whtRate?: number
+    whtForm?: string
+    whtFormLabel?: string | null
+    bankName?: string | null
+    hasBankAccount?: boolean
+  } | null
   items: AgentDetailItem[]
-  totals: { itemCount: number; totalAmount: number }
+  waiting: AgentDetailItem[]
+  pendingDeductions?: PendingDeduction[]
+  warnings?: string[]
+  totals: AgentDetailTotals
+  meta?: { canPay: boolean; canOverride: boolean }
 }
 
 /** Agent-first outstanding list — every agent with unpaid commission. */
@@ -126,7 +228,51 @@ export function createPayoutBatch(fromDate: string, toDate: string, note?: strin
   return api.post<{ data: BatchRow }>('commission-payout-batches', { fromDate, toDate, note })
 }
 export function fetchPayoutBatch(id: string) {
-  return api.get<{ data: BatchDetail }>(`commission-payout-batches/${id}`)
+  return api.get<{ data: BatchDetail; meta?: BatchMeta }>(`commission-payout-batches/${id}`)
+}
+export function overridePolicyConditions(policyId: number | string, reason: string) {
+  return api.post<{ data: { id: string } }>(`policies/${policyId}/payout-override`, { reason })
+}
+export function revokePolicyOverride(policyId: number | string) {
+  return api.delete<{ data: { revoked: number } }>(`policies/${policyId}/payout-override`)
+}
+export function agentStatementPath(batchId: string, agentCode: string): string {
+  return `commission-payout-batches/${batchId}/agents/${encodeURIComponent(agentCode)}/pdf`
+}
+export function certificatePath(batchId: string, payeeId: string): string {
+  return `commission-payout-batches/${batchId}/payees/${payeeId}/certificate`
+}
+export function bankCsvPath(batchId: string): string {
+  return `commission-payout-batches/${batchId}/bank.csv`
+}
+export interface WhtReportRow {
+  seq: number
+  payeeId: string
+  batchId: string
+  taxId: string | null
+  name: string | null
+  agentCode: string | null
+  address: string | null
+  date: string | null
+  incomeType: string
+  rate: number
+  amount: number
+  wht: number
+  condition: number
+  certificate: string | null
+}
+export interface WhtReport {
+  month: string
+  form: 'pnd3' | 'pnd53'
+  formLabel: string
+  rows: WhtReportRow[]
+  totals: { count: number; amount: number; wht: number }
+}
+export function fetchWhtReport(month: string, form: 'pnd3' | 'pnd53') {
+  return api.get<{ data: WhtReport }>(`commission-payout-batches/wht-report${buildQuery({ month, form })}`)
+}
+export function whtReportCsvPath(month: string, form: 'pnd3' | 'pnd53'): string {
+  return `commission-payout-batches/wht-report${buildQuery({ month, form, format: 'csv' })}`
 }
 export function addPayoutAdjustment(
   id: string, payload: { agentId?: string | null; agentCode?: string | null; amount: number; reason: string },

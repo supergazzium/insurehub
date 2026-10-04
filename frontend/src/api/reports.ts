@@ -57,7 +57,11 @@ export interface ExpiringPolicy {
   productName: string | null
   productType?: string | null
   productMainRider?: string | null
+  productCategory?: string | null
+  productSubCategory?: string | null
   motorLicenseNo?: string | null
+  motorVehicle?: string | null
+  lastFollowup?: LastFollowup | null
   // Phase 8b — renewal action timestamps (null if never done)
   lastContactedAt?: string | null
   lastNoticeSentAt?: string | null
@@ -69,6 +73,103 @@ export interface ExpiringPolicy {
   quoteSentAt?: string | null
   renewalDeclinedAt?: string | null
   renewalStage?: RenewalStage
+  policyYear?: number
+  periodLabel?: string | null
+  renewedPolicyId?: string | null
+  renewedApplicationNo?: string | null
+  renewedStatus?: string | null
+}
+
+export type FollowupChannel = 'phone' | 'line' | 'email' | 'inperson' | 'other'
+export type FollowupResult = 'unreachable' | 'interested' | 'thinking' | 'not_renewing'
+
+export interface LastFollowup {
+  id: string
+  at: string | null
+  channel: FollowupChannel
+  result: FollowupResult
+  reasonCode: string | null
+  reasonLabel: string | null
+  note: string | null
+  nextAt: string | null
+  byName: string | null
+}
+
+export interface RenewalFollowup {
+  id: string
+  channel: FollowupChannel
+  result: FollowupResult
+  reasonCode: string | null
+  reasonLabel: string | null
+  reasonNote: string | null
+  note: string | null
+  nextFollowupAt: string | null
+  createdAt: string | null
+  byUserName: string | null
+}
+
+export interface RenewalFollowupPayload {
+  channel: FollowupChannel
+  result: FollowupResult
+  reasonCode?: string | null
+  reasonNote?: string | null
+  note?: string | null
+  nextFollowupAt?: string | null
+}
+
+export function fetchRenewalFollowups(policyId: string) {
+  return api.get<{ data: RenewalFollowup[]; meta: { declined: boolean; reasons: Array<{ code: string; label: string }> } }>(
+    `policies/${policyId}/renewal-followups`,
+  )
+}
+
+export function createRenewalFollowup(policyId: string, payload: RenewalFollowupPayload) {
+  return api.post<{ message: string; data: RenewalFollowup }>(`policies/${policyId}/renewal-followups`, payload)
+}
+
+export function reopenRenewal(policyId: string, note?: string) {
+  return api.post<{ message: string }>(`policies/${policyId}/renewal/reopen`, { note })
+}
+
+export interface RenewalNotice {
+  id: string
+  policyId: string
+  noticeNo: string
+  annualPremium: number
+  netPremium: number | null
+  dutyStamp: number | null
+  vat: number | null
+  discount: number | null
+  coverage: number | null
+  premiumMode: string | null
+  dueDate: string | null
+  validUntil: string | null
+  note: string | null
+  carrierDocumentId: string | null
+  documentId: string | null
+  createdByName: string | null
+  createdAt: string | null
+}
+
+export interface RenewalNoticePayload {
+  annualPremium: number
+  netPremium?: number | null
+  dutyStamp?: number | null
+  vat?: number | null
+  discount?: number | null
+  coverage?: number | null
+  premiumMode?: string | null
+  dueDate?: string | null
+  validUntil?: string | null
+  note?: string | null
+}
+
+export function fetchRenewalNotices(policyId: string) {
+  return api.get<{ data: RenewalNotice[] }>(`policies/${policyId}/renewal-notices`)
+}
+
+export function createRenewalNotice(policyId: string, payload: RenewalNoticePayload) {
+  return api.post<{ message: string; data: RenewalNotice }>(`policies/${policyId}/renewal-notices`, payload)
 }
 
 /** Ordered renewal-pipeline stages, derived server-side from policy events. */
@@ -170,6 +271,7 @@ export interface ExpiringSoonMeta {
 export interface ExpiringSoonSummary {
   totalInWindow: number
   urgentCount: number
+  followupDueCount?: number
 }
 
 export interface ExpiringSoonQuery {
@@ -181,6 +283,9 @@ export interface ExpiringSoonQuery {
   productId?: string
   writingAgentId?: string
   productType?: string
+  productCategory?: string
+  productSubCategory?: string
+  followupDue?: boolean
   insureType?: string
   page?: number
   perPage?: number

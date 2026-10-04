@@ -12,6 +12,7 @@ export interface ScheduleLine {
   installmentId?: string
   amountPaid?: number
   status?: 'pending' | 'partial' | 'paid'
+  periodLabel?: string
 }
 
 export interface CollectionRow {
@@ -27,6 +28,7 @@ export interface CollectionRow {
   agentName: string
   totalDue: number
   paid: number
+  legacySettled?: boolean
   outstanding: number
   dueToDate: number
   nextDue: { no: number; dueDate: string | null; amount: number } | null
@@ -81,6 +83,7 @@ export interface CollectionDetail extends CollectionRow {
   carrierName: string | null
   productName: string | null
   payments: PaymentRecord[]
+  periodLabel?: string
 }
 export function fetchCollection(policyId: string) {
   return api.get<{ data: CollectionDetail }>(`collections/${policyId}`)

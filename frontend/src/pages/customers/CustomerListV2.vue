@@ -4,6 +4,7 @@ import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useCustomerStore } from '../../stores/customers'
+import { fetchTenant, type CustomerTierSetting } from '../../api/tenant'
 import {
   customerDisplayName,
   customerInitials,
@@ -26,11 +27,45 @@ const filters = reactive({
   unassigned: false,
   withPolicies: false,
   active: '' as '' | 'true' | 'false',
+  gender: '' as '' | 'M' | 'F' | 'none',
+  tier: '',
   perPage: 25,
 })
 
+const tierOptions = ref<CustomerTierSetting[]>([
+  { key: 'vip', label: 'VIP', min: 100000 },
+  { key: 'gold', label: 'Gold', min: 50000 },
+  { key: 'silver', label: 'Silver', min: 20000 },
+])
+
+async function loadTiers(): Promise<void> {
+  try {
+    const res = await fetchTenant()
+    const tiers = res.data.customerTiers ?? []
+    if (tiers.length) tierOptions.value = tiers.filter((x) => x.min !== null)
+  } catch {
+    return
+  }
+}
+
+const TIER_CLASS: Record<string, string> = {
+  vip: 'bg-violet-50 text-violet-700 ring-1 ring-violet-200',
+  gold: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
+  silver: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200',
+}
+
+function genderLabel(g: string | null | undefined): string {
+  if (g === 'M') return t('customers.gender.male')
+  if (g === 'F') return t('customers.gender.female')
+  return '—'
+}
+
+function fmtMoney(n: number | null | undefined): string {
+  return Number(n ?? 0).toLocaleString('th-TH', { minimumFractionDigits: 0, maximumFractionDigits: 2 })
+}
+
 const page = ref(1)
-type SortCol = 'customerCode' | 'firstName' | 'lastName' | 'province' | 'registeredAt' | 'newest'
+type SortCol = 'customerCode' | 'firstName' | 'lastName' | 'gender' | 'totalPremium' | 'registeredAt' | 'newest'
 const sortBy = ref<SortCol>('newest')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
@@ -41,7 +76,7 @@ function toggleSort(col: SortCol): void {
     sortDir.value = sortDir.value === 'asc' ? 'desc' : 'asc'
   } else {
     sortBy.value = col
-    sortDir.value = col === 'newest' || col === 'registeredAt' ? 'desc' : 'asc'
+    sortDir.value = col === 'newest' || col === 'registeredAt' || col === 'totalPremium' ? 'desc' : 'asc'
   }
   page.value = 1
   void load()
@@ -54,6 +89,8 @@ async function load(): Promise<void> {
     unassigned: filters.unassigned || undefined,
     withPolicies: filters.withPolicies || undefined,
     active: filters.active === '' ? undefined : filters.active === 'true',
+    gender: filters.gender || undefined,
+    tier: filters.tier || undefined,
     page: page.value,
     perPage: filters.perPage,
     sortBy: sortBy.value,
@@ -73,6 +110,7 @@ onMounted(() => {
     return
   }
   void load()
+  void loadTiers()
 })
 
 let debounceTimer: number | undefined
@@ -84,7 +122,7 @@ watch(
   },
 )
 watch(
-  () => [filters.customerType, filters.unassigned, filters.withPolicies, filters.active, filters.perPage],
+  () => [filters.customerType, filters.unassigned, filters.withPolicies, filters.active, filters.gender, filters.tier, filters.perPage],
   () => { page.value = 1; void load() },
 )
 
@@ -119,12 +157,12 @@ const rangeText = computed(() => {
         <button type="button"
           class="px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm flex items-center gap-1.5"
           @click="goCreate">
-          <i class="pi pi-plus text-xs" /> New Customer
+          <i class="pi pi-plus text-xs" /> {{ t('customers.ui.newCustomer') }}
         </button>
       </div>
     </header>
 
-    <section class="card p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+    <section class="card p-4 grid grid-cols-1 md:grid-cols-4 xl:grid-cols-8 gap-3 items-end">
       <div class="md:col-span-2">
         <label class="text-xs font-medium text-slate-500 mb-1 block">ค้นหา (รหัส / ชื่อ / นิติบุคคล / บัตรประชาชน / เลขผู้เสียภาษี / passport / โทรศัพท์ / อีเมล)</label>
         <div class="relative">
@@ -143,6 +181,23 @@ const rangeText = computed(() => {
         </select>
       </div>
       <div>
+        <label class="text-xs font-medium text-slate-500 mb-1 block">{{ t('customers.fields.gender') }}</label>
+        <select v-model="filters.gender" data-testid="customer-filter-gender" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+          <option value="">{{ t('customers.ui.genderAll') }}</option>
+          <option value="M">{{ t('customers.gender.male') }}</option>
+          <option value="F">{{ t('customers.gender.female') }}</option>
+          <option value="none">{{ t('customers.ui.genderNone') }}</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-500 mb-1 block">{{ t('customers.ui.tier') }}</label>
+        <select v-model="filters.tier" data-testid="customer-filter-tier" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+          <option value="">{{ t('customers.ui.tierAll') }}</option>
+          <option v-for="o in tierOptions" :key="o.key" :value="o.key">{{ o.label }} (≥ {{ fmtMoney(o.min) }})</option>
+          <option value="none">{{ t('customers.ui.tierNone') }}</option>
+        </select>
+      </div>
+      <div>
         <label class="text-xs font-medium text-slate-500 mb-1 block">Active</label>
         <select v-model="filters.active" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
           <option value="">All</option>
@@ -150,11 +205,11 @@ const rangeText = computed(() => {
           <option value="false">Inactive</option>
         </select>
       </div>
-      <div class="flex items-center gap-3">
-        <label class="flex items-center gap-1 text-xs text-slate-500">
+      <div class="flex flex-col gap-1">
+        <label class="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap">
           <input v-model="filters.unassigned" type="checkbox" /> Unassigned
         </label>
-        <label class="flex items-center gap-1 text-xs text-slate-500">
+        <label class="flex items-center gap-1 text-xs text-slate-500 whitespace-nowrap">
           <input v-model="filters.withPolicies" type="checkbox" /> Has policies
         </label>
       </div>
@@ -193,19 +248,27 @@ const rangeText = computed(() => {
                   class="pi text-[10px] ml-1" />
                 <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
               </th>
-              <th class="px-4 py-2 text-left">ประเภท</th>
-              <th class="px-4 py-2 text-left">ID card</th>
-              <th class="px-4 py-2 text-left">โทรศัพท์</th>
               <th class="px-4 py-2 text-left cursor-pointer select-none hover:text-slate-800"
-                @click="toggleSort('province')">
-                จังหวัด
-                <i v-if="sortBy === 'province'"
+                data-testid="customer-col-gender" @click="toggleSort('gender')">
+                {{ t('customers.fields.gender') }}
+                <i v-if="sortBy === 'gender'"
                   :class="sortDir === 'asc' ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'"
                   class="pi text-[10px] ml-1" />
                 <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
               </th>
+              <th class="px-4 py-2 text-left">ประเภท</th>
+              <th class="px-4 py-2 text-left">ID card</th>
+              <th class="px-4 py-2 text-left">โทรศัพท์</th>
               <th class="px-4 py-2 text-left">ตัวแทน</th>
               <th class="px-4 py-2 text-right">Policies</th>
+              <th class="px-4 py-2 text-right cursor-pointer select-none hover:text-slate-800"
+                data-testid="customer-col-premium" @click="toggleSort('totalPremium')">
+                {{ t('customers.ui.totalPremium') }}
+                <i v-if="sortBy === 'totalPremium'"
+                  :class="sortDir === 'asc' ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'"
+                  class="pi text-[10px] ml-1" />
+                <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
+              </th>
               <th class="px-4 py-2 text-left">Status</th>
             </tr>
           </thead>
@@ -223,10 +286,13 @@ const rangeText = computed(() => {
                   </div>
                 </div>
               </td>
-              <td class="px-4 py-2 text-slate-600">{{ customerTypeLabel(c.customerType) }}</td>
+              <td class="px-4 py-2 text-slate-700">{{ genderLabel(c.gender) }}</td>
+              <td class="px-4 py-2 text-slate-600 whitespace-nowrap">{{ customerTypeLabel(c.customerType) }}</td>
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ customerIdentityNumber(c) || '—' }}</td>
-              <td class="px-4 py-2 text-slate-700">{{ c.phone || '—' }}</td>
-              <td class="px-4 py-2 text-slate-700">{{ c.province || '—' }}</td>
+              <td class="px-4 py-2 text-slate-700">
+                {{ c.phone || c.telPhone || '—' }}
+                <div v-if="c.phone && c.telPhone" class="text-xs text-slate-500">{{ c.telPhone }}</div>
+              </td>
               <td class="px-4 py-2">
                 <div v-if="c.assignedAgentCode" class="text-slate-900">
                   {{ c.assignedAgentName || c.assignedAgentCode }}
@@ -238,16 +304,20 @@ const rangeText = computed(() => {
                 <span class="text-slate-900 font-medium">{{ c.activePolicyCount }}</span>
                 <span class="text-xs text-slate-500"> / {{ c.totalPolicyCount }}</span>
               </td>
+              <td class="px-4 py-2 text-right whitespace-nowrap">
+                <div class="text-slate-900 tabular-nums">{{ fmtMoney(c.totalPremium) }}</div>
+                <span v-if="c.tier" :class="['inline-flex px-1.5 py-0.5 rounded text-[10px] font-semibold mt-0.5', TIER_CLASS[c.tier.key] ?? TIER_CLASS.silver]">{{ c.tier.label }}</span>
+              </td>
               <td class="px-4 py-2">
                 <span v-if="c.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">active</span>
                 <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">inactive</span>
               </td>
             </tr>
             <tr v-if="!customerStore.listLoading && customerStore.list.length === 0">
-              <td colspan="9" class="px-4 py-6 text-center text-slate-500">ไม่พบลูกค้า</td>
+              <td colspan="10" class="px-4 py-6 text-center text-slate-500">ไม่พบลูกค้า</td>
             </tr>
             <tr v-if="customerStore.listLoading && customerStore.list.length === 0">
-              <td colspan="9" class="px-4 py-6 text-center text-slate-500">Loading…</td>
+              <td colspan="10" class="px-4 py-6 text-center text-slate-500">Loading…</td>
             </tr>
           </tbody>
         </table>

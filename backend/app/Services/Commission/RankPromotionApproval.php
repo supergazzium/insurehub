@@ -7,10 +7,10 @@ namespace App\Services\Commission;
 use App\Models\Agent;
 use App\Models\Rank;
 use App\Models\RankPromotion;
+use App\Support\AgentLicense;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
-use RuntimeException;
 
 /**
  * Applies the user decision on a pending rank promotion.
@@ -19,48 +19,65 @@ use RuntimeException;
  * rank untouched). A user must approve before the promotion takes effect:
  *   approve() → sets agents.rank_id + agents.level, stamps the row approved.
  *   reject()  → stamps the row rejected, agent unchanged.
- *
- * Non-demotion is re-checked at approval time in case the agent was promoted
- * by another path between proposal and approval.
  */
 class RankPromotionApproval
 {
+    public function __construct(private readonly VolumeAccumulator $accumulator)
+    {
+    }
+
     public function approve(RankPromotion $promotion, int $userId): RankPromotion
     {
         if ($promotion->status !== 'pending') {
-            throw new RuntimeException('Only a pending promotion can be approved.');
+            throw new RankPromotionException('not_pending', 'คำขอนี้ไม่ได้อยู่ในสถานะรออนุมัติ');
         }
 
-        return DB::transaction(function () use ($promotion, $userId): RankPromotion {
+        $changed = false;
+        $result = DB::transaction(function () use ($promotion, $userId, &$changed): RankPromotion {
             $agent = Agent::query()->lockForUpdate()->find($promotion->agent_id);
             if ($agent === null) {
-                throw new RuntimeException('Agent no longer exists.');
+                throw new RankPromotionException('agent_missing', 'ไม่พบตัวแทน');
             }
 
             $toRank = Rank::query()->find($promotion->to_rank_id);
             if ($toRank === null) {
-                throw new RuntimeException('Target rank no longer exists.');
+                throw new RankPromotionException('rank_missing', 'ไม่พบระดับเป้าหมาย');
             }
 
-            // Non-demotion guard: skip the rank write if the agent is already
-            // at or above the target level, but still resolve the row so it
-            // leaves the queue.
+            if ($toRank->license_required && ! AgentLicense::isValid($agent)) {
+                throw new RankPromotionException('license_required', "ระดับ {$toRank->level} ต้องมีใบอนุญาตชีวิตหรือวินาศที่ยังไม่หมดอายุ");
+            }
+
             $currentLevel = $agent->rank_id !== null
                 ? (int) (Rank::query()->where('id', $agent->rank_id)->value('level') ?? 0)
                 : 0;
 
-            if ((int) $toRank->level > $currentLevel) {
+            $applies = $promotion->trigger === 'manual'
+                ? (int) $toRank->level !== $currentLevel
+                : (int) $toRank->level > $currentLevel;
+
+            if ($applies) {
                 $agent->rank_id = $toRank->id;
-                $agent->level = 'l'.$toRank->level;   // keep the legacy string column in sync
+                $agent->level = 'l'.$toRank->level;
                 $agent->save();
+                $changed = true;
             }
 
+            $now = Carbon::now();
             $promotion->update([
                 'status' => 'approved',
                 'decided_by_user_id' => $userId,
-                'decided_at' => Carbon::now(),
-                'promoted_at' => Carbon::now(),
+                'decided_at' => $now,
+                'promoted_at' => $now,
             ]);
+
+            $newLevel = $applies ? (int) $toRank->level : $currentLevel;
+            RankPromotion::query()
+                ->where('rank_promotions.agent_id', $agent->id)
+                ->where('rank_promotions.status', 'pending')
+                ->where('rank_promotions.id', '!=', $promotion->id)
+                ->whereIn('rank_promotions.to_rank_id', Rank::query()->where('level', '<=', $newLevel)->select('id'))
+                ->update(['status' => 'superseded', 'decided_by_user_id' => $userId, 'decided_at' => $now]);
 
             Log::info('MGM rank promotion APPROVED', [
                 'promotion_id' => $promotion->id,
@@ -71,19 +88,28 @@ class RankPromotionApproval
 
             return $promotion->refresh();
         });
+
+        if ($changed) {
+            $agent = Agent::query()->find($promotion->agent_id);
+            if ($agent !== null) {
+                $this->accumulator->recomputeCurrentMonth((int) $agent->tenant_id, (int) $agent->id);
+            }
+        }
+
+        return $result;
     }
 
-    public function reject(RankPromotion $promotion, int $userId, ?string $note = null): RankPromotion
+    public function reject(RankPromotion $promotion, int $userId, string $note): RankPromotion
     {
         if ($promotion->status !== 'pending') {
-            throw new RuntimeException('Only a pending promotion can be rejected.');
+            throw new RankPromotionException('not_pending', 'คำขอนี้ไม่ได้อยู่ในสถานะรออนุมัติ');
         }
 
         $promotion->update([
             'status' => 'rejected',
             'decided_by_user_id' => $userId,
             'decided_at' => Carbon::now(),
-            'notes' => $note !== null && $note !== '' ? $note : $promotion->notes,
+            'notes' => $note,
         ]);
 
         Log::info('MGM rank promotion REJECTED', [

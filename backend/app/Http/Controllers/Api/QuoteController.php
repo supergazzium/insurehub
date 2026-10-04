@@ -9,6 +9,7 @@ use App\Models\MotorActTariff;
 use App\Models\Policy;
 use App\Models\PolicyEvent;
 use App\Services\Insurance\PremiumCalculator;
+use App\Services\Policy\PolicyVerification;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -119,7 +120,7 @@ class QuoteController extends ApiController
      * traceable. Routes the state change through PolicyEventController so
      * the transition matrix + audit event fire from the single chokepoint.
      */
-    public function convert(Request $request, Policy $policy): PolicyResource
+    public function convert(Request $request, Policy $policy): PolicyResource|JsonResponse
     {
         $this->authorizeTenant($request, $policy);
         if (! in_array($policy->status, ['quotation', 'quote'], true)) {
@@ -128,6 +129,15 @@ class QuoteController extends ApiController
 
         $applicationNo = $policy->application_no ?? $this->nextApplicationNo($policy->tenant_id);
         $appDate = now()->toDateString();
+
+        PolicyVerification::assertNotLocked($policy);
+        if (PolicyVerification::enabled((int) $policy->tenant_id)) {
+            return PolicyVerification::pendingResponse($policy, PolicyVerification::submit($policy, 'create', [
+                'status' => 'submitted', 'application_no' => $applicationNo, 'app_date' => $appDate,
+            ], [['type' => 'convertedToApplication', 'payload' => [
+                'applicationNo' => $applicationNo, 'appDate' => $appDate, 'source' => 'quote-controller',
+            ]]], $request->user()));
+        }
 
         DB::transaction(function () use ($policy, $applicationNo, $appDate, $request): void {
             $policy->update([

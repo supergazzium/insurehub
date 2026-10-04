@@ -94,6 +94,8 @@ class CustomerResource extends JsonResource
             // the policies table via a model helper.
             'activePolicyCount' => $this->livePolicyCount('active'),
             'totalPolicyCount' => $this->livePolicyCount('all'),
+            'policyCounts' => $this->policyCounts(),
+            'salesSummary' => $this->salesSummary(),
             'kycDocs' => CustomerKycDocResource::collection($this->whenLoaded('kycDocs')),
             'assignmentHistory' => CustomerAssignmentHistoryResource::collection($this->whenLoaded('assignmentHistory')),
             'active' => (bool) $this->active,

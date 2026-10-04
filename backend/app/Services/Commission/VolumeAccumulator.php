@@ -51,7 +51,46 @@ class VolumeAccumulator
         // each. Upline team_sales_volume depends on downline personal_sales
         // so a payment to the seller potentially shifts every upline's
         // total for the same month.
-        $this->recomputeChain($tenantId, $sellerId, $yearMonth);
+        $this->recomputeFrom($tenantId, $sellerId, $yearMonth);
+    }
+
+    public function forgetPayment(int $policyId, Carbon|string|null $paymentDate): void
+    {
+        $policy = DB::table('policies')->where('id', $policyId)->first(['tenant_id', 'writing_agent_id']);
+        if ($policy === null || $policy->writing_agent_id === null) {
+            return;
+        }
+
+        $this->recomputeFrom((int) $policy->tenant_id, (int) $policy->writing_agent_id, $this->yearMonth($paymentDate));
+    }
+
+    public function recomputeFrom(int $tenantId, int $agentId, string $fromMonth): void
+    {
+        foreach ($this->affectedMonths($fromMonth) as $yearMonth) {
+            $this->recomputeChain($tenantId, $agentId, $yearMonth);
+        }
+    }
+
+    public function recomputeCurrentMonth(int $tenantId, int $agentId): void
+    {
+        $this->recomputeChain($tenantId, $agentId, now()->format('Y-m'));
+    }
+
+    public function affectedMonths(string $fromMonth): array
+    {
+        $cursor = CarbonImmutable::createFromFormat('!Y-m', $fromMonth)->startOfMonth();
+        $last = CarbonImmutable::now()->startOfMonth();
+
+        $months = [$cursor->format('Y-m')];
+        for ($i = 1; $i <= 2; $i++) {
+            $next = $cursor->addMonths($i);
+            if ($next->greaterThan($last)) {
+                break;
+            }
+            $months[] = $next->format('Y-m');
+        }
+
+        return $months;
     }
 
     /**
@@ -188,7 +227,7 @@ class VolumeAccumulator
      */
     private function computeRolling3Month(int $tenantId, int $agentId, string $yearMonth, float $thisMonthTeam): float
     {
-        $now = CarbonImmutable::createFromFormat('Y-m', $yearMonth)->startOfMonth();
+        $now = CarbonImmutable::createFromFormat('!Y-m', $yearMonth)->startOfMonth();
         $prior = [
             $now->subMonth()->format('Y-m'),
             $now->subMonths(2)->format('Y-m'),
@@ -261,7 +300,7 @@ class VolumeAccumulator
      */
     private function monthRange(string $yearMonth): array
     {
-        $start = CarbonImmutable::createFromFormat('Y-m', $yearMonth)->startOfMonth();
+        $start = CarbonImmutable::createFromFormat('!Y-m', $yearMonth)->startOfMonth();
 
         return [$start->toDateString(), $start->endOfMonth()->toDateString()];
     }

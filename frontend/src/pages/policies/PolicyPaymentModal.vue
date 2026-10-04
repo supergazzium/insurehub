@@ -15,6 +15,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { createPolicyPayments, fetchPolicyInstallments, type PolicyInstallmentRow } from '../../api/policies'
 import { ApiError } from '../../api/client'
+import PolicyPeriodBadge from '../../components/PolicyPeriodBadge.vue'
 import { decomposeByFormula, type PremiumParts, type TaxFormula } from '../../utils/premiumBreakdown'
 import { calcInstallment, INSTALLMENT_MODES, type InstallmentMode, type InstallmentResult } from '../../utils/installmentCalc'
 
@@ -87,10 +88,22 @@ function breakdownOf(amount: number | null | undefined): PremiumParts {
 }
 
 /** Persist the entered rows (those with a real amount) as a payment batch. */
+const pendingConfirm = ref<{ code: 'payment_duplicate' | 'payment_overpay'; message: string } | null>(null)
+const confirmFlags = ref({ confirmDuplicate: false, confirmOverpay: false })
+
+function confirmAndSubmit(): void {
+  if (!pendingConfirm.value) return
+  if (pendingConfirm.value.code === 'payment_duplicate') confirmFlags.value.confirmDuplicate = true
+  if (pendingConfirm.value.code === 'payment_overpay') confirmFlags.value.confirmOverpay = true
+  pendingConfirm.value = null
+  submitPayments()
+}
+
 async function submitPayments(): Promise<void> {
   if (!props.policyId) { emit('close'); return } // preview-only
   const res = installmentResult.value
   const payload = {
+    ...confirmFlags.value,
     payMode: payMode.value,
     payee: payee.value,
     // Installment engine (spec): send the mode + agent costs so the backend can
@@ -132,10 +145,16 @@ async function submitPayments(): Promise<void> {
   saveError.value = null
   try {
     await createPolicyPayments(props.policyId, payload)
+    confirmFlags.value = { confirmDuplicate: false, confirmOverpay: false }
     emit('saved')
     emit('close')
   } catch (e: unknown) {
-    saveError.value = e instanceof ApiError ? e.message : 'บันทึกการชำระล้มเหลว'
+    const code = e instanceof ApiError ? (e.body as unknown as { code?: string } | null)?.code : undefined
+    if (e instanceof ApiError && e.status === 409 && (code === 'payment_duplicate' || code === 'payment_overpay')) {
+      pendingConfirm.value = { code, message: e.message }
+    } else {
+      saveError.value = e instanceof ApiError ? e.message : 'บันทึกการชำระล้มเหลว'
+    }
   } finally { saving.value = false }
 }
 
@@ -572,6 +591,7 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
               <div class="flex items-center justify-between mb-2">
                 <div class="flex items-center gap-2">
                   <span class="text-xs font-medium text-slate-600">งวดที่ {{ idx + 1 }}/{{ rows.length }}</span>
+                  <PolicyPeriodBadge v-if="schedule[idx]?.periodLabel" :label="schedule[idx]?.periodLabel" />
                   <span v-if="row.dueDate" class="text-[11px] text-slate-400">ครบกำหนด {{ row.dueDate }}</span>
                   <span v-if="row.locked" class="inline-flex items-center gap-1 text-xs text-emerald-700">
                     <i class="pi pi-check-circle" /> ชำระแล้ว ฿{{ fmt(row.paidAmount || 0) }}
@@ -667,7 +687,12 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
 
       <!-- Footer -->
       <div class="px-5 py-4 border-t border-slate-200 flex items-center justify-between sticky bottom-0 bg-white gap-3">
-        <p v-if="saveError" class="text-xs text-rose-600 flex-1"><i class="pi pi-exclamation-circle mr-1" />{{ saveError }}</p>
+        <div v-if="pendingConfirm" class="flex flex-1 flex-wrap items-center gap-2 rounded-lg bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          <span><i class="pi pi-exclamation-triangle mr-1" />{{ pendingConfirm.message }}</span>
+          <button type="button" class="rounded-md bg-amber-600 px-2 py-1 font-medium text-white hover:bg-amber-700" :disabled="saving" @click="confirmAndSubmit">ยืนยันบันทึก</button>
+          <button type="button" class="rounded-md border border-amber-300 px-2 py-1 text-amber-700" @click="pendingConfirm = null">ยกเลิก</button>
+        </div>
+        <p v-else-if="saveError" class="text-xs text-rose-600 flex-1"><i class="pi pi-exclamation-circle mr-1" />{{ saveError }}</p>
         <p v-else-if="!policyId" class="text-[10px] text-amber-600 flex-1"><i class="pi pi-info-circle mr-1" />บันทึกร่างกรมธรรม์ก่อน จึงจะบันทึกการชำระเงินได้ (กด “บันทึกร่าง” ที่ด้านบน)</p>
         <p v-else class="text-[10px] text-slate-400 flex-1"><i class="pi pi-info-circle mr-1" />บันทึกแล้วจะคำนวณคอมมิชชั่นให้อัตโนมัติ</p>
         <div class="flex gap-2 shrink-0">

@@ -46,6 +46,22 @@ class RbacPermissionSeeder extends Seeder
             $superAdminRole->permissions()->sync($allPermissionIds);
         }
 
+        $financeRole = Role::query()->where('key', 'finance')->first();
+        if ($financeRole !== null) {
+            $financeRole->permissions()->syncWithoutDetaching(
+                Permission::query()
+                    ->where(fn ($q) => $q->where('key', 'like', 'payouts.%')->orWhere('key', 'like', 'receipts.%'))
+                    ->pluck('id')->all()
+            );
+        }
+
+        $executiveRole = Role::query()->where('key', 'executive')->first();
+        if ($executiveRole !== null) {
+            $executiveRole->permissions()->syncWithoutDetaching(
+                Permission::query()->where('key', 'receipts.view')->pluck('id')->all()
+            );
+        }
+
         // Agent baseline. Idempotent — attach if missing.
         $agentRole = Role::query()->where('key', 'agent')->first();
         if ($agentRole !== null) {

@@ -21,6 +21,10 @@ export interface PolicyListRow {
   /** Group label (Approved / Pending / Cancelled / etc.). */
   statusGroup: string | null
   newOrRenew: NewOrRenew
+  policyYear: number
+  customerYear: number | null
+  refAppToId: string | null
+  periodLabel: string | null
   coverage: number
   annualPremium: number
   premiumMode: string
@@ -62,12 +66,47 @@ export interface PolicyListFilters {
   /** created_at range (new — "Create date" per spec) */
   createdFrom?: string
   createdTo?: string
+  renewable?: 1 | 0
   page?: number
   perPage?: number
 }
 
 export function fetchPolicyList(filters: PolicyListFilters = {}) {
   return api.get<Paginated<PolicyListRow>>(`policies${buildQuery({ ...filters })}`)
+}
+
+export interface RenewalPolicySummary {
+  id: string
+  applicationNo: string | null
+  policyNo: string | null
+  status: PolicyStatus
+  policyYear: number
+  customerYear?: number | null
+  effectiveDate: string | null
+  expiryDate: string | null
+  periodLabel?: string
+  productId?: string
+}
+
+export interface RenewalDraftMeta {
+  mustConfirm: string[]
+  cleared: string[]
+  quoteUsed: boolean
+  quote: { annualPremium: number; coverage: number | null; premiumMode: string | null; documentId: string; preparedAt: string | null } | null
+  needsPremiumFormula: boolean
+  suggestedYears: { policyYear: number; customerYear: number }
+  source: RenewalPolicySummary
+}
+
+export interface RenewalBlockedError {
+  code: 'already_renewed' | 'source_not_renewable' | 'source_not_found' | 'self_renewal' | 'renewal_cycle'
+  message: string
+  existingRenewal?: RenewalPolicySummary
+}
+
+export function fetchRenewalDraft(sourceId: string, exceptId?: string | null) {
+  const qs = exceptId ? `?exceptId=${encodeURIComponent(exceptId)}` : ''
+  return api.get<Single<Policy> & { meta: RenewalDraftMeta }>(`policies/${sourceId}/renewal-draft${qs}`)
 }
 
 /** Fetch one policy with its full detail shape (riders/beneficiaries/etc). */
@@ -110,8 +149,12 @@ export function promotePolicyToQuotation(id: string) {
 /** POST /policies/{id}/promote-to-submitted — mints application_no and
  *  flips to `submitted`. Accepts source state = draft (short path) or
  *  quotation (two-step path). */
-export function promotePolicyToSubmitted(id: string) {
-  return api.post<Single<Policy>>(`policies/${id}/promote-to-submitted`)
+export function promotePolicyToSubmitted(id: string, opts: { renewalTermsConfirmed?: boolean } = {}) {
+  return api.post<Single<Policy>>(`policies/${id}/promote-to-submitted`, opts)
+}
+
+export function requestPolicyDelete(id: string, reason: string) {
+  return api.deleteJson<{ data: Policy; meta?: { pendingChange?: unknown } }>(`policies/${id}`, { reason })
 }
 
 /** Phase 6/9b — sectioned PATCH. Section = dates|premium|payment|notes|identifiers|motor|commission. */
@@ -163,10 +206,23 @@ export function fetchPolicyDocuments(policyId: string, type?: string) {
   return api.get<{ data: PolicyDocumentRow[] }>(`policies/${policyId}/documents${qs}`)
 }
 
-export async function uploadPolicyDocument(id: string, type: string, file: File) {
+export interface RenewalQuoteFigures {
+  annualPremium: number
+  coverage?: number | null
+  premiumMode?: string | null
+  renewalNoticeId?: string | null
+}
+
+export async function uploadPolicyDocument(id: string, type: string, file: File, quote?: RenewalQuoteFigures) {
   const form = new FormData()
   form.append('type', type)
   form.append('file', file)
+  if (quote) {
+    form.append('quoteAnnualPremium', String(quote.annualPremium))
+    if (quote.coverage) form.append('quoteCoverage', String(quote.coverage))
+    if (quote.premiumMode) form.append('quotePremiumMode', quote.premiumMode)
+    if (quote.renewalNoticeId) form.append('renewalNoticeId', quote.renewalNoticeId)
+  }
   return api.post<{ data: { id: string; type: string; fileName: string; uploadedAt: string } }>(
     `policies/${id}/documents/upload`, form,
   )
@@ -234,6 +290,8 @@ export interface PolicyPaymentRow {
   method: string
   reference: string
   recordedByUserId: string | null
+  installmentNo?: number | null
+  periodLabel?: string | null
 }
 /** One งวด row in a payment batch. `method` uses the modal values. The tax
  *  parts are the decomposition of THIS row's actual amount. */
@@ -252,6 +310,8 @@ export interface CreatePaymentsPayload {
   payMode: string
   payee: 'insurehub' | 'carrier'
   payments: PaymentRowInput[]
+  confirmDuplicate?: boolean
+  confirmOverpay?: boolean
 }
 export function fetchPolicyPayments(policyId: string) {
   return api.get<{ data: PolicyPaymentRow[] }>(`policies/${policyId}/payments`)
@@ -265,6 +325,7 @@ export interface PolicyInstallmentRow {
   installmentNo: number
   installmentTotal: number
   label: string
+  periodLabel?: string
   dueDate: string | null
   amountDue: number
   amountPaid: number

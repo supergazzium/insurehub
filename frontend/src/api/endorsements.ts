@@ -9,12 +9,25 @@ export type EndorsementType =
   | 'endorsement.premium_change'
   | string
 
+export const ENDORSEMENT_TYPES = [
+  'endorsement.premium_change',
+  'endorsement.coverage_change',
+  'endorsement.date_change',
+  'endorsement.cancel_reissue',
+  'endorsement.other',
+] as const
+
 export interface Endorsement {
   id: string
+  seq: number | null
   type: EndorsementType
   occurredAt: string | null
   byUserId: string | null
+  byUserName: string | null
   payload: Record<string, unknown> | null
+  voidedAt: string | null
+  voidedByName: string | null
+  voidReason: string | null
 }
 
 /** Payload shape for a premium-change (สลักหลังเบี้ยเพิ่ม) endorsement event. */
@@ -31,16 +44,29 @@ export interface PremiumEndorsementPayload {
 }
 
 export function fetchEndorsements(policyId: string) {
-  return api.get<{ data: Endorsement[] }>(`policies/${policyId}/endorsements`)
+  return api.get<{ data: Endorsement[]; meta: { nextSeq: number } }>(`policies/${policyId}/endorsements`)
 }
 
 export function createEndorsement(policyId: string, payload: {
   type: string
   reason: string
   effectiveDate?: string
+  detail?: string | null
   changes?: Record<string, unknown>
 }) {
   return api.post<{ message: string; data: Endorsement }>(`policies/${policyId}/endorsements`, payload)
+}
+
+export function updateEndorsement(policyId: string, eventId: string, payload: {
+  reason: string
+  effectiveDate?: string | null
+  detail?: string | null
+}) {
+  return api.patch<{ message: string; data: Endorsement }>(`policies/${policyId}/endorsements/${eventId}`, payload)
+}
+
+export function voidEndorsement(policyId: string, eventId: string, reason: string) {
+  return api.post<{ message: string; data: Endorsement }>(`policies/${policyId}/endorsements/${eventId}/void`, { reason })
 }
 
 /** สลักหลังเบี้ยเพิ่ม (v1) — records the premium increase, updates the policy,
@@ -73,12 +99,5 @@ export function updatePremiumEndorsement(policyId: string, eventId: string, payl
   return api.patch<{ message: string; data: Endorsement }>(
     `policies/${policyId}/endorsements/premium/${eventId}`,
     payload,
-  )
-}
-
-/** Delete a premium-change endorsement; the policy premium re-syncs server-side. */
-export function deletePremiumEndorsement(policyId: string, eventId: string) {
-  return api.delete<{ message: string }>(
-    `policies/${policyId}/endorsements/premium/${eventId}`,
   )
 }

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Resources;
 
 use App\Models\PolicyInstallment;
+use App\Support\PolicyPeriodLabel;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
 
@@ -22,6 +23,7 @@ class PolicyInstallmentResource extends JsonResource
             'installmentNo' => (int) $this->installment_no,
             'installmentTotal' => (int) $this->installment_total,
             'label' => $this->installment_no.'/'.$this->installment_total,
+            'periodLabel' => PolicyPeriodLabel::forInstallment($this->resource, $this->policy),
             'dueDate' => $this->due_date?->toDateString(),
             'amountDue' => (float) $this->amount_due,
             'amountPaid' => (float) $this->amount_paid,

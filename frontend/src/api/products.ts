@@ -40,6 +40,7 @@ export interface ProductListFilters {
   category?: string
   mainRider?: string
   activeOnly?: boolean
+  taxonomy?: 'unmatched'
   page?: number
   perPage?: number
 }
@@ -164,9 +165,20 @@ export function fetchNextProductCode(carrierId: string) {
 
 /** One entry in the flat product taxonomy — matches ProductTaxonomyController. */
 export interface ProductTaxonomyRow {
+  id?: string
   group: string
   category: string
   subcategory: string | null
+}
+
+export interface ProductTaxonomyGap {
+  category: string | null
+  subCategory: string | null
+  count: number
+}
+
+export function fetchProductTaxonomyGaps() {
+  return api.get<{ data: ProductTaxonomyGap[]; meta: { unmatched: number; total: number } }>('products/taxonomy-gaps')
 }
 
 export function fetchProductTaxonomy() {

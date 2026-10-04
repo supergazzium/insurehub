@@ -40,6 +40,8 @@ const props = withDefaults(
     align?: 'left' | 'right'
     /** Disallow editing (still displays as a plain label). */
     readonly?: boolean
+    controlled?: boolean
+    errorText?: string | null
   }>(),
   {
     type: 'text',
@@ -47,6 +49,8 @@ const props = withDefaults(
     placeholder: '—',
     align: 'left',
     readonly: false,
+    controlled: false,
+    errorText: null,
   },
 )
 
@@ -81,8 +85,48 @@ const displayValue = computed<string>(() => {
   return String(props.value)
 })
 
+const isControlled = computed(() => props.controlled && !props.readonly)
+
+function toText(v: string | number | null | undefined): string {
+  return v === null || v === undefined ? '' : String(v)
+}
+
+watch(
+  () => [isControlled.value, props.value] as const,
+  () => {
+    if (!isControlled.value) return
+    let current: string | number | null | undefined
+    try {
+      current = parseDraft()
+    } catch {
+      current = undefined
+    }
+    if (current !== (props.value ?? null)) draft.value = toText(props.value)
+  },
+  { immediate: true },
+)
+
+function onControlledInput(): void {
+  try {
+    const next = parseDraft()
+    error.value = null
+    emit('update', next)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'Invalid'
+  }
+}
+
+function onBlur(): void {
+  if (!isControlled.value) void save()
+}
+
+function onCommit(): void {
+  if (isControlled.value) onControlledInput()
+  else void save()
+}
+
 async function start(): Promise<void> {
-  if (saving.value || props.readonly) return
+  if (saving.value || props.readonly || isControlled.value) return
   editing.value = true
   draft.value = props.value === null || props.value === undefined ? '' : String(props.value)
   error.value = null
@@ -167,6 +211,10 @@ async function save(): Promise<void> {
 }
 
 function onKey(e: KeyboardEvent): void {
+  if (isControlled.value) {
+    if (e.key === 'Enter' && props.type !== 'textarea') e.preventDefault()
+    return
+  }
   if (e.key === 'Enter' && props.type !== 'textarea') {
     e.preventDefault()
     void save()
@@ -190,30 +238,32 @@ watch(
 
 const alignClass = computed(() => (props.align === 'right' ? 'text-right' : 'text-left'))
 const isEmpty = computed(() => props.value === null || props.value === undefined || props.value === '')
+const shownError = computed(() => props.errorText || error.value)
 </script>
 
 <template>
   <div class="group relative inline-block w-full">
-    <template v-if="editing">
+    <template v-if="editing || isControlled">
       <textarea
         v-if="type === 'textarea'"
         ref="inputEl"
         v-model="draft"
         rows="3"
-        class="w-full border border-brand-400 rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200"
+        :class="['w-full border rounded px-2 py-1 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200', shownError ? 'border-rose-400' : isControlled ? 'border-slate-300' : 'border-brand-400']"
         :disabled="saving"
         @keydown="onKey"
-        @blur="save"
+        @input="isControlled && onControlledInput()"
+        @blur="onBlur"
       />
       <select
         v-else-if="type === 'select'"
         ref="inputEl"
         v-model="draft"
-        class="w-full border border-brand-400 rounded px-2 py-0.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-200"
+        :class="['w-full border rounded px-2 py-0.5 text-sm bg-white focus:outline-none focus:ring-2 focus:ring-brand-200', shownError ? 'border-rose-400' : isControlled ? 'border-slate-300' : 'border-brand-400']"
         :disabled="saving"
         @keydown="onKey"
-        @change="save"
-        @blur="save"
+        @change="onCommit"
+        @blur="onBlur"
       >
         <option value="">—</option>
         <option v-for="o in options" :key="o.value" :value="o.value">{{ o.label }}</option>
@@ -222,7 +272,7 @@ const isEmpty = computed(() => props.value === null || props.value === undefined
         v-else-if="type === 'date'"
         v-model="draft"
         :disabled="saving"
-        @update:model-value="save"
+        @update:model-value="onCommit"
       />
       <input
         v-else
@@ -230,15 +280,27 @@ const isEmpty = computed(() => props.value === null || props.value === undefined
         v-model="draft"
         :type="type === 'number' || type === 'currency' ? 'text' : 'text'"
         :inputmode="type === 'number' || type === 'currency' ? 'decimal' : undefined"
+        :placeholder="isControlled && placeholder !== '—' ? placeholder : undefined"
         :class="[
-          'w-full border border-brand-400 rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200',
+          'w-full border rounded px-2 py-0.5 text-sm focus:outline-none focus:ring-2 focus:ring-brand-200',
+          shownError ? 'border-rose-400' : isControlled ? 'border-slate-300' : 'border-brand-400',
           alignClass,
         ]"
         :disabled="saving"
         @keydown="onKey"
-        @blur="save"
+        @input="isControlled && onControlledInput()"
+        @blur="onBlur"
       />
     </template>
+    <div
+      v-else-if="readonly"
+      :class="[
+        'w-full py-0.5 px-1 text-sm min-h-[24px] select-text break-words cursor-text',
+        alignClass,
+        type === 'textarea' ? 'whitespace-pre-line' : '',
+        isEmpty ? 'text-slate-400 italic' : 'text-slate-900',
+      ]"
+    >{{ displayValue }}</div>
     <template v-else>
       <button
         type="button"
@@ -256,10 +318,11 @@ const isEmpty = computed(() => props.value === null || props.value === undefined
       </button>
     </template>
     <span v-if="saving" class="absolute right-1 top-0.5 text-[10px] text-slate-400">…</span>
+    <p v-if="isControlled && shownError" class="mt-0.5 text-[11px] text-rose-600 leading-snug">{{ shownError }}</p>
     <span
-      v-if="error"
+      v-else-if="shownError"
       class="absolute -bottom-4 right-0 text-[10px] text-rose-600 whitespace-nowrap max-w-[240px] truncate"
-      :title="error"
-    >{{ error }}</span>
+      :title="shownError"
+    >{{ shownError }}</span>
   </div>
 </template>

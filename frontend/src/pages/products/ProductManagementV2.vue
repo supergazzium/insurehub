@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
 import { useProductStore } from '../../stores/products'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
+import { fetchProductTaxonomyGaps, type ProductTaxonomyGap } from '../../api/products'
 import ProductDetailDrawer from './ProductDetailDrawer.vue'
 import ProductCreateModal from './ProductCreateModal.vue'
 
@@ -49,8 +50,20 @@ const filters = reactive({
   type: '',
   mainRider: '',
   activeOnly: false,
+  unmatched: false,
   perPage: 25,
 })
+
+const gaps = ref<ProductTaxonomyGap[]>([])
+const gapMeta = ref<{ unmatched: number; total: number } | null>(null)
+const showGaps = ref(false)
+async function loadGaps(): Promise<void> {
+  try {
+    const res = await fetchProductTaxonomyGaps()
+    gaps.value = res.data
+    gapMeta.value = res.meta
+  } catch { gapMeta.value = null }
+}
 
 const page = ref(1)
 
@@ -73,6 +86,7 @@ async function load(): Promise<void> {
     type: filters.type || undefined,
     mainRider: filters.mainRider || undefined,
     activeOnly: filters.activeOnly || undefined,
+    taxonomy: filters.unmatched ? 'unmatched' : undefined,
     page: page.value,
     perPage: filters.perPage,
   })
@@ -80,6 +94,7 @@ async function load(): Promise<void> {
 
 onMounted(() => {
   void loadCarriers()
+  void loadGaps()
   void load()
   // Cross-page deep-link — /products?open=<id> opens that product's drawer.
   const openId = route.query.open
@@ -153,7 +168,7 @@ watch(
   },
 )
 watch(
-  () => [filters.insureType, filters.carrierId, filters.type, filters.mainRider, filters.activeOnly, filters.perPage],
+  () => [filters.insureType, filters.carrierId, filters.type, filters.mainRider, filters.activeOnly, filters.unmatched, filters.perPage],
   () => { page.value = 1; void load() },
 )
 
@@ -215,6 +230,39 @@ function fmtBaht(n: number | null): string {
         </button>
       </div>
     </header>
+
+    <section v-if="gapMeta && gapMeta.unmatched > 0" class="card p-4 border-amber-200 bg-amber-50/40" data-testid="taxonomy-gaps">
+      <div class="flex items-center justify-between gap-3 flex-wrap">
+        <div class="text-sm text-amber-800">
+          <i class="pi pi-exclamation-triangle mr-1" />
+          สินค้า <b>{{ gapMeta.unmatched.toLocaleString() }}</b> จาก {{ gapMeta.total.toLocaleString() }} รายการ ยังไม่ผูกหมวด/หมวดย่อยตามตารางหมวดผลิตภัณฑ์
+          — จะไม่ขึ้นเมื่อกรองตามหมวดย่อยในงานต่ออายุ
+        </div>
+        <div class="flex items-center gap-2">
+          <button type="button" data-testid="taxonomy-unmatched-chip"
+            :class="['px-3 py-1 rounded-full border text-xs', filters.unmatched ? 'border-amber-500 bg-amber-100 text-amber-900 font-medium' : 'border-amber-300 text-amber-800 hover:bg-amber-100']"
+            @click="filters.unmatched = !filters.unmatched">
+            {{ filters.unmatched ? 'กำลังแสดงเฉพาะที่ยังไม่ผูก' : 'แสดงเฉพาะที่ยังไม่ผูกหมวดย่อย' }}
+          </button>
+          <button type="button" class="px-3 py-1 rounded-full border border-amber-300 text-xs text-amber-800 hover:bg-amber-100"
+            @click="showGaps = !showGaps">
+            {{ showGaps ? 'ซ่อนสรุป' : 'สรุปตามหมวด' }}
+          </button>
+        </div>
+      </div>
+      <table v-if="showGaps" class="mt-3 w-full text-xs">
+        <thead class="text-slate-500">
+          <tr><th class="text-left py-1">หมวด</th><th class="text-left py-1">หมวดย่อยที่บันทึกไว้</th><th class="text-right py-1">จำนวน</th></tr>
+        </thead>
+        <tbody class="divide-y divide-amber-100">
+          <tr v-for="(g, i) in gaps" :key="i">
+            <td class="py-1 text-slate-700">{{ g.category || '(ไม่มีหมวด)' }}</td>
+            <td class="py-1 text-slate-500">{{ g.subCategory || '(ว่าง)' }}</td>
+            <td class="py-1 text-right text-slate-900">{{ g.count.toLocaleString() }}</td>
+          </tr>
+        </tbody>
+      </table>
+    </section>
 
     <section class="card p-4 space-y-3">
       <!-- Same order as the create modal: insureType → carrier → main/rider → product group. -->

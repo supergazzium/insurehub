@@ -22,7 +22,7 @@ import html2canvas from 'html2canvas'
 import type { Quotation } from './useQuotation'
 
 // ── Brand palette (matches the InsureHub logo + tailwind brand scale) ──────
-const BRAND = {
+export const BRAND = {
   teal: '#1f8893',      // brand-600 — primary
   tealDark: '#0f3e44',  // brand-900
   tealTint: '#ecfbfc',  // brand-50
@@ -37,7 +37,7 @@ const LOGO_URL = `${import.meta.env.BASE_URL}brand/logo.png`
 // Load the company logo once and cache it as a data URL so html2canvas
 // captures it deterministically (no CORS/timing races on the <img>).
 let logoDataUrl: string | null = null
-async function loadLogo(): Promise<string | null> {
+export async function loadLogo(): Promise<string | null> {
   if (logoDataUrl) return logoDataUrl
   try {
     const res = await fetch(LOGO_URL)
@@ -225,6 +225,50 @@ function escapeHtml(s: string): string {
     .replace(/"/g, '&quot;')
 }
 
+export async function renderNodeToPdfBlob(node: HTMLElement, fitTolerance = 0): Promise<Blob> {
+  // Give data-URL images (the logo) a tick to be layout-ready before capture.
+  await new Promise((r) => setTimeout(r, 50))
+
+  // Rasterize the node ourselves with html2canvas, then place the image into
+  // the PDF sized to the page width and paginate manually. This is far more
+  // reliable than jsPDF.html()'s internal scaling, which produced blank pages.
+  const canvas = await html2canvas(node, {
+    scale: 2, // crisp text
+    useCORS: true,
+    allowTaint: true,
+    backgroundColor: '#ffffff',
+    windowWidth: 794,
+  })
+  document.body.removeChild(node)
+
+  const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+  const pageW = pdf.internal.pageSize.getWidth()   // 595pt
+  const pageH = pdf.internal.pageSize.getHeight()  // 842pt
+  // Scale the full-width canvas to the page width; height follows aspect.
+  const imgH = (canvas.height * pageW) / canvas.width
+  const imgData = canvas.toDataURL('image/jpeg', 0.92)
+
+  if (imgH <= pageH) {
+    pdf.addImage(imgData, 'JPEG', 0, 0, pageW, imgH)
+  } else if (imgH <= pageH * (1 + fitTolerance)) {
+    const w = (pageW * pageH) / imgH
+    pdf.addImage(imgData, 'JPEG', (pageW - w) / 2, 0, w, pageH)
+  } else {
+    // Taller than one page → slice across pages by shifting the image up.
+    let remaining = imgH
+    let offset = 0
+    while (remaining > 0) {
+      pdf.addImage(imgData, 'JPEG', 0, offset, pageW, imgH)
+      remaining -= pageH
+      if (remaining > 0) {
+        pdf.addPage()
+        offset -= pageH
+      }
+    }
+  }
+  return pdf.output('blob')
+}
+
 export function useQuotationPdf() {
   /**
    * Render the quotation into a PDF Blob.
@@ -234,44 +278,7 @@ export function useQuotationPdf() {
   async function renderToBlob(q: Quotation): Promise<Blob> {
     const logo = await loadLogo()
     const node = buildQuotationHtml(q, logo)
-    // Give data-URL images (the logo) a tick to be layout-ready before capture.
-    await new Promise((r) => setTimeout(r, 50))
-
-    // Rasterize the node ourselves with html2canvas, then place the image into
-    // the PDF sized to the page width and paginate manually. This is far more
-    // reliable than jsPDF.html()'s internal scaling, which produced blank pages.
-    const canvas = await html2canvas(node, {
-      scale: 2, // crisp text
-      useCORS: true,
-      allowTaint: true,
-      backgroundColor: '#ffffff',
-      windowWidth: 794,
-    })
-    document.body.removeChild(node)
-
-    const pdf = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
-    const pageW = pdf.internal.pageSize.getWidth()   // 595pt
-    const pageH = pdf.internal.pageSize.getHeight()  // 842pt
-    // Scale the full-width canvas to the page width; height follows aspect.
-    const imgH = (canvas.height * pageW) / canvas.width
-    const imgData = canvas.toDataURL('image/jpeg', 0.92)
-
-    if (imgH <= pageH) {
-      pdf.addImage(imgData, 'JPEG', 0, 0, pageW, imgH)
-    } else {
-      // Taller than one page → slice across pages by shifting the image up.
-      let remaining = imgH
-      let offset = 0
-      while (remaining > 0) {
-        pdf.addImage(imgData, 'JPEG', 0, offset, pageW, imgH)
-        remaining -= pageH
-        if (remaining > 0) {
-          pdf.addPage()
-          offset -= pageH
-        }
-      }
-    }
-    return pdf.output('blob')
+    return renderNodeToPdfBlob(node)
   }
 
   /**

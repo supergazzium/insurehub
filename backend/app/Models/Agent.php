@@ -38,6 +38,7 @@ class Agent extends Model
         'bank_account_no' => 'encrypted',
         'bank_account_name' => 'encrypted',
         'license_number' => 'encrypted',
+        'wht_rate' => 'decimal:2',
     ];
 
     public function tenant(): BelongsTo

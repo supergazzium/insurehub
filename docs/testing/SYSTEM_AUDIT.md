@@ -113,9 +113,10 @@ regardless of the agent's real VAT setting (`has_vat`/`vat_mode`).
 Confirmed: cancelled policies are correctly excluded from no_commission and
 not_delivered (queries scope to status='active'). No action needed.
 
-### L2. Collections `paid` fallback can double-count  ✅ VERIFIED OK (fixed in seeder, verify prod)
+### L2. Collections `paid` fallback can double-count  ✅ FIXED (task 10, verify prod with `collections:audit-payments`)
 `paid = SUM(policy_payments)`, with a `total_premium_paid` fallback only when
 zero rows. If both are populated on a real policy, ensure no double counting.
+> **Fixed (task 10):** `total_premium_paid` is the gross premium owed, so the fallback hid unpaid web policies. It now applies only to `policies.imported_from_legacy`; due/paid come from `App\Services\Policy\PremiumDue`. Payment store guards duplicates (409 `payment_duplicate`) and overpayment (409 `payment_overpay`), `payments:backfill-legacy` is legacy-only, and importer re-runs keep web-recorded payments. Run the read-only `php artisan collections:audit-payments --csv=…` on production; dev result 2026-10-04: overpaid 0, duplicate groups 0, legacyImport+real 0, legacyImport on web 0, legacy settled 449, web unpaid previously hidden 3. See `docs/tasks/task-10-commission-receipts.md`.
 
 ### L3. Follow-up Freelook shows only life policies missing the date  ✅ FIXED
 Correct per spec, but there's no way from the follow-up row to *set* the freelook

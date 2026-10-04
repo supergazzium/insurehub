@@ -1,0 +1,2 @@
+id	application_no	status	ref_app_to_id	new_or_renew	policy_year	customer_year	notes	updated_at
+485	A2610030003	draft	477	renew	3	4	test autosave	2026-10-03 10:30:22

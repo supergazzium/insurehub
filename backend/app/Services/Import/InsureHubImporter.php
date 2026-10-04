@@ -685,7 +685,7 @@ class InsureHubImporter
                 'title_en' => $row->title_en,
                 'first_name_en' => $row->name_en,
                 'last_name_en' => $row->surname_en,
-                'gender' => $row->gender,
+                'gender' => \App\Support\GenderFromTitle::normalize($row->gender) ?? \App\Support\GenderFromTitle::guess($row->title_th),
                 'id_card' => $row->national_id,
                 'national_id_expiry' => $this->parseDate($row->national_id_expiry),
                 'passport' => $row->passport,
@@ -884,6 +884,7 @@ class InsureHubImporter
                 'recorded_by_username' => $row->created_by_user,
                 'com_rec_check' => $row->commission_record_status,
                 'premium_check' => $premiumCheck,
+                'imported_from_legacy' => true,
                 'updated_at' => $this->now,
             ];
 
@@ -1147,6 +1148,7 @@ class InsureHubImporter
         if (! $this->dryRun) {
             $primary->table('policy_payments')
                 ->whereIn('policy_id', array_values($this->idCache['policies']))
+                ->whereNull('recorded_by_user_id')
                 ->delete();
         }
 

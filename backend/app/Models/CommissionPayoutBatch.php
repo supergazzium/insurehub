@@ -19,6 +19,10 @@ class CommissionPayoutBatch extends Model
     public const STATUS_PAID = 'PAID';
     public const STATUS_CANCELLED = 'CANCELLED';
 
+    public const CALC_V1 = 1;
+
+    public const CALC_V2 = 2;
+
     protected $casts = [
         'from_date' => 'date',
         'to_date' => 'date',
@@ -26,6 +30,7 @@ class CommissionPayoutBatch extends Model
         'approved_at' => 'datetime',
         'paid_at' => 'datetime',
         'total_amount' => 'decimal:2',
+        'calc_version' => 'integer',
     ];
 
     public function tenant(): BelongsTo
@@ -41,6 +46,16 @@ class CommissionPayoutBatch extends Model
     public function adjustments(): HasMany
     {
         return $this->hasMany(CommissionPayoutAdjustment::class, 'batch_id');
+    }
+
+    public function payees(): HasMany
+    {
+        return $this->hasMany(CommissionPayoutPayee::class, 'batch_id');
+    }
+
+    public function isV2(): bool
+    {
+        return (int) $this->calc_version >= self::CALC_V2;
     }
 
     public function isEditable(): bool

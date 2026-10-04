@@ -22,10 +22,11 @@ class ProductTaxonomyController extends ApiController
         $rows = DB::table('product_taxonomy')
             ->where('active', true)
             ->orderBy('sort_order')
-            ->get(['group_', 'category', 'subcategory']);
+            ->get(['id', 'group_', 'category', 'subcategory']);
 
         return response()->json([
             'data' => $rows->map(fn ($r) => [
+                'id' => (string) $r->id,
                 'group' => $r->group_,
                 'category' => $r->category,
                 'subcategory' => $r->subcategory,

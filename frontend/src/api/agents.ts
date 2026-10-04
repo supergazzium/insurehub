@@ -11,7 +11,9 @@ export interface AgentListRow {
   lastName: string
   nickname: string
   email: string
-  phone: string
+  phone?: string
+  kind?: 'individual' | 'corporate'
+  juristicName?: string
   level: string
   headStatus: string
   licenseLifeNo: string
@@ -34,7 +36,8 @@ export interface AgentListFilters {
   parentAgentId?: string
   level?: string
   agentType?: string
-  licenseStatus?: 'valid' | 'expired' | 'expiring60d' | ''
+  licenseStatus?: 'valid' | 'expired' | 'expiring60d' | 'none' | ''
+  licenseType?: 'life' | 'non_life' | ''
   page?: number
   perPage?: number
 }
@@ -58,18 +61,25 @@ export interface RankRow {
   code: string
   nameTh: string
   nameEn: string
-  monthlyAvgTarget: number
   threeMonthAccumTarget: number
   licenseRequired: boolean
 }
 export function fetchRanks() {
   return api.get<{ data: RankRow[] }>('ranks')
 }
+export interface RankPatch {
+  nameTh?: string
+  nameEn?: string
+  threeMonthAccumTarget?: number
+  licenseRequired?: boolean
+}
+export function updateRank(id: string, patch: RankPatch) {
+  return api.patch<{ data: RankRow }>(`ranks/${id}`, patch)
+}
 
-/** PATCH an agent's ต้นสาย (upline) and level. All fields optional. */
+/** PATCH an agent's ต้นสาย (upline). */
 export interface AgentHierarchyPatch {
   parentAgentId?: string | number | null
-  level?: string | null   // 'l1'..'l10'
 }
 export interface HierarchyRollupEntry {
   ownPremium: number
@@ -89,35 +99,44 @@ export function updateAgentHierarchy(agentId: string, patch: AgentHierarchyPatch
 }
 
 // ── Promotion approval queue ────────────────────────────────────────────────
-export type PromotionStatus = 'pending' | 'approved' | 'rejected'
+export type PromotionStatus = 'pending' | 'approved' | 'rejected' | 'superseded'
 export interface RankPromotionRow {
   id: string
   status: PromotionStatus
-  trigger: string
+  trigger: 'auto' | 'manual' | string
   agentId: string
   agentCode: string | null
   agentName: string
+  currentLevel: number | null
+  licenseValid: boolean
   fromLevel: number | null
   fromRankLabel: string | null
   toLevel: number | null
   toRankLabel: string | null
+  toLicenseRequired: boolean
   qualifyingVolume: number
   qualifyingPeriod: string | null
   requestedAt: string | null
+  requestedByName: string | null
+  requestNote: string | null
   decidedAt: string | null
+  decidedByName: string | null
   promotedAt: string | null
   notes: string | null
 }
-export function fetchRankPromotions(status: PromotionStatus | 'all' = 'pending') {
+export function fetchRankPromotions(status: PromotionStatus | 'all' = 'pending', agentId?: string) {
   return api.get<{ data: RankPromotionRow[]; meta: { pendingCount: number } }>(
-    `rank-promotions${buildQuery({ status })}`,
+    `rank-promotions${buildQuery({ status, agentId })}`,
   )
 }
 export function approveRankPromotion(id: string) {
-  return api.post<{ data: { id: string; status: PromotionStatus } }>(`rank-promotions/${id}/approve`, {})
+  return api.post<{ data: RankPromotionRow }>(`rank-promotions/${id}/approve`, {})
 }
-export function rejectRankPromotion(id: string, note?: string) {
-  return api.post<{ data: { id: string; status: PromotionStatus } }>(`rank-promotions/${id}/reject`, { note })
+export function rejectRankPromotion(id: string, note: string) {
+  return api.post<{ data: RankPromotionRow }>(`rank-promotions/${id}/reject`, { note })
+}
+export function createRankRequest(agentId: string, toLevel: number, note: string) {
+  return api.post<{ data: RankPromotionRow }>(`agents/${agentId}/rank-requests`, { toLevel, note })
 }
 
 // ── Level progress (Phase 4) ────────────────────────────────────────────────
@@ -179,6 +198,33 @@ export interface AgentNoteRow {
   note: string
   kind: string
   createdAt: string | null
+  createdByName?: string | null
+}
+
+export type AgentDocKind = 'id' | 'bank' | 'license_life' | 'license_non_life' | 'profile'
+export interface AgentDocumentPresence {
+  id: boolean
+  bank: boolean
+  licenseLife: boolean
+  licenseNonLife: boolean
+  profile: boolean
+}
+export function uploadAgentDocument(agentId: string, kind: AgentDocKind, file: File) {
+  const fd = new FormData()
+  fd.append('file', file)
+  return api.post<{ data: Record<string, unknown> }>(`agents/${agentId}/documents/${kind}`, fd)
+}
+export function deleteAgentDocument(agentId: string, kind: AgentDocKind) {
+  return api.delete<{ data: Record<string, unknown> }>(`agents/${agentId}/documents/${kind}`)
+}
+export async function fetchAgentDocumentBlob(agentId: string, kind: AgentDocKind): Promise<Blob | null> {
+  const res = await api.get<{ data: { mime: string; name: string; content: string } }>(
+    `agents/${agentId}/documents/${kind}?as=base64&t=${Date.now()}`,
+  )
+  const bin = atob(res.data.content)
+  const bytes = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i)
+  return new Blob([bytes], { type: res.data.mime })
 }
 export function fetchAgentNotes(agentId: string) {
   return api.get<{ data: AgentNoteRow[] }>(`agents/${agentId}/notes`)

@@ -18,9 +18,15 @@ import { toIsoDate } from '../../util/dateFormat'
 import { api } from '../../api/client'
 import { fetchCustomerList, type CustomerListRow } from '../../api/customers'
 import { fetchProvinces, fetchDistricts, fetchSubDistricts, fetchNamePrefixes, fetchNationalities, type NamePrefixRow, type NationalityRow } from '../../api/portal'
+import { genderFromTitle } from '../../utils/genderFromTitle'
+import { useI18n } from 'vue-i18n'
 import { isThaiName, isThaiJuristicName, isThaiId13, isThaiMobile, isThaiLandline, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
 
-const props = defineProps<{ open: boolean }>()
+const props = defineProps<{
+  open: boolean
+  initial?: { firstName?: string; lastName?: string; idCard?: string; phone?: string; juristicName?: string } | null
+}>()
+const { t } = useI18n()
 const emit = defineEmits<{
   (e: 'close'): void
   (e: 'created', row: Record<string, unknown>): void
@@ -98,22 +104,6 @@ const mailingSubDistrictOptions = computed<SearchOption[]>(() =>
   mailingSubDistricts.value.map((s) => ({ value: s.name, label: s.name, sublabel: s.postcode })),
 )
 
-// Switching customer type resets every field whose meaning changes across
-// types: title (Individual bucket vs Corporate), Thai ID vs passport, and
-// the corporate-only juristicName/taxId. Prevents stale data from leaking
-// through the payload after the operator flips between types.
-watch(() => form.customerType, () => {
-  form.titleTh = ''
-  form.idCard = ''
-  form.passport = ''
-  form.nationality = ''
-  form.race = ''
-  form.juristicName = ''
-  form.taxId = ''
-  // Re-seed ไทย for Thai individuals after the reset above.
-  applyPersonDefaults()
-})
-
 // ─── Form state ───────────────────────────────────────────────────────────
 const form = reactive({
   customerCode: '',
@@ -168,6 +158,29 @@ const form = reactive({
 // The optional second email row only shows once the operator asks for it
 // (or when editing a customer that already has an email2).
 const showSecondEmail = ref(false)
+
+// Switching customer type resets every field whose meaning changes across
+// types: title (Individual bucket vs Corporate), Thai ID vs passport, and
+// the corporate-only juristicName/taxId. Prevents stale data from leaking
+// through the payload after the operator flips between types.
+watch(() => form.customerType, () => {
+  form.titleTh = ''
+  form.idCard = ''
+  form.passport = ''
+  form.nationality = ''
+  form.race = ''
+  form.juristicName = ''
+  form.taxId = ''
+  // Re-seed ไทย for Thai individuals after the reset above.
+  applyPersonDefaults()
+})
+
+watch(() => form.titleTh, (title) => {
+  if (form.customerType === 'corporate' || form.gender) return
+  const g = genderFromTitle(title)
+  if (g) form.gender = g
+})
+
 
 /** ไทย is the sensible default nationality + race for Thai individuals.
  *  Foreign individuals must pick explicitly (no default); corporate has
@@ -344,13 +357,13 @@ function validateMobile(v: string): string | null {
   }
   return null
 }
-function validateLandline(v: string): string | null {
+function validateBackupPhone(v: string): string | null {
   const t = v.trim()
   if (t === '') return null
   if (form.customerType === 'foreign_individual') {
     if (!isInternationalPhone(t)) return 'รูปแบบเบอร์โทรไม่ถูกต้อง (6-15 หลัก, ใส่ + ได้)'
   } else {
-    if (!isThaiLandline(t)) return 'รูปแบบเบอร์บ้านไม่ถูกต้อง (ขึ้นต้น 02/03/04/05)'
+    if (!isThaiMobile(t) && !isThaiLandline(t)) return 'รูปแบบเบอร์โทรไม่ถูกต้อง (มือถือ 06/08/09 หรือเบอร์บ้าน 02-05)'
   }
   return null
 }
@@ -376,7 +389,7 @@ const errTaxId = computed(() => validateThaiNationalId(form.taxId))
 const errPassport = computed(() => validatePassport(form.passport))
 const errNationality = computed(() => validateNationality())
 const errPhone = computed(() => validateMobile(form.phone))
-const errTelPhone = computed(() => validateLandline(form.telPhone))
+const errTelPhone = computed(() => validateBackupPhone(form.telPhone))
 const errEmail = computed(() => validateEmailFmt(form.email))
 const errEmail2 = computed(() => validateEmailFmt(form.email2))
 const errContactEmail = computed(() => validateEmailFmt(form.contactEmail))
@@ -554,7 +567,7 @@ function collectValidationProblems(): string[] {
   push('เลขหนังสือเดินทาง', errPassport.value)
   push('สัญชาติ', errNationality.value)
   push('โทรศัพท์มือถือ', errPhone.value)
-  push('โทรศัพท์บ้าน', errTelPhone.value)
+  push(t('customers.fields.telPhone'), errTelPhone.value)
   push('อีเมล', errEmail.value)
   push('อีเมล (สำรอง)', errEmail2.value)
   push('อีเมลผู้ติดต่อแทน', errContactEmail.value)
@@ -674,6 +687,9 @@ watch(
       void suggestCode()
       // ไทย defaults for the Thai-individual starting state.
       applyPersonDefaults()
+      if (props.initial) {
+        Object.assign(form, Object.fromEntries(Object.entries(props.initial).filter(([, val]) => !!val)))
+      }
     }
   },
 )
@@ -884,9 +900,9 @@ watch(
           </div>
           <p v-if="showPhone" class="text-xs text-rose-600 mt-0.5">{{ showPhone }}</p>
         </FormField>
-        <FormField label="โทรศัพท์บ้าน" error-key="telPhone" :errors="fieldErrors">
+        <FormField :label="t('customers.fields.telPhone')" error-key="telPhone" :errors="fieldErrors">
           <div class="relative">
-            <input v-model.trim="form.telPhone" inputmode="tel" placeholder="021234567"
+            <input v-model.trim="form.telPhone" inputmode="tel" placeholder="0812345678 หรือ 021234567"
               :class="inputClass(showTelPhone, telPhoneValid)"
               @blur="markTouched('telPhone')" />
             <i v-if="telPhoneValid" class="pi pi-check text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2 text-xs" />
