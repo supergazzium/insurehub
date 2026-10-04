@@ -73,6 +73,9 @@ final class PermissionCatalog
             ['key' => 'receipts.record', 'module' => 'receipts', 'name_th' => 'บันทึกรับค่าคอมจากบริษัทประกัน',       'name_en' => 'Record insurer commission receipts', 'description' => null],
             ['key' => 'receipts.reopen', 'module' => 'receipts', 'name_th' => 'เปิดรายการรับค่าคอมที่รับแล้วกลับมาแก้', 'name_en' => 'Reopen received commission',         'description' => null],
 
+            ['key' => 'payments.record', 'module' => 'payments', 'name_th' => 'บันทึกการชำระเบี้ยจากลูกค้า',       'name_en' => 'Record premium payments', 'description' => null],
+            ['key' => 'payments.void',   'module' => 'payments', 'name_th' => 'ยกเลิกรายการชำระเบี้ยที่บันทึกผิด', 'name_en' => 'Void premium payments',   'description' => null],
+
             // ── Reports ──────────────────────────────────────────────────
             ['key' => 'reports.view_operational', 'module' => 'reports', 'name_th' => 'ดูรายงานปฏิบัติการ', 'name_en' => 'View operational reports', 'description' => null],
             ['key' => 'reports.view_financial',   'module' => 'reports', 'name_th' => 'ดูรายงานการเงิน',    'name_en' => 'View financial reports',   'description' => null],

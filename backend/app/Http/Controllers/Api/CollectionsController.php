@@ -36,8 +36,8 @@ class CollectionsController extends Controller
             'p.main_premium', 'p.compulsory_premium', 'p.total_premium_paid', 'p.imported_from_legacy',
             'p.installment_mode', 'p.installment_term',
             'p.effective_date', 'p.first_due_inst_date',
-            DB::raw('(SELECT COALESCE(SUM(pp.amount),0) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_total'),
-            DB::raw('(SELECT COUNT(*) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_count'),
+            DB::raw(PremiumDue::PAID_TOTAL_SQL.' as paid_total'),
+            DB::raw(PremiumDue::PAID_COUNT_SQL.' as paid_count'),
             DB::raw('(SELECT COUNT(*) FROM payment_reminders pr WHERE pr.policy_id = p.id) as reminder_count'),
             DB::raw('(SELECT MAX(pr.created_at) FROM payment_reminders pr WHERE pr.policy_id = p.id) as last_reminder_at'),
             DB::raw(PremiumDue::ENDORSEMENT_TOTAL_SQL.' as endorsement_total'),
@@ -58,7 +58,7 @@ class CollectionsController extends Controller
             ->whereIn('p.status', ['active', 'issued'])
             ->where(function ($w): void {
                 $w->where('p.imported_from_legacy', false)
-                    ->orWhereExists(fn ($e) => $e->select(DB::raw(1))->from('policy_payments as px')->whereColumn('px.policy_id', 'p.id'));
+                    ->orWhereExists(fn ($e) => $e->select(DB::raw(1))->from('policy_payments as px')->whereColumn('px.policy_id', 'p.id')->whereNull('px.voided_at'));
             })
             ->when($search !== '', function ($q) use ($search) {
                 $like = "%{$search}%";
@@ -152,13 +152,16 @@ class CollectionsController extends Controller
         // Actual payment records (auditable source of truth).
         $payments = DB::table('policy_payments')
             ->where('policy_id', $policy->id)
+            ->whereNull('voided_at')
             ->orderBy('payment_date')->orderBy('id')
-            ->get(['id', 'payment_date', 'amount', 'method', 'reference'])
+            ->get(['id', 'payment_date', 'amount', 'adjustment_amount', 'method', 'payee', 'reference'])
             ->map(fn ($p): array => [
                 'id' => (string) $p->id,
                 'paymentDate' => $p->payment_date,
                 'amount' => (float) $p->amount,
+                'adjustmentAmount' => (float) $p->adjustment_amount,
                 'method' => $p->method,
+                'payee' => $p->payee,
                 'reference' => $p->reference,
             ]);
 

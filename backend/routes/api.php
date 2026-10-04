@@ -358,7 +358,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('policies/{policy}/payments', [PolicyPaymentController::class, 'index']);
     Route::get('policies/{policy}/installments', [PolicyPaymentController::class, 'installments']);
     Route::post('policies/{policy}/payments', [PolicyPaymentController::class, 'store']);
-    Route::delete('policies/{policy}/payments/{payment}', [PolicyPaymentController::class, 'destroy']);
+    Route::post('policies/{policy}/payments/{payment}/void', [PolicyPaymentController::class, 'void'])->whereNumber('payment');
     Route::post('policies/{policy}/documents', [PolicyDocumentController::class, 'store']);
     Route::delete('policies/{policy}/documents/{document}', [PolicyDocumentController::class, 'destroy']);
     Route::get('policies/{policy}/events', [PolicyEventController::class, 'index']);

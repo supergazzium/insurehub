@@ -35,6 +35,10 @@ class CommissionLedger extends Model
      *  stored as a NEGATIVE amount so settlement nets it against payouts. */
     public const TYPE_INSTALLMENT_AGENT_COST = 'INSTALLMENT_AGENT_COST';
 
+    public const TYPE_COMMISSION_PAID_AT_SOURCE = 'COMMISSION_PAID_AT_SOURCE';
+
+    public const DEDUCTION_TYPES = [self::TYPE_INSTALLMENT_AGENT_COST, self::TYPE_COMMISSION_PAID_AT_SOURCE];
+
     public const STATUS_UNSETTLED = 'unsettled';
 
     public const STATUS_SETTLED = 'settled';

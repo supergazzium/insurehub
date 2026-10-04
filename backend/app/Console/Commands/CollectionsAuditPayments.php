@@ -77,11 +77,11 @@ class CollectionsAuditPayments extends Command
     {
         $out = [];
         $this->base($tenant)
-            ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('policy_payments as pp')->whereColumn('pp.policy_id', 'p.id'))
+            ->whereExists(fn ($q) => $q->select(DB::raw(1))->from('policy_payments as pp')->whereColumn('pp.policy_id', 'p.id')->whereNull('pp.voided_at'))
             ->select([
                 'p.id', 'p.policy_no', 'p.application_no', 'p.main_premium', 'p.compulsory_premium', 'p.total_premium_paid', 'p.imported_from_legacy',
-                DB::raw('(SELECT SUM(pp.amount) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_total'),
-                DB::raw('(SELECT COUNT(*) FROM policy_payments pp WHERE pp.policy_id = p.id) as paid_count'),
+                DB::raw(PremiumDue::PAID_TOTAL_SQL.' as paid_total'),
+                DB::raw(PremiumDue::PAID_COUNT_SQL.' as paid_count'),
                 DB::raw(PremiumDue::ENDORSEMENT_TOTAL_SQL.' as endorsement_total'),
             ])
             ->orderBy('p.id')
@@ -107,6 +107,7 @@ class CollectionsAuditPayments extends Command
     {
         return DB::table('policy_payments as pp')
             ->join('policies as p', 'p.id', '=', 'pp.policy_id')
+            ->whereNull('pp.voided_at')
             ->whereNull('p.deleted_at')
             ->when($tenant !== null, fn ($q) => $q->where('p.tenant_id', $tenant))
             ->groupBy('pp.policy_id', 'p.policy_no', 'pp.payment_date', 'pp.amount', 'pp.policy_installment_id')

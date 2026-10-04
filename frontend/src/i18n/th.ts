@@ -1130,6 +1130,7 @@ export default {
       activated: 'เริ่มคุ้มครอง',
       expired: 'หมดอายุ',
       premiumPaid: 'ชำระเบี้ยประกัน',
+      premiumPaymentVoided: 'ยกเลิกรายการชำระเบี้ย',
       fulfilmentUpdated: 'อัปเดตการรับ/จัดส่งกรมธรรม์',
       approvalUpdated: 'อัปเดตรายละเอียดการอนุมัติ',
       renewed: 'ต่ออายุ',
