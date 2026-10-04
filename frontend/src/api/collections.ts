@@ -28,6 +28,7 @@ export interface CollectionRow {
   agentName: string
   totalDue: number
   paid: number
+  legacySettled?: boolean
   outstanding: number
   dueToDate: number
   nextDue: { no: number; dueDate: string | null; amount: number } | null

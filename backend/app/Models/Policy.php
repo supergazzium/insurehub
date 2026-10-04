@@ -98,6 +98,7 @@ class Policy extends Model
         'commission_snapshot' => 'array',
         'comm_override' => 'array',
         'years_overridden' => 'boolean',
+        'imported_from_legacy' => 'boolean',
     ];
 
     public function tenant(): BelongsTo

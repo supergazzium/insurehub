@@ -243,10 +243,11 @@ export const MODULES: ModuleDef[] = [
     icon: 'pi pi-inbox',
     i18nKey: 'commissionReceipt',
     group: 'commission',
+    permission: 'receipts.view',
     functions: [
-      'บันทึกรับค่าคอมจากบริษัทประกัน (Main / OV)',
-      'ตรวจยอด Matched / Mismatch + Reopen พร้อม audit',
-      'แนบไฟล์ Statement (Excel / PDF) เป็นรอบรับเอกสาร',
+      'เรียกรายการจากกรมธรรม์ตามบริษัทประกันและเดือนที่เริ่มคุ้มครอง',
+      'คีย์ยอดตาม statement / วางยอดจาก Excel แล้วยืนยันรับเงินหลายรายการพร้อมกัน',
+      'รับยอดที่ไม่ตรงพร้อมสาเหตุ รายการปรับปรุงเพิ่ม/หักคืน และสรุปเคสสำหรับฝ่ายบัญชี',
     ],
   },
   {

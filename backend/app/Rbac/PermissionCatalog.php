@@ -69,6 +69,10 @@ final class PermissionCatalog
             ['key' => 'finance.export',      'module' => 'finance', 'name_th' => 'ส่งออกข้อมูลการเงิน',  'name_en' => 'Export finance',    'description' => null],
             ['key' => 'finance.reconcile',   'module' => 'finance', 'name_th' => 'กระทบยอดการเงิน',      'name_en' => 'Reconcile finance', 'description' => null],
 
+            ['key' => 'receipts.view',   'module' => 'receipts', 'name_th' => 'ดูการรับค่าคอมจากบริษัทประกัน',        'name_en' => 'View insurer commission receipts',   'description' => null],
+            ['key' => 'receipts.record', 'module' => 'receipts', 'name_th' => 'บันทึกรับค่าคอมจากบริษัทประกัน',       'name_en' => 'Record insurer commission receipts', 'description' => null],
+            ['key' => 'receipts.reopen', 'module' => 'receipts', 'name_th' => 'เปิดรายการรับค่าคอมที่รับแล้วกลับมาแก้', 'name_en' => 'Reopen received commission',         'description' => null],
+
             // ── Reports ──────────────────────────────────────────────────
             ['key' => 'reports.view_operational', 'module' => 'reports', 'name_th' => 'ดูรายงานปฏิบัติการ', 'name_en' => 'View operational reports', 'description' => null],
             ['key' => 'reports.view_financial',   'module' => 'reports', 'name_th' => 'ดูรายงานการเงิน',    'name_en' => 'View financial reports',   'description' => null],

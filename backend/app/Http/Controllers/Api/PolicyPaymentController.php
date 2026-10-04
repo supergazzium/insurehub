@@ -9,6 +9,8 @@ use App\Http\Resources\PolicyPaymentResource;
 use App\Models\Policy;
 use App\Models\PolicyEvent;
 use App\Models\PolicyPayment;
+use App\Services\Policy\PremiumDue;
+use Illuminate\Http\Exceptions\HttpResponseException;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -84,12 +86,16 @@ class PolicyPaymentController extends ApiController
             'payments.*.netAmount' => ['sometimes', 'nullable', 'numeric'],
             'payments.*.dutyAmount' => ['sometimes', 'nullable', 'numeric'],
             'payments.*.vatAmount' => ['sometimes', 'nullable', 'numeric'],
+            'confirmDuplicate' => ['sometimes', 'boolean'],
+            'confirmOverpay' => ['sometimes', 'boolean'],
         ]);
 
         $payMode = $data['payMode'] ?? 'full';
         $payee = $data['payee'] ?? 'insurehub';
 
         $created = DB::transaction(function () use ($policy, $data, $payMode, $payee, $request) {
+            $policy = Policy::query()->whereKey($policy->id)->lockForUpdate()->firstOrFail();
+            $this->guardPayments($policy, $data['payments'], (bool) ($data['confirmDuplicate'] ?? false), (bool) ($data['confirmOverpay'] ?? false));
             $instMode = $data['installmentMode'] ?? null;
             $installmentIds = [];
             if ($instMode !== null && $policy->installment_mode !== $instMode) {
@@ -164,6 +170,55 @@ class PolicyPaymentController extends ApiController
         });
 
         return PolicyPaymentResource::collection($created)->response()->setStatusCode(201);
+    }
+
+    private function guardPayments(Policy $policy, array $payments, bool $confirmDuplicate, bool $confirmOverpay): void
+    {
+        if (! $confirmDuplicate) {
+            $duplicates = [];
+            $seen = [];
+            foreach ($payments as $i => $p) {
+                $amount = round((float) $p['amount'], 2);
+                $date = substr((string) $p['paymentDate'], 0, 10);
+                $inst = $p['installmentId'] ?? null;
+                $key = $date.'|'.$amount.'|'.($inst ?? '-');
+                $existing = DB::table('policy_payments')
+                    ->where('policy_id', $policy->id)
+                    ->whereDate('payment_date', $date)
+                    ->whereBetween('amount', [$amount - 0.005, $amount + 0.005])
+                    ->when($inst !== null, fn ($q) => $q->where('policy_installment_id', $inst), fn ($q) => $q->whereNull('policy_installment_id'))
+                    ->where('created_at', '>=', now()->subMinutes(10))
+                    ->exists();
+                if ($existing || isset($seen[$key])) {
+                    $duplicates[] = ['row' => $i + 1, 'paymentDate' => $date, 'amount' => $amount];
+                }
+                $seen[$key] = true;
+            }
+            if ($duplicates !== []) {
+                throw new HttpResponseException(response()->json([
+                    'code' => 'payment_duplicate',
+                    'message' => 'มีรายการชำระวันที่และยอดเดียวกันบันทึกไว้แล้ว อาจเป็นการบันทึกซ้ำ',
+                    'duplicates' => $duplicates,
+                ], 409));
+            }
+        }
+
+        if (! $confirmOverpay) {
+            $state = PremiumDue::forPolicy($policy);
+            $adding = round(array_sum(array_map(fn ($p) => (float) $p['amount'], $payments)), 2);
+            if ($state['due'] > 0 && $state['paid'] + $adding - $state['due'] > 1.0) {
+                throw new HttpResponseException(response()->json([
+                    'code' => 'payment_overpay',
+                    'message' => $state['legacySettled']
+                        ? 'กรมธรรม์นี้มาจากระบบเดิมและถือว่าชำระครบแล้ว การบันทึกเพิ่มจะทำให้ยอดชำระเกินเบี้ยที่ต้องชำระ'
+                        : 'ยอดชำระรวมจะเกินเบี้ยที่ต้องชำระ',
+                    'due' => $state['due'],
+                    'paid' => $state['paid'],
+                    'adding' => $adding,
+                    'over' => round($state['paid'] + $adding - $state['due'], 2),
+                ], 409));
+            }
+        }
     }
 
     /** Map the modal's method values onto the stored enum. */

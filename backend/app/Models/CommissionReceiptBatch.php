@@ -31,4 +31,9 @@ class CommissionReceiptBatch extends Model
     {
         return $this->hasMany(CommissionReceiptFile::class, 'batch_id');
     }
+
+    public function receivables(): HasMany
+    {
+        return $this->hasMany(CommissionReceivable::class, 'receipt_batch_id');
+    }
 }

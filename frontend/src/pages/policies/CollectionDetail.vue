@@ -54,9 +54,9 @@ async function load(): Promise<void> {
 
 // ── record payment (reuse the policy payment modal) ──────────────────────
 const paymentExpected = computed(() => ({
-  netPremium: data.value?.totalDue ?? 0,
+  netPremium: Math.max(0, data.value?.outstanding ?? 0),
   dutyStamp: 0, vat: 0,
-  totalPremiumPaid: data.value?.totalDue ?? 0,
+  totalPremiumPaid: Math.max(0, data.value?.outstanding ?? 0),
   discountAmount: 0, commissionAmount: 0,
 }))
 const showPayment = ref(false)

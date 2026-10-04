@@ -310,6 +310,8 @@ export interface CreatePaymentsPayload {
   payMode: string
   payee: 'insurehub' | 'carrier'
   payments: PaymentRowInput[]
+  confirmDuplicate?: boolean
+  confirmOverpay?: boolean
 }
 export function fetchPolicyPayments(policyId: string) {
   return api.get<{ data: PolicyPaymentRow[] }>(`policies/${policyId}/payments`)

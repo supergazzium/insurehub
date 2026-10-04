@@ -169,9 +169,17 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // รับค่าคอมจากบริษัทประกัน (insurer commission receipt — Phase 1 manual).
     Route::get('commission-receivables', [CommissionReceiptController::class, 'index']);
+    Route::get('commission-receivables/export', [CommissionReceiptController::class, 'export']);
+    Route::post('commission-receivables/bulk-review', [CommissionReceiptController::class, 'bulkReview']);
+    Route::post('commission-receivables/bulk-receive', [CommissionReceiptController::class, 'bulkReceive']);
+    Route::post('commission-receivables/statement-match', [CommissionReceiptController::class, 'statementMatch']);
+    Route::post('commission-receivables/adjustments', [CommissionReceiptController::class, 'storeAdjustment']);
+    Route::get('commission-receivables/adjustments/suggest', [CommissionReceiptController::class, 'suggestAdjustment']);
     Route::get('commission-receivables/{receivable}', [CommissionReceiptController::class, 'show']);
+    Route::delete('commission-receivables/{receivable}', [CommissionReceiptController::class, 'destroyAdjustment']);
     Route::patch('commission-receivables/{receivable}/review', [CommissionReceiptController::class, 'review']);
-    Route::post('commission-receivables/{receivable}/confirm-received', [CommissionReceiptController::class, 'confirmReceived']);
+    Route::post('commission-receivables/{receivable}/receive', [CommissionReceiptController::class, 'receive']);
+    Route::post('commission-receivables/{receivable}/confirm-received', [CommissionReceiptController::class, 'receive']);
     Route::post('commission-receivables/{receivable}/mark-no-commission', [CommissionReceiptController::class, 'markNoCommission']);
     Route::post('commission-receivables/{receivable}/reopen', [CommissionReceiptController::class, 'reopen']);
     Route::post('commission-receivables/{receivable}/resync-expected', [CommissionReceiptController::class, 'resyncExpected']);

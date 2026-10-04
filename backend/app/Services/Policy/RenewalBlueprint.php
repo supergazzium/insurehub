@@ -25,7 +25,7 @@ final class RenewalBlueprint
         'refund_discount', 'net_refund_amount', 'refund_rebate_amt', 'refund_rebate_ov',
         'first_due_inst', 'first_due_inst_date', 'next_due_inst', 'last_due_inst_date',
         'premium_check', 'com_rec_check', 'import_notes', 'status_note', 'internal_note',
-        'legacy_policy_status_id',
+        'legacy_policy_status_id', 'recorded_by_username',
         'commission_snapshot', 'comm_carrier_to_hub_rate', 'comm_carrier_to_hub_amount',
         'comm_hub_to_agent_rate', 'comm_hub_to_agent_amount',
     ];
@@ -39,7 +39,7 @@ final class RenewalBlueprint
     {
         $source->loadMissing(['product.productType', 'riders', 'beneficiaries', 'customer']);
 
-        $draft = $source->replicate(['years_overridden']);
+        $draft = $source->replicate(['years_overridden', 'imported_from_legacy']);
         foreach (self::CLEAR as $col) {
             if (array_key_exists($col, $draft->getAttributes())) {
                 $draft->{$col} = null;

@@ -99,6 +99,7 @@ class CommissionPayoutService
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->whereNotNull('p.writing_agent_id')
+            ->where('p.imported_from_legacy', false)
             ->whereIn('p.status', self::APPROVED_STATUSES)
             ->where(function ($w): void {
                 $w->whereNull('r.agent_rebate_status')
