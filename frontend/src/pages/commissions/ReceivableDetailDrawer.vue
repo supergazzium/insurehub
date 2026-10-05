@@ -6,6 +6,7 @@ import {
 } from '../../api/commissionReceipts'
 import { ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
+import MoneyInput from '../../components/MoneyInput.vue'
 
 const props = defineProps<{ id: string }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
@@ -129,7 +130,7 @@ onMounted(load)
               </div>
               <div>
                 <label class="mb-1 block text-xs text-slate-500">บริษัทแจ้ง</label>
-                <input v-model.number="(leg === 'MAIN' ? mainEdit : ovEdit).statement" type="number" step="0.01" class="w-full rounded-lg border border-slate-200 px-3 py-2" />
+                <MoneyInput v-model="(leg === 'MAIN' ? mainEdit : ovEdit).statement" :input-class="'w-full rounded-lg border border-slate-200 px-3 py-2'" />
               </div>
               <div>
                 <label class="mb-1 block text-xs text-slate-500">ผลต่าง</label>

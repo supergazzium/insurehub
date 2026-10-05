@@ -12,6 +12,7 @@
 import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import FormField from '../../components/FormField.vue'
+import MoneyInput from '../../components/MoneyInput.vue'
 import { api, ApiError } from '../../api/client'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchNextProductCode, fetchProductTaxonomy, type ProductTaxonomyRow } from '../../api/products'
@@ -736,8 +737,8 @@ function cancel(): void {
                   </td>
                 </tr>
                 <tr v-for="(band, i) in form[direction.key]" :key="i" class="border-t border-slate-100">
-                  <td class="px-1 py-1"><input v-model.number="band.sumAssuredMin" type="number" min="0" step="1000" placeholder="ไม่จำกัด" class="w-24 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
-                  <td class="px-1 py-1"><input v-model.number="band.sumAssuredMax" type="number" min="0" step="1000" placeholder="ไม่จำกัด" class="w-24 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
+                  <td class="px-1 py-1"><MoneyInput v-model="band.sumAssuredMin" placeholder="ไม่จำกัด" :input-class="'w-24 border border-slate-200 rounded px-1 py-0.5 text-xs'" /></td>
+                  <td class="px-1 py-1"><MoneyInput v-model="band.sumAssuredMax" placeholder="ไม่จำกัด" :input-class="'w-24 border border-slate-200 rounded px-1 py-0.5 text-xs'" /></td>
                   <td class="px-1 py-1"><input v-model.number="band.entryAgeMin" type="number" min="0" max="120" step="1" placeholder="0" class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
                   <td class="px-1 py-1"><input v-model.number="band.entryAgeMax" type="number" min="0" max="120" step="1" placeholder="120" class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
                   <td v-for="y in ['yr1','yr2','yr3','yr4','yr5','yr6Up']" :key="y" class="px-1 py-1">

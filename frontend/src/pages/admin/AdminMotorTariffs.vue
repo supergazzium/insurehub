@@ -8,6 +8,7 @@ import {
   type MotorActTariff,
 } from '../../api/motorTariffs'
 import { ApiError } from '../../api/client'
+import MoneyInput from '../../components/MoneyInput.vue'
 
 const { t } = useI18n()
 const rows = ref<MotorActTariff[]>([])
@@ -143,8 +144,8 @@ async function doAdd(): Promise<void> {
                 class="w-full border border-slate-200 rounded px-2 py-1 text-sm" />
             </td>
             <td class="px-4 py-2">
-              <input v-model.number="add.premium" type="number" step="0.01" min="0"
-                class="w-full border border-slate-200 rounded px-2 py-1 text-right text-sm font-mono" />
+              <MoneyInput v-model="add.premium"
+                :input-class="'w-full border border-slate-200 rounded px-2 py-1 text-right text-sm font-mono'" />
             </td>
             <td class="px-4 py-2"></td>
             <td class="px-4 py-2 text-right">

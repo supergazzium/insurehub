@@ -10,6 +10,7 @@ import {
 } from '../../api/commissionPayouts'
 import { ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
+import MoneyInput from '../../components/MoneyInput.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -492,7 +493,7 @@ onMounted(load)
           <option value="correction">แก้ไข/ปรับลด</option>
         </select>
         <label class="mb-1 block text-xs text-slate-500">จำนวนเงิน (บาท)</label>
-        <input v-model.number="adjAmount" type="number" min="0" step="0.01" class="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
+        <MoneyInput v-model="adjAmount" :input-class="'mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm'" />
         <label class="mb-1 block text-xs text-slate-500">เหตุผล *</label>
         <textarea v-model="adjReason" rows="2" class="mb-3 w-full rounded-lg border border-slate-200 px-3 py-2 text-sm" />
         <div v-if="adjError" class="mb-2 text-sm text-rose-600">{{ adjError }}</div>
