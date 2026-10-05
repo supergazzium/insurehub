@@ -15,7 +15,7 @@ import FormField from '../../components/FormField.vue'
 import { api, ApiError } from '../../api/client'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchNextProductCode, fetchProductTaxonomy, type ProductTaxonomyRow } from '../../api/products'
-import { fetchCommissionTiers, type CommissionTier } from '../../api/mgm'
+import { fetchCommissionTiers, commissionTierLabel, type CommissionTier } from '../../api/mgm'
 import { lookupTemplate, fillCarrier } from './productNamePresets'
 
 const router = useRouter()
@@ -635,7 +635,7 @@ function cancel(): void {
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
             <option value="">— select —</option>
             <option v-for="t in commissionTiers" :key="t.id" :value="t.id">
-              {{ t.nameTh }} ({{ t.code }})
+              {{ commissionTierLabel(t) }}
             </option>
           </select>
         </FormField>

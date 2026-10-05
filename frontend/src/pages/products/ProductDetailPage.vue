@@ -5,7 +5,7 @@
 import { ref, computed, onMounted, reactive } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { fetchProduct, fetchProductTaxonomy, type ProductDetail, type ProductTaxonomyRow, type ProductCommissionRatePanel, type ProductCommissionBandRow } from '../../api/products'
-import { fetchCommissionTiers, type CommissionTier } from '../../api/mgm'
+import { fetchCommissionTiers, commissionTierLabel, type CommissionTier } from '../../api/mgm'
 import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import { api, ApiError } from '../../api/client'
@@ -18,7 +18,7 @@ const id = route.params.id as string
 const taxonomy = ref<ProductTaxonomyRow[]>([])
 const commissionTiers = ref<CommissionTier[]>([])
 const commissionTierOptions = computed(() =>
-  commissionTiers.value.map((t) => ({ value: t.id, label: `${t.nameTh} (${t.code})` })),
+  commissionTiers.value.map((t) => ({ value: t.id, label: commissionTierLabel(t) })),
 )
 
 /**

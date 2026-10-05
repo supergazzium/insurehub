@@ -192,3 +192,19 @@ export interface AgentCommissionResponse {
 export function fetchAgentCommissionDetail(agentCode: string) {
   return api.get<AgentCommissionResponse>(`agents/${encodeURIComponent(agentCode)}/commission-detail`)
 }
+
+/**
+ * Display label for a commission tier in dropdowns, per product feedback (#14):
+ *   "ComTier1 : เต็มระบบ (Tier Full)"
+ * Maps the stored code to the ComTierN prefix + an English tier label, keeping
+ * the Thai name in the middle. Unknown codes fall back to "nameTh (code)".
+ */
+const TIER_DISPLAY: Record<string, { prefix: string; en: string }> = {
+  TIER_FULL: { prefix: 'ComTier1', en: 'Tier Full' },
+  TIER_PARTIAL: { prefix: 'ComTier2', en: 'Tier Partial' },
+  TIER_DIRECT_ONLY: { prefix: 'ComTier3', en: 'Tier Direct Only' },
+}
+export function commissionTierLabel(tier: { code: string; nameTh: string }): string {
+  const d = TIER_DISPLAY[tier.code]
+  return d ? `${d.prefix} : ${tier.nameTh} (${d.en})` : `${tier.nameTh} (${tier.code})`
+}

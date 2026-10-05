@@ -171,7 +171,6 @@ async function changeStatus(carrierId: string, next: 'active' | 'inactive'): Pro
               <th class="px-4 py-2 text-left">ประเภท</th>
               <th class="px-4 py-2 text-left">Tax ID</th>
               <th class="px-4 py-2 text-right">Products</th>
-              <th class="px-4 py-2 text-right">Contracts</th>
               <th class="px-4 py-2 text-left">Status</th>
             </tr>
           </thead>
@@ -192,7 +191,6 @@ async function changeStatus(carrierId: string, next: 'active' | 'inactive'): Pro
               </td>
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ c.taxId || '—' }}</td>
               <td class="px-4 py-2 text-right text-slate-900">{{ c.productCount.toLocaleString() }}</td>
-              <td class="px-4 py-2 text-right text-slate-900">{{ c.contractCount.toLocaleString() }}</td>
               <td class="px-4 py-2" @click.stop>
                 <select
                   :value="c.active ? 'active' : 'inactive'"
