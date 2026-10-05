@@ -52,6 +52,14 @@ class AgentResource extends JsonResource
             'licenseLifeExpiry' => $this->license_life_expiry?->toDateString(),
             'licenseNonLifeNo' => $this->license_non_life_no ?? '',
             'licenseNonLifeExpiry' => $this->license_non_life_expiry?->toDateString(),
+            // Document upload status (#22 license photos, #24 id-card + book-bank).
+            // Paths stay server-side; the UI only needs to know what's uploaded.
+            'photos' => [
+                'licenseLife' => ! empty($this->license_life_photo_path),
+                'licenseNonLife' => ! empty($this->license_non_life_photo_path),
+                'idCard' => ! empty($this->id_card_photo_path),
+                'bankBook' => ! empty($this->bank_book_photo_path),
+            ],
             'parentAgentId' => $this->parent_agent_id !== null ? (string) $this->parent_agent_id : null,
             'parentAgentName' => $this->parent !== null
                 ? trim(($this->parent->first_name ?? '').' '.($this->parent->last_name ?? ''))

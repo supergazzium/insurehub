@@ -238,7 +238,9 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ a.agentCode }}</td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ a.firstName }} {{ a.lastName }}</div>
-                <div class="text-xs text-slate-500">{{ a.email || a.phone || '—' }}</div>
+                <!-- Email only in the list — hide phone to reduce the chance of
+                     bulk-copying contact numbers (#25). -->
+                <div class="text-xs text-slate-500">{{ a.email || '—' }}</div>
               </td>
               <td class="px-4 py-2">
                 <div class="flex items-center gap-1.5">

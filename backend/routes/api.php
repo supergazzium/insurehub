@@ -224,7 +224,11 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('agents/{agent}/relations', [AgentHierarchyController::class, 'relations']);
     Route::get('agents/{agent}/notes', [AgentNoteController::class, 'index']);
     Route::post('agents/{agent}/notes', [AgentNoteController::class, 'store']);
-    Route::get('agents/{agent}/level-progress', [LevelProgressController::class, 'show']);    Route::get('ranks', [RankController::class, 'index']);
+    Route::get('agents/{agent}/level-progress', [LevelProgressController::class, 'show']);
+    // Admin document photos: license (life/non-life), id-card, book-bank (#22, #24).
+    Route::post('agents/{agent}/photo/{kind}', [AgentController::class, 'uploadPhoto']);
+    Route::get('agents/{agent}/photo/{kind}', [AgentController::class, 'photo']);
+    Route::get('ranks', [RankController::class, 'index']);
     Route::get('rank-promotions', [RankPromotionController::class, 'index']);
     Route::post('rank-promotions/{rankPromotion}/approve', [RankPromotionController::class, 'approve']);
     Route::post('rank-promotions/{rankPromotion}/reject', [RankPromotionController::class, 'reject']);

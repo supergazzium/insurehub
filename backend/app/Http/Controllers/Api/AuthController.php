@@ -279,7 +279,11 @@ class AuthController extends Controller
      */
     private function nextAgentCode(int $tenantId): string
     {
-        $prefix = 'NA'.now()->format('y');
+        // All agent codes use the "IN" prefix now (no more "AG"/"NA") — the
+        // same scheme as the imported agents (#27). The sequence is taken
+        // across EVERY IN<yy> code including imported ones so a new signup
+        // can't collide with an existing imported code for the same year.
+        $prefix = 'IN'.now()->format('y');
         $lastForYear = Agent::query()
             ->where('tenant_id', $tenantId)
             ->where('agent_code', 'like', $prefix.'%')

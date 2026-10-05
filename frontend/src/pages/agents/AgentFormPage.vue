@@ -8,6 +8,7 @@ import AddressPicker from '../../components/AddressPicker.vue'
 import AgentPicker from '../../components/AgentPicker.vue'
 import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 import AgentsSubnav from './AgentsSubnav.vue'
+import AgentDocUpload from '../../components/AgentDocUpload.vue'
 import {
   fetchAgent, createAgentFull, updateAgentFull, fetchRanks,
   fetchLevelProgress, fetchRankPromotions, approveAgent, rejectAgent, setAgentActive,
@@ -52,13 +53,16 @@ const newNote = ref('')
 const newNoteKind = ref('general')
 const noteSaving = ref(false)
 const approvalStatus = ref<string>('approved')
+// Uploaded-document status (#22 license photos, #24 id-card + book-bank),
+// hydrated from AgentResource.photos. The upload slots flip these to true.
+const photos = reactive({ licenseLife: false, licenseNonLife: false, idCard: false, bankBook: false })
 const busy = ref(false)
 const money = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 0 })
 const agentNameOrCode = computed(() => `${form.firstName} ${form.lastName}`.trim() || form.agentCode)
 
 const form = reactive({
   agentCode: '',
-  agentType: 'AG' as 'AG' | 'IN',
+  agentType: 'IN' as 'AG' | 'IN',
   kind: 'individual' as 'individual' | 'corporate',
   firstName: '', lastName: '', firstNameEn: '', lastNameEn: '', nickname: '',
   gender: '' as '' | 'male' | 'female' | 'other',
@@ -109,6 +113,11 @@ async function load(): Promise<void> {
       s('bankAccountName', bank.accountName ?? d.bankAccountName)
       s('licenseLifeNo', d.licenseLifeNo); s('licenseLifeExpiry', d.licenseLifeExpiry)
       s('licenseNonLifeNo', d.licenseNonLifeNo); s('licenseNonLifeExpiry', d.licenseNonLifeExpiry)
+      const ph = (d.photos ?? {}) as Record<string, boolean>
+      photos.licenseLife = !!ph.licenseLife
+      photos.licenseNonLife = !!ph.licenseNonLife
+      photos.idCard = !!ph.idCard
+      photos.bankBook = !!ph.bankBook
       s('parentAgentId', d.parentAgentId); s('level', d.level)
       s('joinedAt', d.joinedAt); s('notes', d.notes)
       form.active = d.active !== false
@@ -285,7 +294,9 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <FormField label="รหัสตัวแทน *"><input v-model.trim="form.agentCode" :disabled="isEdit" class="ipt" /></FormField>
             <FormField label="ประเภท">
-              <select v-model="form.agentType" class="ipt"><option value="AG">AG (ตัวแทน)</option><option value="IN">IN (นายหน้า)</option></select>
+              <!-- New agents are always IN now (#27). "AG" kept only in the
+                   type for displaying pre-existing AG agents, not as an option. -->
+              <select v-model="form.agentType" class="ipt"><option v-if="form.agentType === 'AG'" value="AG">AG (ตัวแทน)</option><option value="IN">IN (นายหน้า)</option></select>
             </FormField>
             <FormField label="ชนิด">
               <select v-model="form.kind" class="ipt"><option value="individual">บุคคลธรรมดา</option><option value="corporate">นิติบุคคล</option></select>
@@ -370,6 +381,25 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
             <FormField label="วันหมดอายุ (ชีวิต)"><DateInput v-model="form.licenseLifeExpiry" /></FormField>
             <FormField label="เลขใบอนุญาตวินาศภัย"><input v-model.trim="form.licenseNonLifeNo" class="ipt" /></FormField>
             <FormField label="วันหมดอายุ (วินาศภัย)"><DateInput v-model="form.licenseNonLifeExpiry" /></FormField>
+          </div>
+          <!-- รูปใบอนุญาต (#22) — ชีวิต / วินาศภัย แยกกันชัดเจน -->
+          <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AgentDocUpload :agent-id="editId" kind="license_life" label="รูปใบอนุญาต (ชีวิต)"
+              :uploaded="photos.licenseLife" @uploaded="photos.licenseLife = true" />
+            <AgentDocUpload :agent-id="editId" kind="license_non_life" label="รูปใบอนุญาต (วินาศภัย)"
+              :uploaded="photos.licenseNonLife" @uploaded="photos.licenseNonLife = true" />
+          </div>
+        </section>
+
+        <!-- เอกสารยืนยันตัวตน (#24) — บัตรประชาชน + หน้า Book Bank -->
+        <section class="rounded-lg border border-slate-200 bg-white p-4">
+          <h2 class="mb-1 text-sm font-semibold text-slate-700">เอกสารยืนยันตัวตน</h2>
+          <p class="mb-3 text-xs text-slate-500">ใช้ยืนยันตัวตน และตรวจสอบก่อนจ่ายเงินออกให้ตัวแทน</p>
+          <div class="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            <AgentDocUpload :agent-id="editId" kind="id_card" label="รูปบัตรประชาชน"
+              :uploaded="photos.idCard" @uploaded="photos.idCard = true" />
+            <AgentDocUpload :agent-id="editId" kind="bank_book" label="หน้าสมุดบัญชี (Book Bank)"
+              :uploaded="photos.bankBook" @uploaded="photos.bankBook = true" />
           </div>
         </section>
 
