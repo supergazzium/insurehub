@@ -19,7 +19,7 @@ import { toIsoDate } from '../../util/dateFormat'
 import { api } from '../../api/client'
 import { fetchCustomerList, type CustomerListRow } from '../../api/customers'
 import { fetchProvinces, fetchDistricts, fetchSubDistricts, fetchNamePrefixes, fetchNationalities, type NamePrefixRow, type NationalityRow } from '../../api/portal'
-import { isThaiName, isThaiJuristicName, isThaiId13, isThaiMobile, isThaiLandline, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
+import { isThaiName, isThaiJuristicName, isThaiId13, isThaiMobile, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
 
 const router = useRouter()
 
@@ -344,14 +344,9 @@ function validateMobile(v: string): string | null {
   }
   return null
 }
-function validateLandline(v: string): string | null {
-  const t = v.trim()
-  if (t === '') return null
-  if (form.customerType === 'foreign_individual') {
-    if (!isInternationalPhone(t)) return 'รูปแบบเบอร์โทรไม่ถูกต้อง (6-15 หลัก, ใส่ + ได้)'
-  } else {
-    if (!isThaiLandline(t)) return 'รูปแบบเบอร์บ้านไม่ถูกต้อง (ขึ้นต้น 02/03/04/05)'
-  }
+// Backup phone ("เบอร์สำรอง") — optional and format-free: it may hold a
+// mobile, landline, or any reachable number, so we accept anything.
+function validateLandline(_v: string): string | null {
   return null
 }
 function validateEmailFmt(v: string): string | null {
@@ -554,7 +549,7 @@ function collectValidationProblems(): string[] {
   push('เลขหนังสือเดินทาง', errPassport.value)
   push('สัญชาติ', errNationality.value)
   push('โทรศัพท์มือถือ', errPhone.value)
-  push('โทรศัพท์บ้าน', errTelPhone.value)
+  push('เบอร์สำรอง', errTelPhone.value)
   push('อีเมล', errEmail.value)
   push('อีเมล (สำรอง)', errEmail2.value)
   push('อีเมลผู้ติดต่อแทน', errContactEmail.value)
@@ -932,9 +927,9 @@ function cancel(): void {
           </div>
           <p v-if="showPhone" class="text-xs text-rose-600 mt-0.5">{{ showPhone }}</p>
         </FormField>
-        <FormField label="โทรศัพท์บ้าน" error-key="telPhone" :errors="fieldErrors">
+        <FormField label="เบอร์สำรอง" error-key="telPhone" :errors="fieldErrors">
           <div class="relative">
-            <input v-model.trim="form.telPhone" inputmode="tel" placeholder="021234567"
+            <input v-model.trim="form.telPhone" inputmode="tel" placeholder="เบอร์โทรสำรอง"
               :class="inputClass(showTelPhone, telPhoneValid)"
               @blur="markTouched('telPhone')" />
             <i v-if="telPhoneValid" class="pi pi-check text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2 text-xs" />

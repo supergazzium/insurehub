@@ -75,11 +75,15 @@ const rangeText = computed(() => {
 })
 
 function typeBadge(insureType: string): string {
+  // DB stores mixed case ("Life" / "Non-Life" / "Tax") because some rows were
+  // imported and others created via the form. Normalize before matching so
+  // every row gets its colour, not just the ones that happen to be lowercase.
+  const key = insureType.toLowerCase().replace(/\s+/g, '-')
   return {
     life: 'bg-emerald-50 text-emerald-700',
     'non-life': 'bg-sky-50 text-sky-700',
     tax: 'bg-violet-50 text-violet-700',
-  }[insureType] ?? 'bg-slate-100 text-slate-600'
+  }[key] ?? 'bg-slate-100 text-slate-600'
 }
 
 // In-place status change via dropdown — PATCHes carriers/{id} then updates

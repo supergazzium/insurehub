@@ -1030,6 +1030,7 @@ if (typeof BroadcastChannel !== 'undefined') {
         phone: String(r.phone ?? ''),
         email: String(r.email ?? ''),
         province: String(r.province ?? ''),
+        gender: String(r.gender ?? ''),
         assignedAgentId: null,
         assignedAgentCode: null,
         assignedAgentName: '',
@@ -1472,6 +1473,7 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
           phone: String(c.phone ?? ''),
           email: String(c.email ?? ''),
           province: String(c.province ?? ''),
+          gender: String(c.gender ?? ''),
           assignedAgentId: null,
           assignedAgentCode: null,
           assignedAgentName: '',
@@ -1689,6 +1691,15 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         </FormField>
 
         <FormField :label="t('policyCreate.customer')" required>
+          <!-- Quick link to create a customer when search comes up empty.
+               Opens the full-page form in a new tab; the created customer is
+               broadcast back here (customer:created) and auto-selected. -->
+          <template #label-extra>
+            <a :href="router.resolve({ name: 'customer-new' }).href" target="_blank" rel="noopener"
+              class="ml-2 inline-flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 hover:underline">
+              <i class="pi pi-plus text-[10px]" /> สร้างลูกค้าใหม่
+            </a>
+          </template>
           <EntityPicker
             v-model="form.customerId"
             :fetch="searchCustomers"

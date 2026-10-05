@@ -23,6 +23,7 @@ export interface CustomerListRow {
   phone: string
   email: string
   province: string
+  gender: string
   assignedAgentId: string | null
   assignedAgentCode: string | null
   assignedAgentName: string
@@ -41,7 +42,7 @@ export interface CustomerListFilters {
   customerType?: string
   page?: number
   perPage?: number
-  sortBy?: 'customerCode' | 'firstName' | 'lastName' | 'province' | 'registeredAt' | 'newest'
+  sortBy?: 'customerCode' | 'firstName' | 'lastName' | 'province' | 'gender' | 'registeredAt' | 'newest'
   sortDir?: 'asc' | 'desc'
 }
 

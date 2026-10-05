@@ -20,6 +20,15 @@ const customerStore = useCustomerStore()
 function goCreate(): void { router.push({ name: 'customer-new' }) }
 function openCustomer(id: string): void { router.push({ name: 'customer-edit', params: { id } }) }
 
+// Gender stored values are mixed-case / abbreviated (male/M, female/F, other).
+function genderLabel(g: string): string {
+  const v = (g || '').toLowerCase()
+  if (v === 'male' || v === 'm') return 'ชาย'
+  if (v === 'female' || v === 'f') return 'หญิง'
+  if (v === '' || v === 'null') return '—'
+  return 'อื่นๆ'
+}
+
 const filters = reactive({
   q: '',
   customerType: '' as '' | 'individual' | 'foreign_individual' | 'corporate' | 'other',
@@ -30,7 +39,7 @@ const filters = reactive({
 })
 
 const page = ref(1)
-type SortCol = 'customerCode' | 'firstName' | 'lastName' | 'province' | 'registeredAt' | 'newest'
+type SortCol = 'customerCode' | 'firstName' | 'lastName' | 'gender' | 'registeredAt' | 'newest'
 const sortBy = ref<SortCol>('newest')
 const sortDir = ref<'asc' | 'desc'>('desc')
 
@@ -197,9 +206,9 @@ const rangeText = computed(() => {
               <th class="px-4 py-2 text-left">ID card</th>
               <th class="px-4 py-2 text-left">โทรศัพท์</th>
               <th class="px-4 py-2 text-left cursor-pointer select-none hover:text-slate-800"
-                @click="toggleSort('province')">
-                จังหวัด
-                <i v-if="sortBy === 'province'"
+                @click="toggleSort('gender')">
+                เพศ
+                <i v-if="sortBy === 'gender'"
                   :class="sortDir === 'asc' ? 'pi-sort-amount-up-alt' : 'pi-sort-amount-down'"
                   class="pi text-[10px] ml-1" />
                 <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
@@ -226,7 +235,7 @@ const rangeText = computed(() => {
               <td class="px-4 py-2 text-slate-600">{{ customerTypeLabel(c.customerType) }}</td>
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ customerIdentityNumber(c) || '—' }}</td>
               <td class="px-4 py-2 text-slate-700">{{ c.phone || '—' }}</td>
-              <td class="px-4 py-2 text-slate-700">{{ c.province || '—' }}</td>
+              <td class="px-4 py-2 text-slate-700">{{ genderLabel(c.gender) }}</td>
               <td class="px-4 py-2">
                 <div v-if="c.assignedAgentCode" class="text-slate-900">
                   {{ c.assignedAgentName || c.assignedAgentCode }}

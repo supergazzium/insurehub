@@ -267,7 +267,7 @@ function statusBadge(s: string): string {
         <div class="grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
           <div><div class="text-xs text-slate-400">โทรศัพท์มือถือ</div>
             <EditableField entity="customers" :id="customer.id" field="phone" :value="customer.phone" @update="v => apply('phone', v)" /></div>
-          <div><div class="text-xs text-slate-400">โทรศัพท์บ้าน</div>
+          <div><div class="text-xs text-slate-400">เบอร์สำรอง</div>
             <EditableField entity="customers" :id="customer.id" field="telPhone" :value="customer.telPhone" @update="v => apply('telPhone', v)" /></div>
           <div><div class="text-xs text-slate-400">LINE ID</div>
             <EditableField entity="customers" :id="customer.id" field="lineId" :value="customer.lineId" @update="v => apply('lineId', v)" /></div>

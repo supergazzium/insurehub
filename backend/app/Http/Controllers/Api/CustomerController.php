@@ -42,7 +42,7 @@ class CustomerController extends ApiController
                 // juristic + tax + passport are needed so the list row can
                 // render corporate / foreign customer names + identity numbers.
                 'c.juristic_name', 'c.tax_id', 'c.passport',
-                'c.id_card', 'c.phone', 'c.email', 'c.province',
+                'c.id_card', 'c.phone', 'c.email', 'c.province', 'c.gender',
                 'c.assigned_agent_id',
                 'c.active', 'c.registered_at',
                 'a.agent_code as assigned_agent_code',
@@ -100,6 +100,7 @@ class CustomerController extends ApiController
             'firstName' => 'c.first_name',
             'lastName' => 'c.last_name',
             'province' => 'c.province',
+            'gender' => 'c.gender',
             'registeredAt' => 'c.registered_at',
             'newest' => 'c.id',
         ];

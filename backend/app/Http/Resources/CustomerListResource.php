@@ -33,6 +33,7 @@ class CustomerListResource extends JsonResource
             'phone' => $this->phone ?? '',
             'email' => $this->email ?? '',
             'province' => $this->province ?? '',
+            'gender' => $this->gender ?? '',
             'assignedAgentId' => $this->assigned_agent_id !== null ? (string) $this->assigned_agent_id : null,
             'assignedAgentCode' => $this->assigned_agent_code,
             'assignedAgentName' => trim(($this->assigned_agent_first_name ?? '') . ' ' . ($this->assigned_agent_last_name ?? '')),
