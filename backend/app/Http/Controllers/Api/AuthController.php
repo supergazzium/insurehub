@@ -39,9 +39,19 @@ class AuthController extends Controller
             ->whereNull('deleted_at')
             ->first();
 
-        if ($user === null || ! Hash::check($data['password'], $user->password)) {
+        // Per product feedback (task 15), distinguish "email not registered"
+        // from "wrong password" so the UI can show a specific message. NOTE:
+        // this is a deliberate trade-off — it enables account enumeration
+        // (an attacker can learn which emails exist). Chosen by product.
+        // The front end maps these codes to Thai copy.
+        if ($user === null) {
             throw ValidationException::withMessages([
-                'email' => ['Invalid email or password.'],
+                'email' => ['email_not_found'],
+            ]);
+        }
+        if (! Hash::check($data['password'], $user->password)) {
+            throw ValidationException::withMessages([
+                'email' => ['invalid_password'],
             ]);
         }
 

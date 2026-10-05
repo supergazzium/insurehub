@@ -320,6 +320,21 @@ function clearServerError(field: string): void {
   }
 }
 
+// Phone + national-id/tax-id accept digits only — strip anything else as the
+// operator types so non-numeric characters can't be entered (tasks 6/9/11).
+function onPhoneInput(e: Event): void {
+  const el = e.target as HTMLInputElement
+  const digits = el.value.replace(/\D/g, '')
+  if (digits !== el.value) { el.value = digits; form.phone = digits }
+  clearServerError('phone')
+}
+function onIdCardInput(e: Event): void {
+  const el = e.target as HTMLInputElement
+  const digits = el.value.replace(/\D/g, '')
+  if (digits !== el.value) { el.value = digits; form.idCard = digits }
+  clearServerError('idCard')
+}
+
 const referralToken = computed(() => (typeof route.query.ref === 'string' ? route.query.ref : ''))
 const recruiter = ref<RecruitLinkInfo | null>(null)
 const recruiterLoading = ref(false)
@@ -410,13 +425,26 @@ const idCardError = computed<string | null>(() => {
   return null
 })
 
+// The latest birth date an applicant may have and still be ≥18 — also the
+// year the date picker should open on (วันนี้ − 18 ปี). Corporate accounts
+// have no birth date (task 10), so this only gates individuals.
+const maxBirthDate = computed<string>(() => {
+  const d = new Date()
+  d.setFullYear(d.getFullYear() - 18)
+  return toIsoDate(d)
+})
+
 const birthDateError = computed<string | null>(() => {
+  // Juristic (corporate) accounts have no birth date — skip entirely.
+  if (form.signupType === 'corporate') return null
   if (form.birthDate === '') return t('agentRegister.missing.birthDate')
   const d = new Date(form.birthDate)
   const today = new Date()
   today.setHours(0, 0, 0, 0)
   if (!(d instanceof Date) || isNaN(d.getTime())) return t('agentRegister.missing.birthDate')
   if (d >= today) return t('agentRegister.missing.birthDateFuture')
+  // Must be at least 18 — under-18 applicants cannot register.
+  if (form.birthDate > maxBirthDate.value) return t('agentRegister.missing.birthDateUnder18')
   return null
 })
 
@@ -532,7 +560,8 @@ async function submit(): Promise<void> {
       password: form.password,
       password_confirmation: form.passwordConfirmation,
       idCard: form.idCard.trim(),
-      birthDate: form.birthDate,
+      // Corporate accounts have no birth date (task 10).
+      birthDate: form.signupType === 'corporate' ? null : form.birthDate,
       phone: form.phone,
       lineId: form.lineId || null,
       juristicName: form.signupType === 'corporate' ? form.juristicName : null,
@@ -738,7 +767,7 @@ async function submit(): Promise<void> {
               :placeholder="form.signupType === 'corporate' ? t('agentRegister.placeholders.taxId') : t('agentRegister.placeholders.idCard')"
               :class="inputClass(idCardDisplay, idCardValid)"
               @blur="markTouched('idCard')"
-              @input="clearServerError('idCard')" />
+              @input="onIdCardInput" />
             <i v-if="idCardValid" class="pi pi-check text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2" />
           </div>
           <p v-if="idCardDisplay" class="text-xs text-rose-600 mt-1">{{ idCardDisplay }}</p>
@@ -746,20 +775,22 @@ async function submit(): Promise<void> {
         </div>
 
         <div class="grid grid-cols-2 gap-4">
-          <div>
+          <!-- Birth date — individuals only. Corporate accounts have none (task 10). -->
+          <div v-if="form.signupType !== 'corporate'">
             <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ t('agentRegister.birthDate') }} <span class="text-rose-500">*</span></label>
             <DateInput v-model="form.birthDate"
-              :max="toIsoDate(new Date())"
+              :max="maxBirthDate"
               @update:model-value="() => { markTouched('birthDate'); clearServerError('birthDate') }" />
             <p v-if="birthDateDisplay" class="text-xs text-rose-600 mt-1">{{ birthDateDisplay }}</p>
+            <p v-else class="text-xs text-slate-500 mt-1">{{ t('agentRegister.hints.minAge18') }}</p>
           </div>
-          <div>
+          <div :class="form.signupType === 'corporate' ? 'col-span-2' : ''">
             <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ t('agentRegister.phone') }} <span class="text-rose-500">*</span></label>
             <div class="relative">
               <input v-model.trim="form.phone" type="tel" inputmode="tel" maxlength="14" placeholder="08x-xxx-xxxx"
                 :class="inputClass(phoneDisplay, phoneValid)"
                 @blur="markTouched('phone')"
-                @input="clearServerError('phone')" />
+                @input="onPhoneInput" />
               <i v-if="phoneValid" class="pi pi-check text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2" />
             </div>
             <p v-if="phoneDisplay" class="text-xs text-rose-600 mt-1">{{ phoneDisplay }}</p>
