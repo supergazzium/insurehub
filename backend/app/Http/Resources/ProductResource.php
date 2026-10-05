@@ -159,6 +159,8 @@ class ProductResource extends JsonResource
             'scheme' => $scheme,
             'carrierToHub' => $this->rowToPanel($rows->get(ProductCommissionRate::DIRECTION_CARRIER_TO_HUB)),
             'hubToAgent' => $this->rowToPanel($rows->get(ProductCommissionRate::DIRECTION_HUB_TO_AGENT)),
+            // OV — single flat rate carrier → hub. Null when not set.
+            'carrierToHubOv' => $this->rowToPanel($rows->get(ProductCommissionRate::DIRECTION_CARRIER_TO_HUB_OV)),
         ];
     }
 

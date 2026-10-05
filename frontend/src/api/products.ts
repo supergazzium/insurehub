@@ -136,6 +136,8 @@ export interface ProductCommissionRatesBlock {
   scheme: 'flat' | 'life_years'
   carrierToHub: ProductCommissionRatePanel | null
   hubToAgent: ProductCommissionRatePanel | null
+  /** OV (Override) — single flat rate carrier → hub. Null when not set. */
+  carrierToHubOv: ProductCommissionRatePanel | null
 }
 
 /** Payload shape when writing rates via POST/PATCH products. Matches
@@ -144,6 +146,8 @@ export interface ProductCommissionRatesBlock {
 export interface ProductCommissionRatesPayload {
   carrierToHub?: Partial<ProductCommissionRatePanel>
   hubToAgent?: Partial<ProductCommissionRatePanel>
+  /** OV — single flat rate carrier → hub. */
+  carrierToHubOv?: Partial<ProductCommissionRatePanel>
 }
 
 export function fetchProduct(id: string) {

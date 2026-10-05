@@ -2,40 +2,32 @@
 // Server-paginated product list.
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useProductStore } from '../../stores/products'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
-import ProductDetailDrawer from './ProductDetailDrawer.vue'
-import ProductCreateModal from './ProductCreateModal.vue'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const productStore = useProductStore()
 
-const detailId = ref<string | null>(null)
-// Auto-open the create modal when the URL has ?new=1 — used by the policy
-// create wizard's "New product" button, which opens this page in a new tab
-// pre-set to open the product form.
-const openedForNew = route.query.new === '1'
-const showCreate = ref(openedForNew)
+/** Open the full-page create form. The product create UI moved from a modal
+ *  to a dedicated page (products/new). The policy wizard's "New product"
+ *  button opens this list with ?new=1; preserve that by forwarding the flag
+ *  so the create page can still broadcast + close its tab on success. */
+function openCreate(): void {
+  router.push({ name: 'product-new', query: route.query.new === '1' ? { new: '1' } : {} })
+}
 
-/** Broadcast a newly-created product to the parent tab (the policy wizard) and
- *  close ourselves. Only fires when we were opened via ?new=1 — regular
- *  list-page create should not close the tab. */
-function handleCreated(row: Record<string, unknown>): void {
-  if (openedForNew) {
-    try {
-      const bc = new BroadcastChannel('insurehub')
-      bc.postMessage({ type: 'product:created', row })
-      bc.close()
-    } catch {
-      // BroadcastChannel unavailable — fall through and just close.
-    }
-    window.close()
-    return
-  }
-  page.value = 1
-  load()
+/** Open the full-page view/edit form for one product. Replaced the old
+ *  slide-in detail drawer. */
+function openEdit(id: string): void {
+  router.push({ name: 'product-edit', params: { id } })
+}
+// Preserve the policy-wizard flow: ?new=1 on the list jumps straight to the
+// full-page create form (carrying the flag through).
+if (route.query.new === '1') {
+  void router.replace({ name: 'product-new', query: { new: '1' } })
 }
 
 const filters = reactive({
@@ -81,10 +73,11 @@ async function load(): Promise<void> {
 onMounted(() => {
   void loadCarriers()
   void load()
-  // Cross-page deep-link — /products?open=<id> opens that product's drawer.
+  // Cross-page deep-link — /products?open=<id> jumps to that product's
+  // full-page view/edit form.
   const openId = route.query.open
   if (typeof openId === 'string' && openId.trim() !== '') {
-    detailId.value = openId.trim()
+    void router.replace({ name: 'product-edit', params: { id: openId.trim() } })
   }
 })
 
@@ -210,7 +203,7 @@ function fmtBaht(n: number | null): string {
         <div v-if="productStore.listMeta" class="text-sm text-slate-500">{{ rangeText }}</div>
         <button type="button"
           class="px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm flex items-center gap-1.5"
-          @click="showCreate = true">
+          @click="openCreate">
           <i class="pi pi-plus text-xs" /> New Product
         </button>
       </div>
@@ -305,7 +298,7 @@ function fmtBaht(n: number | null): string {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="p in productStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer" @click="detailId = p.id">
+            <tr v-for="p in productStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer" @click="openEdit(p.id)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ p.code }}</td>
               <td class="px-4 py-2">
                 <div class="text-slate-900 truncate max-w-[320px]" :title="p.name">{{ p.name }}</div>
@@ -369,10 +362,5 @@ function fmtBaht(n: number | null): string {
         </div>
       </div>
     </section>
-
-    <ProductDetailDrawer :product-id="detailId" @close="detailId = null" />
-    <ProductCreateModal :open="showCreate"
-      @close="() => { showCreate = false }"
-      @created="handleCreated" />
   </div>
 </template>

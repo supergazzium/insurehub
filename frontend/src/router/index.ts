@@ -139,6 +139,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'account', name: 'user-account', component: UserAccount },
       { path: 'carriers', name: 'carriers', component: CarrierManagement, meta: { moduleKey: 'carriers' } },
       { path: 'products', name: 'products', component: ProductManagement, meta: { moduleKey: 'products' } },
+      { path: 'products/new', name: 'product-new', component: () => import('../pages/products/ProductCreatePage.vue'), meta: { moduleKey: 'products' } },
+      { path: 'products/:id/edit', name: 'product-edit', component: () => import('../pages/products/ProductDetailPage.vue'), meta: { moduleKey: 'products' } },
       { path: 'contracts', name: 'contracts', component: ContractManagement, meta: { moduleKey: 'contracts' } },
       { path: 'agents', name: 'agents', component: AgentList, meta: { moduleKey: 'agents' } },
       { path: 'agents/hierarchy', name: 'agents-hierarchy', component: AgentHierarchy, meta: { moduleKey: 'agents' } },
