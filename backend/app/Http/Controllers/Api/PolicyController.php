@@ -853,7 +853,7 @@ class PolicyController extends ApiController
             $sentToAgent = true;
         } else {
             throw ValidationException::withMessages([
-                'email' => ['Neither the customer nor the writing agent has an email on file.'],
+                'email' => ['ไม่มีอีเมลของลูกค้าหรือตัวแทนในระบบ จึงส่งแจ้งเตือนไม่ได้'],
             ]);
         }
 

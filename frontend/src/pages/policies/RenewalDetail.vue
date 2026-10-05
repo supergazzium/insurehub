@@ -201,6 +201,21 @@ function eventLabel(type: string): string {
   }
   return map[type] ?? type
 }
+// Channel code → Thai label for contact events.
+const CONTACT_CHANNEL: Record<string, string> = {
+  phone: 'โทรศัพท์', line: 'LINE', email: 'อีเมล', inperson: 'พบตัว', other: 'อื่นๆ',
+}
+// Human-readable detail of an event's payload — e.g. channel + note for a
+// contact touchpoint (#49: let the operator read what was logged, not just
+// that something was logged).
+function eventDetail(e: PolicyEventRow): string {
+  const p = e.payload
+  if (!p) return ''
+  const parts: string[] = []
+  if (typeof p.channel === 'string' && p.channel) parts.push(CONTACT_CHANNEL[p.channel] ?? p.channel)
+  if (typeof p.note === 'string' && p.note.trim()) parts.push(p.note.trim())
+  return parts.join(' · ')
+}
 const money = (n: number | null | undefined) =>
   n == null ? '—' : n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
@@ -319,6 +334,14 @@ onMounted(load)
 
       <!-- Action bar --------------------------------------------------------- -->
       <div class="mb-4 rounded-lg border border-slate-200 bg-white p-4">
+        <!-- Action result banner (#50) — previously the notice/contact result
+             was set but never shown, so the buttons felt like they did nothing. -->
+        <div v-if="actions.msg.value"
+          :class="['mb-3 rounded px-3 py-2 text-xs',
+            actions.msg.value.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700']">
+          <i :class="['pi text-[10px]', actions.msg.value.ok ? 'pi-check-circle' : 'pi-exclamation-circle']" />
+          {{ actions.msg.value.text }}
+        </div>
         <div class="mb-3 flex flex-wrap items-center gap-2">
           <span class="text-xs font-medium text-slate-500">การดำเนินการ:</span>
           <button v-if="nextAction && ACTION_PANEL[nextAction.action]" type="button"
@@ -586,6 +609,7 @@ onMounted(load)
                 <span class="mt-0.5 h-1.5 w-1.5 shrink-0 rounded-full bg-sky-400" />
                 <div>
                   <div class="text-slate-700">{{ eventLabel(e.type) }}</div>
+                  <div v-if="eventDetail(e)" class="text-[11px] text-slate-600">{{ eventDetail(e) }}</div>
                   <div class="text-[10px] text-slate-400">{{ fmtDate(e.at) }}</div>
                 </div>
               </li>
