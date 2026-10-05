@@ -35,6 +35,10 @@ function applyAddress(field: string, value: string | null): void {
 
 const loading = ref(false)
 const saving = ref(false)
+// View-before-edit (#21): in edit mode the form opens read-only; the operator
+// must click "แก้ไข" to unlock the data fields. Create mode is always editable.
+const editing = ref(false)
+const locked = computed(() => isEdit.value && !editing.value)
 const error = ref<string | null>(null)
 const ranks = ref<RankRow[]>([])
 const progress = ref<LevelProgress | null>(null)
@@ -200,6 +204,8 @@ async function submit(): Promise<void> {
   } finally { saving.value = false }
 }
 function cancel(): void { router.push({ name: 'agents' }) }
+// Leave edit mode and discard unsaved changes by re-loading the saved values.
+function cancelEdit(): void { editing.value = false; error.value = null; void load() }
 function goAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
 
 // ── Status actions (approve / deactivate) — edit mode only ─────────────────
@@ -276,6 +282,10 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           </p>
         </div>
         <div v-if="isEdit" class="flex shrink-0 gap-2">
+          <!-- View mode: a single "แก้ไข" button unlocks the data fields (#21). -->
+          <button v-if="!editing" type="button" class="rounded bg-brand-600 px-3 py-1.5 text-xs text-white hover:bg-brand-700" @click="editing = true">
+            <i class="pi pi-pencil mr-1 text-[10px]" />แก้ไข
+          </button>
           <button v-if="approvalStatus === 'pending'" type="button" class="rounded bg-emerald-600 px-2.5 py-1.5 text-xs text-white disabled:opacity-50" :disabled="busy" @click="doApprove">อนุมัติ</button>
           <button v-if="approvalStatus === 'pending'" type="button" class="rounded border border-rose-300 px-2.5 py-1.5 text-xs text-rose-600 disabled:opacity-50" :disabled="busy" @click="doReject">ปฏิเสธ</button>
           <button type="button"
@@ -287,6 +297,11 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
       <div v-if="loading" class="py-16 text-center text-sm text-slate-400"><i class="pi pi-spin pi-spinner" /> กำลังโหลด…</div>
       <div v-else class="space-y-4">
         <div v-if="error" class="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{{ error }}</div>
+
+        <!-- Editable data sections — locked in view mode (#21). The display-only
+             relations/commission sections below stay outside so their navigation
+             links keep working. -->
+        <fieldset :disabled="locked" :class="['m-0 min-w-0 space-y-4 border-0 p-0', locked && 'opacity-70']">
 
         <!-- ข้อมูลพื้นฐาน -->
         <section class="rounded-lg border border-slate-200 bg-white p-4">
@@ -415,6 +430,9 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           </div>
         </section>
 
+        </fieldset>
+        <!-- /editable sections (fieldset 1) -->
+
         <!-- สายงาน — ต้นสาย & ลูกทีม (upline / downline at a glance) -->
         <section v-if="isEdit && relations" class="rounded-lg border border-slate-200 bg-white p-4">
           <h2 class="mb-3 text-sm font-semibold text-slate-700">สายงาน — ต้นสาย &amp; ลูกทีม</h2>
@@ -517,13 +535,15 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           <p class="mt-2 text-[10px] text-slate-400">ค่าคอมจากการขายเอง + ค่าแนะนำ/ส่วนต่างจากสายงานลูกทีม (คลิกเลขกรมธรรม์เพื่อเปิดกรมธรรม์)</p>
         </section>
 
-        <!-- หมายเหตุ + สถานะ -->
+        <!-- หมายเหตุ + สถานะ — editable, locked in view mode (#21) -->
+        <fieldset :disabled="locked" :class="['m-0 min-w-0 border-0 p-0', locked && 'opacity-70']">
         <section class="rounded-lg border border-slate-200 bg-white p-4">
           <FormField label="หมายเหตุ"><textarea v-model="form.notes" rows="2" class="ipt"></textarea></FormField>
           <label class="mt-2 flex items-center gap-2 text-xs text-slate-600">
             <input type="checkbox" v-model="form.active" class="h-4 w-4" /> เปิดใช้งาน (active)
           </label>
         </section>
+        </fieldset>
 
         <!-- ── Detail-only (edit mode): level progress + promotion history ─── -->
         <template v-if="isEdit">
@@ -588,8 +608,11 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           </section>
         </template>
 
-        <div class="flex justify-end gap-2">
-          <button type="button" class="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-50" @click="cancel">ยกเลิก</button>
+        <!-- Save/cancel only while editing (create mode is always editing). In
+             edit view mode the header "แก้ไข" button is the entry point (#21). -->
+        <div v-if="!locked" class="flex justify-end gap-2">
+          <button type="button" class="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
+            @click="isEdit ? cancelEdit() : cancel()">ยกเลิก</button>
           <button type="button" class="rounded bg-brand-600 px-4 py-1.5 text-sm text-white hover:bg-brand-700 disabled:opacity-50"
             :disabled="saving" @click="submit">
             <i :class="saving ? 'pi pi-spin pi-spinner' : 'pi pi-check'" class="mr-1 text-xs" />{{ isEdit ? 'บันทึก' : 'สร้างตัวแทน' }}
