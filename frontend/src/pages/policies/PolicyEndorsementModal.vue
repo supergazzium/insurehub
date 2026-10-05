@@ -10,6 +10,7 @@
 
 import { ref, computed, watch } from 'vue'
 import FormField from '../../components/FormField.vue'
+import MoneyInput from '../../components/MoneyInput.vue'
 import { useI18n } from 'vue-i18n'
 
 const { t } = useI18n()
@@ -205,8 +206,8 @@ const additionalTotal = computed<number>(() =>
               </div>
             </FormField>
             <FormField :label="t('endorsement.newPremium')" required errorKey="newAnnualPremium" :errors="errors">
-              <input type="number" min="0" step="0.01" v-model.number="newAnnualPremium"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="newAnnualPremium"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
             <FormField :label="t('endorsement.currentCoverage')">
               <div class="w-full border border-slate-100 bg-slate-50 rounded-lg px-3 py-1.5 text-sm text-slate-600">
@@ -214,8 +215,8 @@ const additionalTotal = computed<number>(() =>
               </div>
             </FormField>
             <FormField :label="t('endorsement.newCoverage')" :hint="t('endorsement.newCoverageHint')">
-              <input type="number" min="0" step="1" v-model.number="newCoverage"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="newCoverage"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
           </div>
         </div>
@@ -244,16 +245,16 @@ const additionalTotal = computed<number>(() =>
           <div class="text-sm font-medium text-slate-700">{{ t('endorsement.additionalSection') }}</div>
           <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
             <FormField :label="t('endorsement.additionalPremium')" required errorKey="additionalPremium" :errors="errors">
-              <input type="number" min="0" step="0.01" v-model.number="additionalPremium"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="additionalPremium"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
             <FormField :label="t('endorsement.additionalDuty')">
-              <input type="number" min="0" step="0.01" v-model.number="additionalDutyStamp"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="additionalDutyStamp"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
             <FormField :label="t('endorsement.additionalVat')">
-              <input type="number" min="0" step="0.01" v-model.number="additionalVat"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="additionalVat"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
           </div>
           <div class="flex justify-between text-sm font-medium text-slate-800 pt-1 border-t border-slate-100">

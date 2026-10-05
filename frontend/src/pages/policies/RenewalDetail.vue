@@ -14,6 +14,7 @@ import {
   renewalStageMeta, renewalNextAction, RENEWAL_PIPELINE,
 } from '../../utils/renewalStage'
 import { useRenewalActions } from '../../composables/useRenewalActions'
+import MoneyInput from '../../components/MoneyInput.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -471,11 +472,11 @@ onMounted(load)
           <!-- Figures -->
           <div class="grid grid-cols-2 gap-2 sm:grid-cols-3">
             <label class="text-[11px] text-slate-500">ทุนประกัน (บาท)
-              <input v-model.number="actions.prepareForm.value.coverageAmount" type="number" min="0"
-                class="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs" /></label>
+              <MoneyInput v-model="actions.prepareForm.value.coverageAmount"
+                :input-class="'mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs'" /></label>
             <label class="text-[11px] text-slate-500">เบี้ยประกัน (บาท)
-              <input v-model.number="actions.prepareForm.value.annualPremium" type="number" min="0"
-                class="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs" /></label>
+              <MoneyInput v-model="actions.prepareForm.value.annualPremium"
+                :input-class="'mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs'" /></label>
             <label class="text-[11px] text-slate-500">งวดการชำระเบี้ย
               <select v-model="actions.prepareForm.value.premiumMode"
                 class="mt-0.5 w-full rounded border border-slate-300 px-2 py-1 text-xs">

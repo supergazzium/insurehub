@@ -30,6 +30,7 @@ import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import FormField from '../../components/FormField.vue'
+import MoneyInput from '../../components/MoneyInput.vue'
 import DateInput from '../../components/DateInput.vue'
 import DurationChip from '../../components/DurationChip.vue'
 import RiskFieldRenderer from '../../components/RiskFieldRenderer.vue'
@@ -1785,8 +1786,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           />
         </FormField>
         <FormField :label="t('policyCreate.coverage')">
-          <input v-model.number="form.coverage" type="number" min="0" step="1"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.coverage"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
       </div>
 
@@ -1795,8 +1796,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
            ส่วนลดย้ายไปอยู่ Section เบี้ย + การชำระ. -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
         <FormField :label="t('policyCreate.totalPremium')">
-          <input v-model.number="form.grossPremiumInput" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.grossPremiumInput"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
           <p class="text-[10px] text-slate-500 mt-1">
             <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.totalPremiumHint') }}
           </p>
@@ -1935,23 +1936,20 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
 
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <FormField :label="t('policyCreate.netPremium')" required>
-          <input v-model.number="form.netPremium" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.netPremium"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.dutyStamp')">
-          <input v-model.number="form.dutyStamp" type="number" min="0" step="0.01"
-            @change="touched.dutyStamp = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.dutyStamp" @update:model-value="touched.dutyStamp = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.vat')">
-          <input v-model.number="form.vat" type="number" min="0" step="0.01"
-            @change="touched.vat = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.vat" @update:model-value="touched.vat = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.totalPremiumPaid')">
-          <input v-model.number="form.totalPremiumPaid" type="number" min="0" step="0.01"
-            @change="touched.totalPremiumPaid = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.totalPremiumPaid" @update:model-value="touched.totalPremiumPaid = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
       </div>
 
@@ -1963,21 +1961,19 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-5 mb-2 pt-4 border-t border-slate-100">{{ t('policyCreate.discountWhtGroup') }}</h3>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <FormField :label="t('policyCreate.discountAmount')">
-          <input v-model.number="form.discountAmount" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.discountAmount"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.whtAmt')">
-          <input v-model.number="form.whtAmt" type="number" min="0" step="0.01"
-            @change="touched.whtAmt = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.whtAmt" @update:model-value="touched.whtAmt = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
           <p class="text-[10px] text-slate-500 mt-1">
             <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.whtHint') }}
           </p>
         </FormField>
         <FormField :label="t('policyCreate.netCustomerPaid')">
-          <input v-model.number="form.netCustomerPaid" type="number" min="0" step="0.01"
-            @change="touched.netCustomerPaid = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.netCustomerPaid" @update:model-value="touched.netCustomerPaid = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
       </div>
 
@@ -2012,8 +2008,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <!-- พ.ร.บ. — motor products only (compulsory motor insurance); billed
              in full on งวด 1. Hidden for non-motor where it doesn't apply. -->
         <FormField v-if="kind === 'motor'" label="พ.ร.บ. (compulsory)">
-          <input v-model.number="form.compulsoryPremium" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.compulsoryPremium"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
       </div>
 
@@ -2114,9 +2110,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
               </div>
             </FormField>
             <FormField :label="t('policyCreate.commissionAmount')">
-              <input v-model.number="form.commCarrierToHubAmount" @change="touched.commCarrierToHubAmount = true"
-                type="number" min="0" step="0.01"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="form.commCarrierToHubAmount" @update:model-value="touched.commCarrierToHubAmount = true"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
           </div>
         </div>
@@ -2136,9 +2131,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
               </div>
             </FormField>
             <FormField :label="t('policyCreate.commissionAmount')">
-              <input v-model.number="form.commHubToAgentAmount" @change="touched.commHubToAgentAmount = true"
-                type="number" min="0" step="0.01"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="form.commHubToAgentAmount" @update:model-value="touched.commHubToAgentAmount = true"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
           </div>
         </div>

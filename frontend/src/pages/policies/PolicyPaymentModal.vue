@@ -17,6 +17,7 @@ import { createPolicyPayments } from '../../api/policies'
 import { ApiError } from '../../api/client'
 import { decomposeByFormula, type PremiumParts, type TaxFormula } from '../../utils/premiumBreakdown'
 import { calcInstallment, INSTALLMENT_MODES, type InstallmentMode, type InstallmentResult } from '../../utils/installmentCalc'
+import MoneyInput from '../../components/MoneyInput.vue'
 
 /** Expected (computed) premium numbers passed in from the wizard. */
 export interface ExpectedPremium {
@@ -58,7 +59,7 @@ const saveError = ref<string | null>(null)
 // Mode A/B/C decides who bears fee + interest. Defaults from the policy,
 // overridable here. พ.ร.บ. is billed on งวด 1 only.
 const instMode = ref<InstallmentMode>('A')
-const instCompulsory = ref<number>(0)
+const instCompulsory = ref<number | null>(0)
 const instCount = ref<number>(2)
 
 // ── Tax formula (สูตร 1-4) for decomposing the ACTUAL paid amount ──────────
@@ -428,8 +429,8 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
             </div>
             <div>
               <label class="block text-[10px] text-slate-500 mb-0.5">พ.ร.บ. (งวดแรก)</label>
-              <input v-model.number="instCompulsory" type="number" min="0" step="0.01"
-                class="w-full border border-slate-300 rounded-md px-2 py-1 text-xs" />
+              <MoneyInput v-model="instCompulsory"
+                :input-class="'w-full border border-slate-300 rounded-md px-2 py-1 text-xs'" />
             </div>
           </div>
           <p class="mt-1 text-[10px] text-slate-500">
@@ -466,8 +467,8 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
             <div class="grid grid-cols-2 sm:grid-cols-4 gap-3">
               <div>
                 <label class="block text-[10px] text-slate-400 mb-0.5">ยอดเงิน (บาท)</label>
-                <input v-model.number="rows[0].amount" type="number" min="0" step="0.01" placeholder="0.00"
-                  class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                <MoneyInput v-model="rows[0].amount" placeholder="0.00"
+                  :input-class="'w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400'" />
               </div>
               <div>
                 <label class="block text-[10px] text-slate-400 mb-0.5">วันที่</label>
@@ -531,13 +532,13 @@ const PAY_MODES: { value: PayMode; label: string }[] = [
               <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2.5">
                 <div>
                   <label class="block text-[10px] text-slate-400 mb-0.5">ยอดที่ต้องชำระ</label>
-                  <input v-model.number="row.expected" type="number" min="0" step="0.01" placeholder="0.00"
-                    class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                  <MoneyInput v-model="row.expected" placeholder="0.00"
+                    :input-class="'w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400'" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-slate-400 mb-0.5">ยอดชำระจริง</label>
-                  <input v-model.number="row.amount" type="number" min="0" step="0.01" placeholder="0.00"
-                    class="w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400" />
+                  <MoneyInput v-model="row.amount" placeholder="0.00"
+                    :input-class="'w-full border border-slate-200 rounded-md px-2 py-1 text-sm focus:outline-none focus:border-brand-400'" />
                 </div>
                 <div>
                   <label class="block text-[10px] text-slate-400 mb-0.5">วันที่</label>
