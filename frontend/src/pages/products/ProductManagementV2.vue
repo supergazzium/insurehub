@@ -5,6 +5,7 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useProductStore } from '../../stores/products'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
+import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -87,6 +88,16 @@ const filteredCarriers = computed<CarrierListRow[]>(() =>
     ? carriers.value
     : carriers.value.filter((c) => c.insureType === filters.insureType),
 )
+
+// Options for the searchable carrier filter (#18 — type to search by code /
+// name). Leading "ทั้งหมด" clears the filter.
+const carrierOptions = computed<SearchOption[]>(() => [
+  { value: '', label: 'ทั้งหมด' },
+  ...filteredCarriers.value.map((c) => ({
+    value: String(c.id),
+    label: `${c.code} — ${c.nicknameTh || c.name}`,
+  })),
+])
 
 // Product-group options mirror the create modal so the two flows use the
 // same vocabulary. When insureType is blank we show every group.
@@ -235,12 +246,7 @@ function fmtBaht(n: number | null): string {
       <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
         <div>
           <label class="text-xs font-medium text-slate-500 mb-1 block">บริษัทประกัน</label>
-          <select v-model="filters.carrierId" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
-            <option value="">ทั้งหมด</option>
-            <option v-for="c in filteredCarriers" :key="c.id" :value="c.id">
-              {{ c.code }} — {{ c.nicknameTh || c.name }}
-            </option>
-          </select>
+          <SearchSelect v-model="filters.carrierId" :options="carrierOptions" placeholder="พิมพ์ค้น (เช่น วิริยะ / VIB)" />
         </div>
         <div>
           <label class="text-xs font-medium text-slate-500 mb-1 block">Main / Rider</label>

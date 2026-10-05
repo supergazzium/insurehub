@@ -418,6 +418,11 @@ onMounted(async () => {
             <div class="text-xs text-slate-400">Name (Thai)</div>
             <EditableField entity="products" :id="product.id" field="name" :value="product.name" @update="v => apply('name', v)" />
           </div>
+          <!-- Product-knowledge note (#20). -->
+          <div class="md:col-span-4">
+            <div class="text-xs text-slate-400">หมายเหตุ / ความรู้ผลิตภัณฑ์</div>
+            <EditableField entity="products" :id="product.id" field="notes" type="textarea" :value="product.notes" @update="v => apply('notes', v)" />
+          </div>
         </div>
       </section>
 

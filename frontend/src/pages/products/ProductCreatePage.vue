@@ -139,6 +139,8 @@ const form = reactive({
   // a row.
   carrierToHubBands: [] as CommissionBandRow[],
   hubToAgentBands: [] as CommissionBandRow[],
+  // Free-text product-knowledge note (#20) — e.g. "PA ผู้สูงอายุ ซื้อได้ถึง 75".
+  notes: '',
 })
 
 /**
@@ -437,6 +439,7 @@ const payload = computed(() => {
     category: form.category.trim() || null,
     subCategory: form.subCategory.trim() || null,
     commissionTierId: form.commissionTierId ? Number(form.commissionTierId) : null,
+    notes: form.notes.trim() || null,
     active: true,
   }
   // Age band is Life-only — omit for non-life so we don't persist stale
@@ -644,6 +647,13 @@ function cancel(): void {
           hint="ระบบเติมชื่อให้อัตโนมัติจากประเภทที่เลือก — แก้ [???] เป็นชื่อจริงได้เลย">
           <input v-model.trim="form.name" placeholder="ประกันสุขภาพ ..."
             @input="nameTouched = true"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <!-- Product-knowledge note (#20) — free text for selling notes,
+             age limits, package quirks, etc. -->
+        <FormField label="หมายเหตุ / ความรู้ผลิตภัณฑ์" class="col-span-2" error-key="notes" :errors="fieldErrors"
+          hint="เช่น PA ผู้สูงอายุ ซื้อได้ถึงอายุ 75 · ประกันกลุ่ม IPD/OPD — จดบันทึกความรู้ไว้ได้">
+          <textarea v-model.trim="form.notes" rows="3" placeholder="บันทึกความรู้/เงื่อนไขของผลิตภัณฑ์นี้ ..."
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
         <!-- Age band is a Life-only concept — motor / tax / non-motor
