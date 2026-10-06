@@ -52,10 +52,27 @@ class CarrierContactController extends ApiController
     {
         $sometimes = $isUpdate ? 'sometimes' : 'nullable';
         $rules = [
-            'firstName' => [$sometimes, 'string', 'max:120'],
+            // #8 — firstName doubles as "ชื่อ / แผนก" (a person OR a department
+            // like "Group motor"), so it accepts a longer free-text value.
+            'firstName' => [$sometimes, 'string', 'max:255'],
             'lastName' => [$sometimes, 'string', 'max:120'],
             'phone' => [$sometimes, 'string', 'max:32'],
-            'email' => [$sometimes, 'string', 'email', 'max:255'],
+            // #8 — email accepts ONE address or a comma-separated list
+            //   (e.g. "motor@aia.co.th, claims@aia.co.th"). Validate each part.
+            'email' => [$sometimes, 'string', 'max:1000', function ($attribute, $value, $fail) {
+                if ($value === null || $value === '') {
+                    return;
+                }
+                foreach (explode(',', (string) $value) as $part) {
+                    $part = trim($part);
+                    if ($part === '') {
+                        continue;
+                    }
+                    if (! filter_var($part, FILTER_VALIDATE_EMAIL)) {
+                        $fail("อีเมล \"{$part}\" ไม่ถูกต้อง");
+                    }
+                }
+            }],
             'isPrimary' => ['sometimes', 'boolean'],
             'sortOrder' => ['sometimes', 'integer', 'min:0'],
             'active' => ['sometimes', 'boolean'],

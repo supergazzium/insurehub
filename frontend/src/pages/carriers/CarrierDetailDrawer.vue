@@ -596,6 +596,23 @@ async function saveContact(c: CarrierContact, field: keyof CarrierContactPayload
   }
 }
 
+/** #8 — the merged "ชื่อ / แผนก" field writes the whole value to firstName and
+ *  clears any legacy lastName so it doesn't reappend on reload. */
+async function saveContactName(c: CarrierContact, value: string): Promise<void> {
+  if (!props.carrierId) return
+  contactSaveError.value = null
+  contactSavingId.value = c.id
+  try {
+    const res = await updateCarrierContact(props.carrierId, c.id, { firstName: value, lastName: '' } as CarrierContactPayload)
+    const i = contacts.value.findIndex((x) => x.id === c.id)
+    if (i >= 0) contacts.value[i] = res.data
+  } catch (e: unknown) {
+    contactSaveError.value = e instanceof ApiError ? e.message : 'Save failed'
+  } finally {
+    contactSavingId.value = null
+  }
+}
+
 async function addContact(): Promise<void> {
   if (!props.carrierId) return
   contactSaveError.value = null
@@ -1211,27 +1228,25 @@ function typeBadge(insureType: string): string {
             <table class="min-w-full text-sm">
               <thead class="bg-slate-50 text-xs text-slate-500 uppercase">
                 <tr>
-                  <th class="px-3 py-2 text-left">First name</th>
-                  <th class="px-3 py-2 text-left">Last name</th>
+                  <th class="px-3 py-2 text-left">ชื่อ / แผนก</th>
                   <th class="px-3 py-2 text-left">Phone</th>
-                  <th class="px-3 py-2 text-left">Email</th>
+                  <th class="px-3 py-2 text-left">Email (คั่นหลายอันด้วย ,)</th>
                   <th class="px-3 py-2 text-center">Primary</th>
                   <th class="px-3 py-2"></th>
                 </tr>
               </thead>
               <tbody class="divide-y divide-slate-100">
                 <tr v-if="!contacts.length && !contactAddingNew">
-                  <td class="px-3 py-3 text-slate-500 text-xs" colspan="6">No contacts yet — add one below.</td>
+                  <td class="px-3 py-3 text-slate-500 text-xs" colspan="5">No contacts yet — add one below.</td>
                 </tr>
                 <tr v-for="c in contacts" :key="c.id" :class="{ 'opacity-60': contactSavingId === c.id }">
                   <td class="px-3 py-2">
-                    <input :value="c.firstName" lang="th"
-                      @change="e => saveContact(c, 'firstName', (e.target as HTMLInputElement).value)"
-                      class="w-full border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
-                  </td>
-                  <td class="px-3 py-2">
-                    <input :value="c.lastName" lang="th"
-                      @change="e => saveContact(c, 'lastName', (e.target as HTMLInputElement).value)"
+                    <!-- #8 — single "ชื่อ / แผนก" field: a person's name OR a
+                         department label like "Group motor". Bound to firstName;
+                         any legacy lastName is shown appended but not editable. -->
+                    <input :value="[c.firstName, c.lastName].filter(Boolean).join(' ')" lang="th"
+                      placeholder="ชื่อผู้ติดต่อ หรือ ชื่อแผนก"
+                      @change="e => saveContactName(c, (e.target as HTMLInputElement).value)"
                       class="w-full border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
                   </td>
                   <td class="px-3 py-2">
@@ -1249,7 +1264,8 @@ function typeBadge(insureType: string): string {
                   </td>
                   <td class="px-3 py-2">
                     <div class="flex items-center gap-1">
-                      <input :value="c.email" type="email"
+                      <input :value="c.email" type="text" inputmode="email"
+                        placeholder="a@x.com, b@x.com"
                         @change="e => saveContact(c, 'email', (e.target as HTMLInputElement).value)"
                         class="flex-1 border border-transparent hover:border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
                       <button type="button" class="text-slate-400 hover:text-brand-600 p-1 shrink-0"
@@ -1272,11 +1288,7 @@ function typeBadge(insureType: string): string {
                 </tr>
                 <tr class="bg-slate-50/50">
                   <td class="px-3 py-2">
-                    <input v-model.trim="newContact.firstName" placeholder="ชื่อ" lang="th"
-                      class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
-                  </td>
-                  <td class="px-3 py-2">
-                    <input v-model.trim="newContact.lastName" placeholder="นามสกุล" lang="th"
+                    <input v-model.trim="newContact.firstName" placeholder="ชื่อผู้ติดต่อ หรือ ชื่อแผนก" lang="th"
                       class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
                   </td>
                   <td class="px-3 py-2">
@@ -1284,7 +1296,7 @@ function typeBadge(insureType: string): string {
                       class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none font-mono" />
                   </td>
                   <td class="px-3 py-2">
-                    <input v-model.trim="newContact.email" placeholder="name@example.com" type="email"
+                    <input v-model.trim="newContact.email" placeholder="a@x.com, b@x.com" type="text" inputmode="email"
                       class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
                   </td>
                   <td class="px-3 py-2 text-center">
