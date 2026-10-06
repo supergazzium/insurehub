@@ -37,9 +37,14 @@ const INSURE_TYPE_OPTIONS = [
   { value: 'tax', label: 'Tax' },
 ]
 
+// #12 — Sub-type is stored as a legacy single-letter code: "F" = Direct
+// (InsureHub deals with the carrier directly), "P" = Partner (via a broker /
+// partner). The DB holds F/P, so the dropdown's VALUES must be F/P too —
+// otherwise a carrier like MSIG (sub_type="F") matches no option and the UI
+// shows the bare "F" the operator asked about. Labels spell out the meaning.
 const SUB_TYPE_OPTIONS = [
-  { value: 'direct', label: 'Direct' },
-  { value: 'partner', label: 'Partner' },
+  { value: 'F', label: 'Direct (F)' },
+  { value: 'P', label: 'Partner (P)' },
 ]
 
 const { t } = useI18n()
@@ -766,7 +771,7 @@ function typeBadge(insureType: string): string {
               <EditableField entity="carriers" :id="carrier.id" field="code" :value="carrier.code" @update="v => apply('code', v)" /></div>
             <div><div class="text-xs text-slate-400">Type</div>
               <EditableField entity="carriers" :id="carrier.id" field="type" type="select" :options="INSURE_TYPE_OPTIONS" :value="carrier.insureType" @update="v => apply('insureType', v)" /></div>
-            <div><div class="text-xs text-slate-400">Sub-type</div>
+            <div><div class="text-xs text-slate-400">Sub-type <span class="text-slate-300">· F = Direct, P = Partner</span></div>
               <EditableField entity="carriers" :id="carrier.id" field="subType" type="select" :options="SUB_TYPE_OPTIONS" :value="carrier.subType" @update="v => apply('subType', v)" /></div>
             <div><div class="text-xs text-slate-400">OIC Insurance Code</div>
               <EditableField entity="carriers" :id="carrier.id" field="oicInsureComCode" :value="carrier.oicInsureComCode" @update="v => apply('oicInsureComCode', v)" /></div>

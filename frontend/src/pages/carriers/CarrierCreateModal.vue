@@ -88,12 +88,13 @@ watch(
           <input v-model.trim="form.nicknameTh"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
-        <FormField label="Sub-type" error-key="subType" :errors="fieldErrors">
+        <FormField label="Sub-type" error-key="subType" :errors="fieldErrors"
+          hint="F = Direct (ดีลตรงกับบริษัทประกัน) · P = Partner (ผ่านพาร์ทเนอร์/โบรกเกอร์)">
           <select v-model="form.subType"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
             <option value="">—</option>
-            <option value="direct">Direct</option>
-            <option value="partner">Partner</option>
+            <option value="F">Direct (F)</option>
+            <option value="P">Partner (P)</option>
           </select>
         </FormField>
         <FormField label="OIC Insurance Code" error-key="oicInsureComCode" :errors="fieldErrors" hint="Regulator (คปภ.) company code.">
