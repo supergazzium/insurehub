@@ -29,6 +29,18 @@ const summary = ref<ExpiringSoonSummary>({ totalInWindow: 0, urgentCount: 0 })
 const loading = ref(false)
 const error = ref<string | null>(null)
 
+// #48 — rows after the client-side renewal-stage filters (stage dropdown +
+// hide-renewed toggle). renewalStage is derived server-side per row, so the
+// filtering happens here. Both the table and the board read displayRows.
+const displayRows = computed<ExpiringPolicy[]>(() =>
+  rows.value.filter((r) => {
+    const stage = (r.renewalStage ?? 'not_started') as RenewalStage
+    if (filters.renewalStage && stage !== filters.renewalStage) return false
+    if (filters.hideRenewed && stage === 'renewed') return false
+    return true
+  }),
+)
+
 // ── View mode: table (default) or kanban board grouped by renewal stage ──
 const viewMode = ref<'table' | 'board'>('table')
 
@@ -43,7 +55,7 @@ const boardColumns = computed(() => {
     not_started: [], contacted: [], quote_requested: [], quote_received: [],
     quote_prepared: [], quote_sent: [], renewed: [], declined: [], expired: [],
   }
-  for (const r of rows.value) {
+  for (const r of displayRows.value) {
     const stage = (r.renewalStage ?? 'not_started') as RenewalStage
     ;(buckets[stage] ?? buckets.not_started).push(r)
   }
@@ -73,6 +85,12 @@ const filters = reactive({
   writingAgentId: '',
   productType: '',
   insureType: '' as '' | 'life' | 'non-life' | 'tax',
+  // #48 — renewal-stage filter. renewalStage is a derived field (not a stored
+  // column), so this filters the loaded rows client-side. '' = every stage.
+  renewalStage: '' as '' | RenewalStage,
+  // #48 — "ต่ออายุไปแล้วน่าจะไม่ต้องแสดงแล้ว": default-hide rows already
+  // renewed so the queue shows only what still needs work. Off shows them.
+  hideRenewed: true,
 })
 const page = ref<number>(1)
 const perPage = ref<number>(50)
@@ -290,13 +308,16 @@ const productTypeOptions = computed<Option[]>(() => {
 // Clear-filters UX
 const hasActiveFilters = computed(() =>
   filters.q !== '' || filters.carrierId !== '' || filters.productId !== '' ||
-  filters.writingAgentId !== '' || filters.productType !== '' || filters.insureType !== '',
+  filters.writingAgentId !== '' || filters.productType !== '' || filters.insureType !== '' ||
+  // #48 — a stage pick, or un-hiding renewed (non-default), counts as active.
+  filters.renewalStage !== '' || filters.hideRenewed !== true,
 )
 function clearFilters(): void {
   filters.q = ''
   filters.carrierId = ''; filters.productId = ''
   filters.writingAgentId = ''
   filters.productType = ''; filters.insureType = ''
+  filters.renewalStage = ''; filters.hideRenewed = true
   applyPreset(60)
   // A cleared filter shouldn't carry a stale multi-page selection.
   clearSelection()
@@ -427,19 +448,20 @@ function isSelected(id: string): boolean {
   return selected.value.has(id)
 }
 // Are all rows on the current page in the selection? Used for the
-// header-row "select all on page" checkbox tri-state.
+// header-row "select all on page" checkbox tri-state. Operates on the
+// VISIBLE (filtered) rows so hidden/renewed rows are never bulk-selected (#48).
 const allOnPageSelected = computed(() =>
-  rows.value.length > 0 && rows.value.every((r) => selected.value.has(r.policyId)),
+  displayRows.value.length > 0 && displayRows.value.every((r) => selected.value.has(r.policyId)),
 )
 const someOnPageSelected = computed(() =>
-  !allOnPageSelected.value && rows.value.some((r) => selected.value.has(r.policyId)),
+  !allOnPageSelected.value && displayRows.value.some((r) => selected.value.has(r.policyId)),
 )
 function toggleAllOnPage(): void {
   const next = new Set(selected.value)
   if (allOnPageSelected.value) {
-    for (const r of rows.value) next.delete(r.policyId)
+    for (const r of displayRows.value) next.delete(r.policyId)
   } else {
-    for (const r of rows.value) next.add(r.policyId)
+    for (const r of displayRows.value) next.add(r.policyId)
   }
   selected.value = next
 }
@@ -794,10 +816,28 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
         </div>
 
         <!-- Writing-agent filter (searchable) -->
-        <div class="md:col-span-4">
+        <div class="md:col-span-2">
           <label class="text-xs font-medium text-slate-500 mb-1 block">ตัวแทน (ผู้เขียนกรมธรรม์)</label>
           <SearchSelect v-model="filters.writingAgentId" :options="agentOptions"
             placeholder="พิมพ์เพื่อค้นหาตัวแทน…" />
+        </div>
+
+        <!-- #48 — renewal-stage filter + hide-renewed toggle -->
+        <div class="md:col-span-1">
+          <label class="text-xs font-medium text-slate-500 mb-1 block">สถานะต่ออายุ</label>
+          <select v-model="filters.renewalStage" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+            <option value="">ทั้งหมด</option>
+            <option v-for="s in RENEWAL_PIPELINE" :key="s" :value="s">{{ renewalStageMeta(s).label }}</option>
+            <option value="declined">{{ renewalStageMeta('declined').label }}</option>
+            <option value="expired">{{ renewalStageMeta('expired').label }}</option>
+          </select>
+        </div>
+        <div class="md:col-span-1 flex items-end">
+          <label class="flex items-center gap-1.5 text-xs text-slate-600 cursor-pointer select-none pb-1.5">
+            <input type="checkbox" v-model="filters.hideRenewed"
+              class="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            ซ่อนที่ต่ออายุแล้ว
+          </label>
         </div>
       </div>
     </section>
@@ -806,6 +846,10 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
       <div class="card p-4">
         <div class="text-xs uppercase tracking-wider text-slate-400">รวมทั้งหมด (ตามฟิลเตอร์)</div>
         <div class="text-2xl font-semibold text-slate-900 mt-1">{{ summary.totalInWindow.toLocaleString() }}</div>
+        <!-- #48 — when a stage filter hides some loaded rows, show what's visible. -->
+        <div v-if="displayRows.length !== rows.length" class="text-xs text-brand-600 mt-0.5">
+          แสดง {{ displayRows.length.toLocaleString() }} รายการ (กรองตามสถานะ)
+        </div>
         <div class="text-xs text-slate-500 mt-1">{{ windowLabel }}</div>
       </div>
       <button type="button" @click="applyUrgent"
@@ -894,7 +938,7 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="r in rows" :key="r.policyId"
+            <tr v-for="r in displayRows" :key="r.policyId"
               :class="['hover:bg-slate-50 cursor-pointer', isSelected(r.policyId) ? 'bg-brand-50/40' : '']"
               @click="openRenewalDetail(r.policyId)">
               <td class="px-3 py-2 w-8" @click.stop>
@@ -936,8 +980,13 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
                 </div>
               </td>
             </tr>
-            <tr v-if="!loading && rows.length === 0">
-              <td colspan="9" class="px-4 py-6 text-center text-slate-500">ไม่พบกรมธรรม์ที่จะครบกำหนดในช่วงเวลานี้</td>
+            <tr v-if="!loading && displayRows.length === 0">
+              <td colspan="9" class="px-4 py-6 text-center text-slate-500">
+                <template v-if="rows.length > 0">
+                  ไม่มีกรมธรรม์ตรงกับตัวกรองสถานะ — ลองล้างตัวกรอง หรือเปิด "ต่ออายุแล้ว"
+                </template>
+                <template v-else>ไม่พบกรมธรรม์ที่จะครบกำหนดในช่วงเวลานี้</template>
+              </td>
             </tr>
           </tbody>
         </table>
