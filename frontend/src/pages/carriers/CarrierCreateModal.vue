@@ -58,7 +58,7 @@ watch(
 <template>
   <CreateModal
     :open="open" entity="carriers" title="New Carrier"
-    :payload="payload" :can-submit="canSubmit"
+    :payload="payload" :can-submit="canSubmit" :hide-add-another="true"
     @close="emit('close')" @created="emit('created')"
   >
     <template #default="{ fieldErrors }">
@@ -100,8 +100,9 @@ watch(
           <input v-model.trim="form.oicInsureComCode" placeholder="e.g. 2014"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
-        <FormField label="Company Insure Code" error-key="compInsureCode" :errors="fieldErrors" hint="Internal / company-issued insurer code.">
-          <input v-model.trim="form.compInsureCode"
+        <FormField label="Company Insure Code" error-key="compInsureCode" :errors="fieldErrors"
+          hint="รหัสบริษัทประกันที่ InsureHub กำหนดใช้ภายใน (ต่างจากรหัส คปภ. ด้านซ้าย)">
+          <input v-model.trim="form.compInsureCode" placeholder="เช่น VIB, AIA"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
         <FormField label="Tax ID" error-key="taxId" :errors="fieldErrors">

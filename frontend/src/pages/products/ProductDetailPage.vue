@@ -161,6 +161,42 @@ function removeBand(kind: 'carrierToHub' | 'hubToAgent', i: number): void {
   if (kind === 'carrierToHub') carrierToHubBands.value = carrierToHubBands.value.filter((_, j) => j !== i)
   else hubToAgentBands.value = hubToAgentBands.value.filter((_, j) => j !== i)
 }
+
+/**
+ * #17 — "ดูดค่าคอมจากด้านบน": fill the InsureHub → Agent rates from the
+ * Carrier → InsureHub rates. Default agent split: year 1 = 80%, year 2+ = 70%.
+ */
+const AGENT_YR1_FACTOR = 0.8
+const AGENT_YR2UP_FACTOR = 0.7
+function agentPct(carrier: number | null, firstYear: boolean): number | null {
+  if (carrier === null || Number.isNaN(carrier)) return null
+  const factor = firstYear ? AGENT_YR1_FACTOR : AGENT_YR2UP_FACTOR
+  return Math.round(carrier * factor * 100) / 100
+}
+function pullAgentFromCarrier(): void {
+  if (commissionScheme.value === 'flat') {
+    Object.assign(hubToAgent, blankPanel(), { flatRate: agentPct(carrierToHub.flatRate, true) })
+  } else {
+    hubToAgentBands.value = carrierToHubBands.value.map((b) => ({
+      sumAssuredMin: b.sumAssuredMin,
+      sumAssuredMax: b.sumAssuredMax,
+      entryAgeMin: b.entryAgeMin,
+      entryAgeMax: b.entryAgeMax,
+      yr1: agentPct(b.yr1, true),
+      yr2: agentPct(b.yr2, false),
+      yr3: agentPct(b.yr3, false),
+      yr4: agentPct(b.yr4, false),
+      yr5: agentPct(b.yr5, false),
+      yr6Up: agentPct(b.yr6Up, false),
+    }))
+  }
+}
+const canPullAgent = computed<boolean>(() => {
+  if (commissionScheme.value === 'flat') {
+    return carrierToHub.flatRate !== null && !Number.isNaN(carrierToHub.flatRate)
+  }
+  return carrierToHubBands.value.length > 0
+})
 const savingRates = ref(false)
 const rateSaveError = ref<string | null>(null)
 const rateSaveFlash = ref<string | null>(null)
@@ -449,9 +485,18 @@ onMounted(async () => {
       <!-- Commission rates — two-panel editor. Right panel (hub→agent)
            feeds the MGM engine. -->
       <section class="card p-4">
-        <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Commission rates</h3>
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <h3 class="text-xs uppercase tracking-wider text-slate-400">Commission rates</h3>
+          <button type="button" :disabled="!canPullAgent" @click="pullAgentFromCarrier"
+            title="คัดลอกค่าคอมบริษัท → InsureHub มาเป็นค่าคอม Agent (ปีแรก 80%, ปีถัดไป 70%)"
+            class="shrink-0 px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 text-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+            <i class="pi pi-arrow-down text-[10px]" />
+            ดูดค่าคอมมาใส่ Agent
+          </button>
+        </div>
         <div class="text-xs text-slate-500 mb-3">
-          ค่าที่บันทึกที่นี่จะถูกใช้ในระบบ MGM แทนตารางบริษัท × ประเภทสินค้า
+          ค่าที่บันทึกที่นี่จะถูกใช้ในระบบ MGM แทนตารางบริษัท × ประเภทสินค้า ·
+          ปุ่ม "ดูดค่าคอม" ตั้งค่า Agent = ปีแรก 80% / ปีถัดไป 70% ของค่าคอมบริษัท (แก้ไขต่อได้)
         </div>
         <!-- Flat scheme (Non-Life, PA, Group, Tax): one % per direction. -->
         <div v-if="commissionScheme === 'flat'" class="grid grid-cols-2 gap-4">

@@ -31,6 +31,12 @@ const props = defineProps<{
    * should be impossible, not just gated by an alert. Defaults false.
    */
   hardBlock?: boolean
+  /**
+   * Hide the "บันทึกและเพิ่มอีก" (save & add another) button. Some entities
+   * (e.g. carriers) are created one-at-a-time, so the shortcut just adds
+   * noise. Defaults false (button shown).
+   */
+  hideAddAnother?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -143,7 +149,7 @@ watch(
             :disabled="saving" @click="emit('close')">
             Cancel
           </button>
-          <button type="button"
+          <button v-if="!hideAddAnother" type="button"
             class="px-3 py-1.5 rounded-lg border border-brand-500 text-brand-600 hover:bg-brand-50 text-sm disabled:opacity-50 disabled:cursor-not-allowed flex items-center gap-1.5"
             :disabled="(!canSubmit && !validate) || hardBlock || saving" @click="submit(true)"
             title="บันทึกแล้วเปิดฟอร์มใหม่โดยคงประเภทประกันและบริษัทไว้">

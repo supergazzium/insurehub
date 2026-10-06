@@ -369,6 +369,51 @@ function removeBand(direction: 'carrierToHubBands' | 'hubToAgentBands', index: n
   form[direction] = form[direction].filter((_, i) => i !== index)
 }
 
+/**
+ * #17 — "ดูดค่าคอมจากด้านบน": fill the InsureHub → Agent rates from the
+ * Carrier → InsureHub rates using the default agent split: year 1 = 80%
+ * of the carrier rate, year 2 onward = 70%. The operator can then tweak
+ * individual cells. Overwrites the whole agent panel/table.
+ */
+const AGENT_YR1_FACTOR = 0.8
+const AGENT_YR2UP_FACTOR = 0.7
+/** carrier % → agent % for a given year index; round to 2dp to avoid float noise. */
+function agentPct(carrier: number | null, firstYear: boolean): number | null {
+  if (carrier === null || Number.isNaN(carrier)) return null
+  const factor = firstYear ? AGENT_YR1_FACTOR : AGENT_YR2UP_FACTOR
+  return Math.round(carrier * factor * 100) / 100
+}
+function pullAgentFromCarrier(): void {
+  if (commissionScheme.value === 'flat') {
+    // Flat = single rate; treat as the standard (year-1) rate → ×80%.
+    form.hubToAgent = {
+      flatRate: agentPct(form.carrierToHub.flatRate, true),
+      yr1: null, yr2: null, yr3: null, yr4: null, yr5: null, yr6_10: null, yr11Up: null,
+    }
+  } else {
+    // Life banded — copy each carrier band's ranges, split the per-year rates.
+    form.hubToAgentBands = form.carrierToHubBands.map((b) => ({
+      sumAssuredMin: b.sumAssuredMin,
+      sumAssuredMax: b.sumAssuredMax,
+      entryAgeMin: b.entryAgeMin,
+      entryAgeMax: b.entryAgeMax,
+      yr1: agentPct(b.yr1, true),
+      yr2: agentPct(b.yr2, false),
+      yr3: agentPct(b.yr3, false),
+      yr4: agentPct(b.yr4, false),
+      yr5: agentPct(b.yr5, false),
+      yr6Up: agentPct(b.yr6Up, false),
+    }))
+  }
+}
+/** Whether the carrier side has any rate worth pulling (enables the button). */
+const canPullAgent = computed<boolean>(() => {
+  if (commissionScheme.value === 'flat') {
+    return form.carrierToHub.flatRate !== null && !Number.isNaN(form.carrierToHub.flatRate)
+  }
+  return form.carrierToHubBands.length > 0
+})
+
 const ageError = computed<string | null>(() => {
   const min = form.minAge
   const max = form.maxAge
@@ -685,9 +730,18 @@ function cancel(): void {
       DIRECT accrual. Left panel is for reporting / reconciliation.
     -->
     <section v-if="commissionScheme !== ''" class="card p-5">
-      <h2 class="font-semibold text-slate-900 mb-1">ค่าคอมมิชชั่นมาตรฐาน</h2>
+      <div class="flex items-start justify-between gap-3 mb-1">
+        <h2 class="font-semibold text-slate-900">ค่าคอมมิชชั่นมาตรฐาน</h2>
+        <button type="button" :disabled="!canPullAgent" @click="pullAgentFromCarrier"
+          title="คัดลอกค่าคอมบริษัท → InsureHub มาเป็นค่าคอม Agent (ปีแรก 80%, ปีถัดไป 70%)"
+          class="shrink-0 px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 text-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+          <i class="pi pi-arrow-down text-[10px]" />
+          ดูดค่าคอมมาใส่ Agent
+        </button>
+      </div>
       <div class="text-xs text-slate-500 mb-3">
-        เว้นว่างได้ — ค่าที่บันทึกจะถูกใช้ในระบบ MGM แทนตารางบริษัท×ประเภทสินค้า
+        เว้นว่างได้ — ค่าที่บันทึกจะถูกใช้ในระบบ MGM แทนตารางบริษัท×ประเภทสินค้า ·
+        ปุ่ม "ดูดค่าคอม" ตั้งค่า Agent = ปีแรก 80% / ปีถัดไป 70% ของค่าคอมบริษัท (แก้ไขต่อได้)
       </div>
       <!-- Flat scheme (Non-Life, PA, Group, Tax): one % per direction. -->
       <div v-if="commissionScheme === 'flat'" class="grid grid-cols-2 gap-4">
