@@ -335,9 +335,11 @@ function statusBadge(s: string): string {
         </div>
       </section>
 
-      <!-- Assignment -->
+      <!-- Assignment & registration — split from policy stats so each
+           block has a single clear meaning (#30). -->
       <section class="card p-5">
-        <h2 class="font-semibold text-slate-900 mb-3">การมอบหมาย</h2>
+        <h2 class="font-semibold text-slate-900 mb-1">ผู้ดูแลและการลงทะเบียน</h2>
+        <p class="text-xs text-slate-400 mb-3">ใครดูแลลูกค้ารายนี้ และข้อมูลการลงทะเบียน</p>
         <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
           <div>
             <div class="text-xs text-slate-400">ตัวแทนที่ดูแล</div>
@@ -351,11 +353,17 @@ function statusBadge(s: string): string {
           <div><div class="text-xs text-slate-400">สร้างโดย</div><div class="text-slate-900">{{ customer.createdByName || '—' }}</div></div>
           <div><div class="text-xs text-slate-400">วันที่ลงทะเบียน</div><div class="text-slate-900">{{ customer.registeredAt || '—' }}</div></div>
           <div><div class="text-xs text-slate-400">ติดต่อล่าสุด</div><div class="text-slate-900">{{ customer.lastContact || '—' }}</div></div>
-          <div><div class="text-xs text-slate-400">กรมธรรม์ที่ใช้งาน</div><div class="font-medium text-slate-900">{{ customer.activePolicyCount }}</div></div>
-          <div><div class="text-xs text-slate-400">กรมธรรม์ทั้งหมด</div><div class="text-slate-900">{{ customer.totalPolicyCount }}</div></div>
-          <div><div class="text-xs text-slate-400">สถานะ</div>
-            <span v-if="customer.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">ใช้งาน</span>
-            <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">ไม่ใช้งาน</span>
+        </div>
+
+        <div class="border-t border-slate-100 mt-4 pt-4">
+          <h3 class="text-sm font-medium text-slate-700 mb-3">สรุปกรมธรรม์และสถานะ</h3>
+          <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
+            <div><div class="text-xs text-slate-400">กรมธรรม์ที่ใช้งาน</div><div class="font-medium text-slate-900">{{ customer.activePolicyCount }}</div></div>
+            <div><div class="text-xs text-slate-400">กรมธรรม์ทั้งหมด</div><div class="text-slate-900">{{ customer.totalPolicyCount }}</div></div>
+            <div><div class="text-xs text-slate-400">สถานะลูกค้า</div>
+              <span v-if="customer.active" class="inline-flex px-2 py-0.5 rounded-md text-xs bg-emerald-50 text-emerald-700">ใช้งาน</span>
+              <span v-else class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">ไม่ใช้งาน</span>
+            </div>
           </div>
         </div>
       </section>

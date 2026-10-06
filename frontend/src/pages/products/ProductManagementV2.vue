@@ -290,7 +290,7 @@ function fmtBaht(n: number | null): string {
     <section class="card overflow-hidden">
       <div class="overflow-x-auto">
         <table class="min-w-full text-sm">
-          <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+          <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider sticky top-0 z-10 shadow-sm">
             <tr>
               <th class="px-4 py-2 text-left">Code</th>
               <th class="px-4 py-2 text-left">ชื่อสินค้า</th>
