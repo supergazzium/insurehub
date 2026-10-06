@@ -706,6 +706,16 @@ watch(() => form.premiumMode, (mode) => {
   form.installmentCount = INSTALLMENTS_BY_MODE[mode] ?? 1
 }, { immediate: true })
 
+// #43 — งวดการผ่อน (รายปี) ทำให้สับสน: the installment detail fields (count /
+// term / mode) only make sense when the policy is actually paid in
+// instalments. For "รายปี / จ่ายครั้งเดียว" (count = 1) they're noise, so we
+// hide them unless a sub-annual frequency is chosen OR the operator has set
+// more than one instalment.
+const hasInstallmentPlan = computed<boolean>(() =>
+  (form.premiumMode !== 'annual' && form.premiumMode !== 'single') ||
+  (Number(form.installmentCount) || 1) > 1,
+)
+
 // ── Premium recalc watchers (KEEP verbatim per B3 §9) ────────────────────
 // The Access-parity math: duty = 0.4% net, vat = 7% (net + duty), total =
 // net + duty + vat. Rounded to 2dp. Operator overrides win via touched flags.
@@ -1692,15 +1702,6 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand-400" />
         </FormField>
 
-        <!-- สถานะกรมธรรม์ — editable dropdown once the policy exists (draft or
-             beyond). Options queried from the policy_statuses lookup. -->
-        <FormField v-if="draftId" :label="t('policyCreate.statusLabel')" :hint="t('policyCreate.statusHint')">
-          <select v-model="form.status"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-            <option v-for="s in statusOptions" :key="s.code" :value="s.code">{{ s.nameTh }}</option>
-          </select>
-        </FormField>
-
         <FormField :label="t('policyCreate.customer')" required>
           <!-- Quick link to create a customer when search comes up empty.
                Opens the full-page form in a new tab; the created customer is
@@ -1734,6 +1735,17 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             :initial-label="agentPicked ? (`${agentPicked.firstName} ${agentPicked.lastName}`.trim() || agentPicked.agentCode) : ''"
             @picked="(r) => agentPicked = r as AgentListRow | null"
           />
+        </FormField>
+
+        <!-- #39 — สถานะกรมธรรม์ moved to the bottom of the section so the
+             data-entry flow runs identity → customer → agent → status without
+             the status dropdown interrupting mid-grid. Editable once the
+             policy exists (draft or beyond); options from policy_statuses. -->
+        <FormField v-if="draftId" :label="t('policyCreate.statusLabel')" :hint="t('policyCreate.statusHint')">
+          <select v-model="form.status"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option v-for="s in statusOptions" :key="s.code" :value="s.code">{{ s.nameTh }}</option>
+          </select>
         </FormField>
       </div>
     </section>
@@ -1993,6 +2005,11 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </div>
 
       <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-4 mb-2">{{ t('policyCreate.installment') }}</h3>
+      <!-- #43 — explain the งวด fields so "รายปี" doesn't read as an instalment. -->
+      <p class="text-[10px] text-slate-500 mb-2">
+        <i class="pi pi-info-circle mr-1" />เลือก "รายปี / จ่ายครั้งเดียว" = ชำระเต็มจำนวนครั้งเดียว (ไม่ใช่การผ่อน) ·
+        เลือกความถี่รายเดือน/ราย 3 เดือน/ราย 6 เดือน หรือใส่จำนวนงวด &gt; 1 เพื่อผ่อนชำระ
+      </p>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <FormField :label="t('policyCreate.premiumMode')">
           <select v-model="form.premiumMode"
@@ -2007,13 +2024,15 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <input v-model.number="form.installmentCount" type="number" min="1" max="60" step="1"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
-        <FormField :label="t('policyCreate.installmentTerm')">
+        <!-- #43 — term + mode only matter for an actual instalment plan; hidden
+             for รายปี / จ่ายครั้งเดียว to cut the confusion. -->
+        <FormField v-if="hasInstallmentPlan" :label="t('policyCreate.installmentTerm')">
           <input v-model.trim="form.installmentTerm" type="text"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
         <!-- Installment mode (A/B/C) — who bears fee + interest. Drives the
              payment modal's schedule. -->
-        <FormField label="รูปแบบการผ่อน (Mode)">
+        <FormField v-if="hasInstallmentPlan" label="รูปแบบการผ่อน (Mode)">
           <select v-model="form.installmentMode"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
             <option value="">— ไม่ระบุ —</option>
