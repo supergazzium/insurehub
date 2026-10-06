@@ -409,6 +409,25 @@ const VECTOR_YEAR_LABELS: Record<string, string> = {
  *  the vector grid vs the single rate+amount cards. */
 const isVectorScheme = computed(() => productDetail.value?.commissionRates?.scheme === 'life_years')
 
+// #45 — "ดึงแค่ปีปัจจุบันขึ้นมาแสดง ไม่ต้องให้กรอก 6 ปี": a life policy only
+// uses its CURRENT policy-year commission, so by default the vector grid
+// shows just that one row. The operator can expand to all six.
+const showAllVectorYears = ref(false)
+/** Map the policy-year ordinal (1,2,3,…) to its vector key; year ≥6 → yr_6_up. */
+const currentVectorYear = computed<typeof VECTOR_YEARS[number]>(() => {
+  const n = policyYear.value ?? 1
+  if (n <= 1) return 'yr_1'
+  if (n === 2) return 'yr_2'
+  if (n === 3) return 'yr_3'
+  if (n === 4) return 'yr_4'
+  if (n === 5) return 'yr_5'
+  return 'yr_6_up'
+})
+/** The rows the vector grid renders: just the current year unless expanded. */
+const visibleVectorYears = computed<readonly string[]>(() =>
+  showAllVectorYears.value ? VECTOR_YEARS : [currentVectorYear.value],
+)
+
 /** C-23: live warning when the insured age / sum-assured falls outside every
  *  RATED hub→agent commission band — the policy would accrue no agent
  *  commission. Computed from the same product data the grid uses; shown as a
@@ -2136,8 +2155,12 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="yr in VECTOR_YEARS" :key="yr" class="border-t border-slate-100">
-              <td class="py-1.5 pr-3 text-slate-600 whitespace-nowrap">{{ VECTOR_YEAR_LABELS[yr] }}</td>
+            <tr v-for="yr in visibleVectorYears" :key="yr"
+              :class="['border-t border-slate-100', yr === currentVectorYear ? 'bg-brand-50/40' : '']">
+              <td class="py-1.5 pr-3 text-slate-600 whitespace-nowrap">
+                {{ VECTOR_YEAR_LABELS[yr] }}
+                <span v-if="yr === currentVectorYear" class="ml-1 text-[10px] text-brand-600">(ปีนี้)</span>
+              </td>
               <!-- carrier → hub: rate % (editable) + amount (computed) -->
               <td class="py-1.5 px-3">
                 <div class="relative w-24">
@@ -2169,6 +2192,12 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             </tr>
           </tbody>
         </table>
+        <!-- #45 — by default only the current policy year shows; expand for all 6. -->
+        <button type="button" @click="showAllVectorYears = !showAllVectorYears"
+          class="mt-1 text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1">
+          <i :class="['pi text-[10px]', showAllVectorYears ? 'pi-chevron-up' : 'pi-chevron-down']" />
+          {{ showAllVectorYears ? 'ย่อ — แสดงเฉพาะปีปัจจุบัน' : 'แสดงค่าคอมทุกปี (6 ปี)' }}
+        </button>
       </div>
 
       <!-- Flat products: single rate + amount per direction. -->
