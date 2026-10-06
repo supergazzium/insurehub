@@ -219,9 +219,15 @@ async function loadCarriers(): Promise<void> {
     allCarriers.value = res.data
   } catch { /* silent — dropdown just empty */ }
 }
-async function loadProducts(): Promise<void> {
+// Load the plan dropdown's products for ONE carrier on demand. Loading all
+// 900 products up front (a) exceeded the old perPage:500 cap — silently
+// dropping 400 products so the plan filter was incomplete (#47) — and (b)
+// was wasteful since the dropdown only ever shows the selected carrier's
+// plans. Empty carrier → clear the list (productOptions returns [] anyway).
+async function loadProducts(carrierId: string): Promise<void> {
+  if (!carrierId) { allProducts.value = []; return }
   try {
-    const res = await fetchProductList({ perPage: 500, activeOnly: true })
+    const res = await fetchProductList({ carrierId, perPage: 500, activeOnly: true })
     allProducts.value = res.data
   } catch { /* silent — dropdown just empty */ }
 }
@@ -254,8 +260,12 @@ const agentOptions = computed<SearchOption[]>(() =>
     .sort((x, y) => x.label.localeCompare(y.label, 'th')),
 )
 const carrierOptions = computed<Option[]>(() => {
+  // Carrier API returns insureType capitalised ("Life"/"Non-Life"/"Tax")
+  // while the filter value is lowercase ("life"/…), so compare case-
+  // insensitively — otherwise the carrier dropdown comes up empty whenever
+  // an insure-type is selected (the #47 "filter ใช้ไม่ได้" bug).
   const src = filters.insureType
-    ? allCarriers.value.filter((c) => c.insureType === filters.insureType)
+    ? allCarriers.value.filter((c) => (c.insureType ?? '').toLowerCase() === filters.insureType)
     : allCarriers.value
   return src
     .map((c) => ({ id: c.id, label: `${c.code} — ${c.nicknameTh || c.name}` }))
@@ -294,7 +304,10 @@ function clearFilters(): void {
 
 // Cascading resets — carrier switch clears plan; insureType switch clears
 // carrier + plan + productType if they no longer make sense.
-watch(() => filters.carrierId, () => { filters.productId = '' })
+watch(() => filters.carrierId, (cid) => {
+  filters.productId = ''
+  void loadProducts(cid)   // reload the plan dropdown for the new carrier
+})
 watch(() => filters.insureType, () => {
   if (filters.carrierId && !carrierOptions.value.some((c) => c.id === filters.carrierId)) {
     filters.carrierId = ''
@@ -394,7 +407,9 @@ watch(
 onMounted(() => {
   restoreState()
   void loadCarriers()
-  void loadProducts()
+  // Restore the plan list for a persisted carrier so the dropdown isn't
+  // empty on first paint; otherwise it stays empty until a carrier is picked.
+  void loadProducts(filters.carrierId)
   void loadAgents()
   void load()
 })
