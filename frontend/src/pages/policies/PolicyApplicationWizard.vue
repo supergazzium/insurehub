@@ -722,6 +722,16 @@ const hasInstallmentPlan = computed<boolean>(() =>
 // net + duty + vat. Rounded to 2dp. Operator overrides win via touched flags.
 watch(() => form.netPremium, (net) => {
   if (!net || net <= 0) return
+  // #52 — when the OPERATOR edits เบี้ยสุทธิ (i.e. not during draft
+  // hydration), net becomes the source of truth again: clear the derived
+  // fields' `touched` flags so อากร / VAT / เบี้ยรวม recompute. Without this,
+  // a hydrated draft (which marks everything touched to protect saved values)
+  // would never recalc on edit — the "auto-cal ใช้ไม่ได้ ในหน้า Edit" bug.
+  if (!hydrating.value) {
+    touched.dutyStamp = false
+    touched.vat = false
+    touched.totalPremiumPaid = false
+  }
   if (!touched.dutyStamp) form.dutyStamp = Math.round(net * 0.004 * 100) / 100
   if (!touched.vat) form.vat = Math.round((net + (form.dutyStamp ?? 0)) * 0.07 * 100) / 100
   if (!touched.totalPremiumPaid) form.totalPremiumPaid = Math.round((net + form.dutyStamp + form.vat) * 100) / 100
@@ -751,6 +761,10 @@ watch(whtEnabled, (on) => {
 // ── ยอดสุทธิที่ต้องชำระ = รวมเบี้ยที่ต้องชำระ − ส่วนลด − ยอดหัก ณ ที่จ่าย.
 //    Auto unless edited. Recomputes when total / discount / wht changes.
 function recomputeNetCustomerPaid(): void {
+  // #52 — any operator-driven change to รวมเบี้ย / ส่วนลด / หัก ณ ที่จ่าย makes
+  // ยอดสุทธิ a derived value again, so drop its hydration `touched` flag and
+  // recompute. Skip during hydration so the saved value loads intact.
+  if (!hydrating.value) touched.netCustomerPaid = false
   if (touched.netCustomerPaid) return
   form.netCustomerPaid = Math.round(
     ((Number(form.totalPremiumPaid) || 0) - (Number(form.discountAmount) || 0) - (Number(form.whtAmt) || 0)) * 100,
