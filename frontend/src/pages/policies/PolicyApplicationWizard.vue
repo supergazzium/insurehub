@@ -720,12 +720,22 @@ watch(() => form.netPremium, (net) => {
 
 // ── ยอดหัก ณ ที่จ่าย (WHT) = (เบี้ยสุทธิ + อากรแสตมป์) × 1%. Auto unless the
 //    operator edits it. Recomputes when net or duty changes.
+// #37 — checkbox toggle: when OFF, WHT is forced to 0 and the field is locked;
+//       when ON, it auto-calcs (unless the operator typed a custom value).
 const WHT_RATE = 0.01
+const whtEnabled = ref(true)
 function recomputeWht(): void {
+  if (!whtEnabled.value) { form.whtAmt = 0; return }
   if (touched.whtAmt) return
   form.whtAmt = Math.round(((Number(form.netPremium) || 0) + (Number(form.dutyStamp) || 0)) * WHT_RATE * 100) / 100
 }
 watch(() => [form.netPremium, form.dutyStamp], recomputeWht)
+// Toggling the checkbox: OFF → zero + lock; ON → clear the manual flag and
+// recompute from the current premium so the auto value comes back.
+watch(whtEnabled, (on) => {
+  if (!on) { form.whtAmt = 0 }
+  else { touched.whtAmt = false; recomputeWht() }
+})
 
 // ── ยอดสุทธิที่ต้องชำระ = รวมเบี้ยที่ต้องชำระ − ส่วนลด − ยอดหัก ณ ที่จ่าย.
 //    Auto unless edited. Recomputes when total / discount / wht changes.
@@ -1827,9 +1837,10 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           :product-search-context="productSearchContext"
         />
 
-        <!-- สัญญาเพิ่มเติม (Riders) — always available, independent of the
-             product's risk schema (many products carry no rider field). -->
-        <div class="mt-4">
+        <!-- #38 — สัญญาเพิ่มเติม (Riders): เพิ่มได้เฉพาะประกันชีวิตเท่านั้น.
+             Riders are a life-insurance concept; non-life / tax products
+             don't carry them, so the whole block is gated on insureType. -->
+        <div v-if="form.insureType === 'Life'" class="mt-4">
           <div class="flex items-center justify-between mb-2">
             <h4 class="text-xs font-medium text-slate-600">
               {{ t('policyCreate.riders.title') }}
@@ -1965,8 +1976,12 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.whtAmt')">
-          <MoneyInput v-model="form.whtAmt" @update:model-value="touched.whtAmt = true"
-            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
+          <label class="flex items-center gap-1.5 text-xs text-slate-600 mb-1 cursor-pointer select-none">
+            <input type="checkbox" v-model="whtEnabled" class="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            หัก ณ ที่จ่าย (1%)
+          </label>
+          <MoneyInput v-model="form.whtAmt" :disabled="!whtEnabled" @update:model-value="touched.whtAmt = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 disabled:bg-slate-100 disabled:text-slate-400'" />
           <p class="text-[10px] text-slate-500 mt-1">
             <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.whtHint') }}
           </p>
@@ -2326,6 +2341,35 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
       </FormField>
     </section>
+
+    <!-- #44 — Bottom action bar: duplicates the header actions so the operator
+         can save right where they finish typing instead of scrolling back up. -->
+    <div class="flex items-center justify-end gap-2 pb-4">
+      <template v-if="isDraftMode">
+        <button type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
+          class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
+          <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
+        </button>
+        <button type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
+          class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
+          <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
+        </button>
+        <button type="button" @click="submitToCarrier" :disabled="saving"
+          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+          <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
+        </button>
+      </template>
+      <template v-else>
+        <button type="button" @click="startRenewal" :disabled="saving"
+          class="px-3 py-1.5 rounded-lg text-sm text-brand-700 border border-brand-300 hover:bg-brand-50 disabled:opacity-50">
+          <i class="pi pi-replay text-xs mr-1" /> {{ t('policyCreate.action.renew') }}
+        </button>
+        <button type="button" @click="savePolicyNow" :disabled="saving"
+          class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+          <i class="pi pi-check text-xs mr-1" /> {{ t('policyCreate.action.save') }}
+        </button>
+      </template>
+    </div>
 
     <!-- Payment modal (frontend-only skeleton). installmentCount prefills the
          ผ่อน rows; premiumMode label shown as the plan. -->
