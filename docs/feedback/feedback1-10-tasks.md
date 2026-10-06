@@ -81,7 +81,7 @@
 - [x] 🟢 **#39** ย้ายสถานะกรมธรรม์ไปล่างสุดของ section 1 — **เสร็จ** (`0f2e93c`)
 - [x] 🟢 **#40** ปุ่ม "+ ปี" (DurationChip: year presets + custom-year → คำนวณวันสิ้นสุด) — **มีอยู่แล้ว**
 - [x] 🟢 **#41** ตัวเงินทั้งระบบใส่ comma (MoneyInput 36 ช่อง) — **เสร็จ** (`3c66cb0`+`6861c5f`)
-- [ ] 🚧 **#42** **Rider** เป็น dropdown search — **ติด** (ยังไม่มี rider master list/catalog เป็น data source) ต้องปรึกษา
+- [x] 🟢 **#42** Rider เป็น searchable dropdown — ใช้ ProductSearchSelect filter carrier + insureType=life + mainRider=Rider (ดึง rider ของ product จริง, verified 47 rows MTL) — **เสร็จ** (`PENDING`)
 - [x] 🟢 **#43** งวดการผ่อน: hint "รายปี=จ่ายเต็ม ไม่ใช่ผ่อน" + ซ่อน term/mode เมื่อไม่ผ่อน — **เสร็จ** (`0f2e93c`)
 - [x] 🟢 **#44** ปุ่มบันทึกเพิ่มที่ล่างสุด (bottom action bar) — **เสร็จ** (`d5792c8`)
 - [ ] 💬 **#45** **ค่าคอมดึงจาก product อัตโนมัติ** (ไม่ต้องกรอก) + แสดงแค่ปีปัจจุบัน (ไม่ต้อง 6 ปี) — ลองดูก่อนแล้วมาคุย

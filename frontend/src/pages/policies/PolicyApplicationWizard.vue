@@ -35,6 +35,7 @@ import DateInput from '../../components/DateInput.vue'
 import DurationChip from '../../components/DurationChip.vue'
 import RiskFieldRenderer from '../../components/RiskFieldRenderer.vue'
 import EntityPicker from '../../components/EntityPicker.vue'
+import ProductSearchSelect from '../../components/ProductSearchSelect.vue'
 import { INSTALLMENT_MODES } from '../../utils/installmentCalc'
 import PolicyPaymentModal, { type ExpectedPremium } from './PolicyPaymentModal.vue'
 import PolicyEndorsementModal, { type EndorsementInitial } from './PolicyEndorsementModal.vue'
@@ -974,6 +975,23 @@ function riderField(idx: number, key: 'name' | 'premium' | 'notes'): string | nu
   if (key === 'premium') return v === null || v === undefined || v === '' ? 0 : Number(v)
   return typeof v === 'string' ? v : ''
 }
+/** #42 — read a rider row's picked product code (powers the searchable
+ *  dropdown's v-model). Stored alongside name so the selection sticks. */
+function riderCode(idx: number): string {
+  const v = riderRows.value[idx]?.productCode
+  return typeof v === 'string' ? v : ''
+}
+/** #42 — a Life rider is picked from the product catalog (carrier-matched,
+ *  insure_type=life, mainRider=Rider). Record its code + name onto the row;
+ *  premium stays operator-entered (rider premium depends on SA/age). */
+function pickRider(idx: number, row: ProductListRow | null): void {
+  const rows = riderRows.value.slice()
+  if (!rows[idx]) return
+  rows[idx] = row
+    ? { ...rows[idx], productCode: row.code, name: row.name }
+    : { ...rows[idx], productCode: '', name: '' }
+  form.risk = { ...form.risk, 'riders.rows': rows }
+}
 
 /** @param gross the VAT/duty-inclusive amount the formula back-solved from;
  *  it becomes รวมเบี้ยที่ต้องชำระ (may include rider premiums for life). */
@@ -1877,8 +1895,20 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
                 <tr v-for="(_r, idx) in riderRows" :key="idx">
                   <td class="px-2 py-1 text-slate-400 text-xs">{{ idx + 1 }}</td>
                   <td class="px-2 py-1">
-                    <input :value="riderField(idx, 'name')" @input="setRiderField(idx, 'name', ($event.target as HTMLInputElement).value)"
-                      class="w-full border border-slate-200 rounded px-2 py-1" placeholder="ชื่อสัญญาเพิ่มเติม" />
+                    <!-- #42 — searchable dropdown of this carrier's Life riders.
+                         Falls back to the picked name so existing free-text
+                         rows still render; emits the full product row. -->
+                    <ProductSearchSelect
+                      :model-value="riderCode(idx) || (riderField(idx, 'name') as string)"
+                      :carrier-id="form.carrierId || null"
+                      insure-type="life"
+                      main-rider="Rider"
+                      placeholder="ค้นหาสัญญาเพิ่มเติม…"
+                      :disabled="!form.carrierId"
+                      disabled-hint="เลือกบริษัท/สินค้าหลักก่อน"
+                      @select="(row) => pickRider(idx, row)"
+                      @update:model-value="(v) => { if (!v) pickRider(idx, null) }"
+                    />
                   </td>
                   <td class="px-2 py-1">
                     <input :value="riderField(idx, 'premium')" @input="setRiderField(idx, 'premium', ($event.target as HTMLInputElement).value)"
