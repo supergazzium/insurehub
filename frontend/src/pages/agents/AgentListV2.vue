@@ -9,6 +9,7 @@ import { ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
 import { AGENT_LEVELS, levelBadgeClass } from '../../utils/agentLevel'
 import AgentActiveDialog from './AgentActiveDialog.vue'
+import AgentsSubnav from './AgentsSubnav.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -154,6 +155,8 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
         </button>
       </div>
     </header>
+
+    <AgentsSubnav />
 
     <!-- Flash -->
     <transition name="fade">

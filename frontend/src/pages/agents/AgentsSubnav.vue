@@ -9,6 +9,7 @@ const tabs = [
   { name: 'agents-approvals', to: '/agents/approvals', label: 'รออนุมัติ', icon: 'pi pi-verified', badge: true },
   { name: 'agents-recruitment', to: '/agents/recruitment', label: 'การรับสมัคร', icon: 'pi pi-share-alt' },
   { name: 'agents-level-progress', to: '/agents/level-progress', label: 'เลื่อนระดับ', icon: 'pi pi-chart-line' },
+  { name: 'agents-hierarchy', to: '/agents/hierarchy', label: 'สายงาน', icon: 'pi pi-sitemap' },
 ]
 
 // Combined pending count (agents awaiting approval + promotions awaiting approval).

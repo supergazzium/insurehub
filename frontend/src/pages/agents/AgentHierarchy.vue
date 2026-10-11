@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAgentStore } from '../../stores/agents'
 import AgentsSubnav from './AgentsSubnav.vue'
@@ -55,11 +56,16 @@ onMounted(() => {
   void loadRollup()
 })
 
-const selectedAgentId = ref<string>(store.topLevelAgents[0]?.id ?? '')
+// Pre-select from ?agent=<id> (e.g. the "ดูสายงาน" link on an agent's detail
+// page) so the tree opens focused on that agent.
+const route = useRoute()
+const queryAgentId = typeof route.query.agent === 'string' ? route.query.agent : ''
+const selectedAgentId = ref<string>(queryAgentId || store.topLevelAgents[0]?.id || '')
 const expanded = ref<Set<string>>(new Set([selectedAgentId.value]))
 const directOnly = ref(false)
 
-// When the store finishes loading, pick the first top-level agent if nothing is selected yet.
+// When the store finishes loading, pick the first top-level agent if nothing is
+// selected yet (unless a ?agent= query already pinned one).
 watch(
   () => store.topLevelAgents,
   (tops) => {
