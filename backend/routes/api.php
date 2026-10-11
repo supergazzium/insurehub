@@ -104,6 +104,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('me/agent/id-card-unmask', [MeAgentController::class, 'unmaskIdCard']);
     Route::get('me/agent/referral-link', [MeAgentController::class, 'referralLink']);
     Route::get('me/agent/downline', [MeAgentController::class, 'downline']);
+    Route::get('me/agent/relations', [MeAgentController::class, 'relations']);
     Route::get('me/agent/earnings', [MeAgentController::class, 'earnings']);
     Route::get('me/agent/payouts/{batch}/statement', [MeAgentController::class, 'payoutStatement']);
     Route::get('me/agent/payouts/{batch}/certificate', [MeAgentController::class, 'payoutCertificate']);

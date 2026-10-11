@@ -266,3 +266,11 @@ export async function uploadPhoto(
   form.append('photo', file)
   return api.post<{ data: MyAgent }>(`me/agent/${endpoint}`, form)
 }
+
+// สายงาน — the signed-in agent's own upline chain (self → top) and direct
+// downline. Mirrors AgentRelations from the back-office agents API.
+export type { AgentRelation, AgentRelations } from './agents'
+
+export function fetchMyRelations() {
+  return api.get<import('./agents').AgentRelations>('me/agent/relations')
+}
