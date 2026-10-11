@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Models;
 
 use App\Observers\PolicyObserver;
+use App\Support\Freelook;
 use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
@@ -16,7 +17,45 @@ class Policy extends Model
 {
     use SoftDeletes;
 
+    public const DELIVERY_METHODS = ['post', 'kerry', 'flash', 'pickup', 'e_policy', 'other'];
+
+    public const FULFILMENT_COLUMNS = [
+        'received_date', 'received_note', 'mailing_note',
+        'delivery_method', 'courier', 'tracking_no', 'shipped_date', 'delivered_date', 'delivered_to',
+    ];
+
+    public const APPROVAL_COLUMNS = ['approved_date', 'approval_ref', 'approval_note'];
+
+    public const DEAD_STATUSES = ['cancelled', 'rejected'];
+
+    public const RENEWABLE_STATUSES = ['active', 'expired'];
+
+    public const SALES_CHANNELS = ['face_to_face', 'telephone', 'online'];
+
+    public const CANCEL_CHECK_VALUES = ['pending', 'done', 'na'];
+
+    public bool $yearsResolved = false;
+
+    public ?array $pendingYearsAudit = null;
+
     protected $table = 'policies';
+
+    protected static function booted(): void
+    {
+        static::saving(function (Policy $policy): void {
+            if ($policy->isDirty('shipped_date') && ! $policy->isDirty('mailing_date')) {
+                $policy->mailing_date = $policy->shipped_date;
+            } elseif ($policy->isDirty('mailing_date') && ! $policy->isDirty('shipped_date')) {
+                $policy->shipped_date = $policy->mailing_date;
+            }
+            if ($policy->isDirty('status') && $policy->status === 'approved' && $policy->approved_date === null) {
+                $policy->approved_date = now()->toDateString();
+            }
+            if ($policy->isDirty(['delivered_date', 'sales_channel', 'product_id'])) {
+                Freelook::apply($policy);
+            }
+        });
+    }
 
     protected $guarded = ['id'];
 
@@ -38,8 +77,17 @@ class Policy extends Model
         'last_due_inst_date' => 'date',
         'payment_date' => 'date',
         'mailing_date' => 'date',
+        'shipped_date' => 'date',
+        'approved_date' => 'date',
+        'delivered_date' => 'date',
         'freelook_active' => 'boolean',
         'freelook_end_date' => 'date',
+        'freelook_doc_sent_at' => 'date',
+        'freelook_doc_signed_at' => 'date',
+        'freelook_doc_returned_at' => 'date',
+        'cancellation_reviewed_at' => 'datetime',
+        'refund_amount' => 'decimal:2',
+        'commission_clawback_amount' => 'decimal:2',
         'vehicle_on_non_motor' => 'boolean',
         // Added 2027-02-15 (C-4). Persistent home for risk-* fields that
         // previously lived as ~30 top-level columns. The writer shim in
@@ -49,6 +97,8 @@ class Policy extends Model
         // C-20: frozen product commission basis, captured at create time.
         'commission_snapshot' => 'array',
         'comm_override' => 'array',
+        'years_overridden' => 'boolean',
+        'imported_from_legacy' => 'boolean',
     ];
 
     public function tenant(): BelongsTo
@@ -81,6 +131,21 @@ class Policy extends Model
         return $this->belongsTo(self::class, 'ref_app_to_id');
     }
 
+    public function renewals(): HasMany
+    {
+        return $this->hasMany(self::class, 'ref_app_to_id')->orderByDesc('id');
+    }
+
+    public function liveRenewals(): HasMany
+    {
+        return $this->renewals()->whereNotIn('status', self::DEAD_STATUSES);
+    }
+
+    public function getPeriodLabelAttribute(): string
+    {
+        return \App\Support\PolicyPeriodLabel::forPolicy($this);
+    }
+
     public function riders(): HasMany
     {
         return $this->hasMany(PolicyRider::class);
@@ -99,6 +164,12 @@ class Policy extends Model
     public function payments(): HasMany
     {
         return $this->hasMany(PolicyPayment::class);
+    }
+
+    /** ตารางงวดชำระ, งวด 1 first. */
+    public function installments(): HasMany
+    {
+        return $this->hasMany(PolicyInstallment::class)->orderBy('installment_no');
     }
 
     public function documents(): HasMany

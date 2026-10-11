@@ -4,11 +4,14 @@ declare(strict_types=1);
 
 namespace App\Models;
 
+use App\Observers\CustomerObserver;
+use Illuminate\Database\Eloquent\Attributes\ObservedBy;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\SoftDeletes;
 
+#[ObservedBy([CustomerObserver::class])]
 class Customer extends Model
 {
     use SoftDeletes;
@@ -89,6 +92,42 @@ class Customer extends Model
      *
      * @param 'all'|'active' $scope
      */
+    public const IN_PROGRESS_STATUSES = ['draft', 'quotation', 'quote', 'application', 'submitted', 'approved', 'issued'];
+
+    public const ENDED_STATUSES = ['expired', 'cancelled', 'rejected', 'lapsed'];
+
+    public function policyCounts(): array
+    {
+        $byStatus = $this->policies()->whereNull('deleted_at')
+            ->selectRaw('status, COUNT(*) as n')->groupBy('status')->pluck('n', 'status');
+        $sum = fn (array $statuses) => (int) collect($statuses)->sum(fn ($s) => (int) ($byStatus[$s] ?? 0));
+
+        return [
+            'inForce' => (int) ($byStatus['active'] ?? 0),
+            'inProgress' => $sum(self::IN_PROGRESS_STATUSES),
+            'ended' => $sum(self::ENDED_STATUSES),
+            'total' => (int) $byStatus->sum(),
+        ];
+    }
+
+    public function salesSummary(): array
+    {
+        $statuses = \App\Support\CustomerTier::SALES_STATUSES;
+        $base = $this->policies()->whereNull('deleted_at')->whereIn('status', $statuses);
+        $total = round((float) (clone $base)->sum('annual_premium'), 2);
+        $year = now()->year;
+        $thisYear = round((float) (clone $base)->whereYear('effective_date', $year)->sum('annual_premium'), 2);
+        $tiers = \App\Support\CustomerTier::forTenant($this->tenant);
+
+        return [
+            'totalPremium' => $total,
+            'premiumThisYear' => $thisYear,
+            'policyCount' => (clone $base)->count(),
+            'year' => $year,
+            'tier' => \App\Support\CustomerTier::classify($total, $tiers),
+        ];
+    }
+
     public function livePolicyCount(string $scope = 'all'): int
     {
         $q = $this->policies()->whereNull('deleted_at');

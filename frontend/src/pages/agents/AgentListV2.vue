@@ -7,6 +7,8 @@ import { useAgentStore } from '../../stores/agents'
 import { fetchPendingAgents, approveAgent, rejectAgent, setAgentActive, type AgentListRow } from '../../api/agents'
 import { ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
+import { AGENT_LEVELS, levelBadgeClass } from '../../utils/agentLevel'
+import AgentActiveDialog from './AgentActiveDialog.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -19,14 +21,15 @@ const pending = ref<AgentListRow[]>([])
 const busy = ref<string | null>(null)
 const flash = ref<{ ok: boolean; text: string } | null>(null)
 function setFlash(ok: boolean, text: string) { flash.value = { ok, text }; setTimeout(() => flash.value = null, 3500) }
-function aName(a: { firstName?: string; lastName?: string; agentCode: string }): string {
+function aName(a: { firstName?: string; lastName?: string; agentCode: string; kind?: string; juristicName?: string }): string {
+  if (a.kind === 'corporate' && a.juristicName) return a.juristicName
   return `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim() || a.agentCode
 }
 async function loadPending(): Promise<void> {
   try { const r = await fetchPendingAgents(); pending.value = r.data } catch { pending.value = [] }
 }
 function createNew(): void { router.push({ name: 'agent-new' }) }
-function editAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
+function editAgent(id: string): void { router.push({ name: 'agent-edit', params: { id } }) }
 async function approve(a: AgentListRow): Promise<void> {
   busy.value = a.id
   try { await approveAgent(a.id); setFlash(true, `อนุมัติ ${aName(a)} แล้ว`); await load(); await loadPending() }
@@ -41,20 +44,33 @@ async function reject(a: AgentListRow): Promise<void> {
   catch (e: unknown) { setFlash(false, e instanceof ApiError ? e.message : 'ปฏิเสธล้มเหลว') }
   finally { busy.value = null }
 }
-async function toggleActive(a: AgentListRow): Promise<void> {
+const activeTarget = ref<AgentListRow | null>(null)
+const activeError = ref<string | null>(null)
+function toggleActive(a: AgentListRow): void {
+  activeError.value = null
+  activeTarget.value = a
+}
+async function confirmActive(): Promise<void> {
+  const a = activeTarget.value
+  if (!a) return
   const next = !a.active
-  if (!next && !window.confirm(`ปิดใช้งาน ${aName(a)}?`)) return
   busy.value = a.id
-  try { await setAgentActive(a.id, next); setFlash(true, next ? 'เปิดใช้งานแล้ว' : 'ปิดใช้งานแล้ว'); await load() }
-  catch (e: unknown) { setFlash(false, e instanceof ApiError ? e.message : 'ดำเนินการล้มเหลว') }
+  try {
+    await setAgentActive(a.id, next)
+    activeTarget.value = null
+    setFlash(true, next ? `เปิดใช้งาน ${aName(a)} แล้ว` : `ปิดใช้งาน ${aName(a)} แล้ว`)
+    await load()
+  }
+  catch (e: unknown) { activeError.value = e instanceof ApiError ? e.message : 'ดำเนินการล้มเหลว' }
   finally { busy.value = null }
 }
 
 const filters = reactive({
   q: '',
   agentType: '' as '' | 'AG' | 'IN',
-  level: '' as '' | 'l1' | 'l2' | 'l3' | 'l4' | 'l5',
-  licenseStatus: '' as '' | 'valid' | 'expired' | 'expiring60d',
+  level: '' as string,
+  licenseType: '' as '' | 'life' | 'non_life',
+  licenseStatus: '' as '' | 'valid' | 'expired' | 'expiring60d' | 'none',
   activeOnly: false,
   perPage: 25,
 })
@@ -66,6 +82,7 @@ async function load(): Promise<void> {
     q: filters.q || undefined,
     agentType: filters.agentType || undefined,
     level: filters.level || undefined,
+    licenseType: filters.licenseType || undefined,
     licenseStatus: filters.licenseStatus || undefined,
     activeOnly: filters.activeOnly || undefined,
     page: page.value,
@@ -91,7 +108,7 @@ watch(
   },
 )
 watch(
-  () => [filters.agentType, filters.level, filters.licenseStatus, filters.activeOnly, filters.perPage],
+  () => [filters.agentType, filters.level, filters.licenseType, filters.licenseStatus, filters.activeOnly, filters.perPage],
   () => { page.value = 1; void load() },
 )
 
@@ -112,15 +129,6 @@ const rangeText = computed(() => {
   return `${from.toLocaleString()}–${to.toLocaleString()} จาก ${meta.total.toLocaleString()}`
 })
 
-function levelBadge(l: string): string {
-  return {
-    l1: 'bg-slate-100 text-slate-600',
-    l2: 'bg-sky-50 text-sky-700',
-    l3: 'bg-emerald-50 text-emerald-700',
-    l4: 'bg-amber-50 text-amber-700',
-    l5: 'bg-violet-50 text-violet-700',
-  }[l] ?? 'bg-slate-100 text-slate-600'
-}
 
 function licenseStatus(expiry: string | null): { cls: string; label: string } {
   if (!expiry) return { cls: 'bg-slate-100 text-slate-500', label: 'ไม่มี' }
@@ -166,12 +174,12 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
       </ul>
     </section>
 
-    <section class="card p-4 grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
+    <section class="card p-4 grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
       <div class="md:col-span-2">
-        <label class="text-xs font-medium text-slate-500 mb-1 block">ค้นหา (ชื่อ / รหัสตัวแทน / อีเมล / โทรศัพท์)</label>
+        <label class="text-xs font-medium text-slate-500 mb-1 block">ค้นหา (ชื่อ / ชื่อนิติบุคคล / รหัส / เลขผู้เสียภาษี / อีเมล / โทร)</label>
         <div class="relative">
           <i class="pi pi-search absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm" />
-          <input v-model.trim="filters.q" placeholder="AG200014, ชื่อตัวแทน, ..."
+          <input v-model.trim="filters.q" placeholder="IN260684, ชื่อ, บริษัท…, 0105…" data-testid="agent-search"
             class="w-full border border-slate-200 rounded-lg pl-9 pr-3 py-1.5 text-sm bg-white" />
         </div>
       </div>
@@ -187,20 +195,25 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
         <label class="text-xs font-medium text-slate-500 mb-1 block">Level</label>
         <select v-model="filters.level" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
           <option value="">All</option>
-          <option value="l1">L1</option>
-          <option value="l2">L2</option>
-          <option value="l3">L3</option>
-          <option value="l4">L4</option>
-          <option value="l5">L5</option>
+          <option v-for="n in AGENT_LEVELS" :key="n" :value="`l${n}`">L{{ n }}</option>
         </select>
       </div>
       <div>
-        <label class="text-xs font-medium text-slate-500 mb-1 block">License</label>
-        <select v-model="filters.licenseStatus" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
-          <option value="">All</option>
-          <option value="valid">valid</option>
-          <option value="expired">expired</option>
-          <option value="expiring60d">expiring &lt; 60d</option>
+        <label class="text-xs font-medium text-slate-500 mb-1 block">ใบอนุญาต</label>
+        <select v-model="filters.licenseType" data-testid="filter-license-type" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+          <option value="">ทุกประเภท</option>
+          <option value="life">ชีวิต</option>
+          <option value="non_life">วินาศภัย</option>
+        </select>
+      </div>
+      <div>
+        <label class="text-xs font-medium text-slate-500 mb-1 block">สถานะใบอนุญาต</label>
+        <select v-model="filters.licenseStatus" data-testid="filter-license-status" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+          <option value="">ทั้งหมด</option>
+          <option value="valid">ใช้ได้</option>
+          <option value="expiring60d">ใกล้หมด (&lt; 60 วัน)</option>
+          <option value="expired">หมดอายุ</option>
+          <option v-if="filters.licenseType" value="none">ไม่มี</option>
         </select>
       </div>
       <div>
@@ -237,15 +250,17 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
             <tr v-for="a in agentStore.list" :key="a.id" class="cursor-pointer hover:bg-slate-50" @click="openAgent(a.id)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ a.agentCode }}</td>
               <td class="px-4 py-2">
-                <div class="text-slate-900">{{ a.firstName }} {{ a.lastName }}</div>
-                <!-- Email only in the list — hide phone to reduce the chance of
-                     bulk-copying contact numbers (#25). -->
-                <div class="text-xs text-slate-500">{{ a.email || '—' }}</div>
+                <div class="text-slate-900">{{ aName(a) }}</div>
+                <!-- Email only in the list — hide phone to reduce bulk-copying of
+                     contact numbers (#25). Corporate agents get a kind badge. -->
+                <div class="text-xs text-slate-500">
+                  <span v-if="a.kind === 'corporate'" class="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">นิติบุคคล</span>{{ a.email || '—' }}
+                </div>
               </td>
               <td class="px-4 py-2">
                 <div class="flex items-center gap-1.5">
                   <span class="inline-flex px-2 py-0.5 rounded-md text-xs bg-slate-100 text-slate-600">{{ a.agentType }}</span>
-                  <span :class="['inline-flex px-2 py-0.5 rounded-md text-xs font-medium', levelBadge(a.level)]">{{ a.level.toUpperCase() }}</span>
+                  <span :class="['inline-flex px-2 py-0.5 rounded-md text-xs font-medium', levelBadgeClass(a.level)]">{{ a.level.toUpperCase() }}</span>
                 </div>
               </td>
               <td class="px-4 py-2">
@@ -318,5 +333,7 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
         </div>
       </div>
     </section>
+    <AgentActiveDialog :open="activeTarget !== null" :agent-name="activeTarget ? aName(activeTarget) : ''" :active="activeTarget?.active ?? true"
+      :busy="busy !== null" :error="activeError" @cancel="activeTarget = null" @confirm="confirmActive" />
   </div>
 </template>

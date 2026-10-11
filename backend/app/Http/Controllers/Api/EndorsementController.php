@@ -6,9 +6,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Models\Policy;
 use App\Models\PolicyEvent;
+use App\Services\Policy\EndorsementRecorder;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 
 /**
  * Phase 9 — endorsement history + create endorsement.
@@ -29,31 +31,23 @@ use Illuminate\Support\Facades\DB;
  */
 class EndorsementController extends ApiController
 {
-    private const ALLOWED_TYPES = [
-        'endorsement.date_change',
-        'endorsement.coverage_change',
-        'endorsement.cancel_reissue',
-        'endorsement.other',
-        'endorsement.premium_change',
-    ];
-
     public function index(Request $request, Policy $policy): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
         $rows = PolicyEvent::query()
+            ->with(['user:id,name', 'voidedBy:id,name'])
             ->where('policy_id', $policy->id)
             ->where('type', 'like', 'endorsement.%')
-            ->orderByDesc('occurred_at')
-            ->limit(100)
-            ->get(['id', 'type', 'occurred_at', 'by_user_id', 'payload']);
+            ->orderByRaw('endorsement_seq IS NULL')
+            ->orderBy('endorsement_seq')
+            ->orderBy('occurred_at')
+            ->orderBy('id')
+            ->limit(200)
+            ->get();
+
         return response()->json([
-            'data' => $rows->map(fn ($r) => [
-                'id' => (string) $r->id,
-                'type' => $r->type,
-                'occurredAt' => $r->occurred_at?->toIso8601String(),
-                'byUserId' => $r->by_user_id !== null ? (string) $r->by_user_id : null,
-                'payload' => $r->payload,
-            ]),
+            'data' => $rows->map(fn (PolicyEvent $r) => $this->row($r))->values(),
+            'meta' => ['nextSeq' => (int) $policy->endorsement_count + 1],
         ]);
     }
 
@@ -61,34 +55,28 @@ class EndorsementController extends ApiController
     {
         $this->authorizeTenant($request, $policy);
         $data = $request->validate([
-            'type' => ['required', 'string', 'in:'.implode(',', self::ALLOWED_TYPES)],
+            'type' => ['required', 'string', 'in:'.implode(',', EndorsementRecorder::TYPES)],
             'reason' => ['required', 'string', 'max:500'],
             'effectiveDate' => ['sometimes', 'nullable', 'date'],
+            'detail' => ['sometimes', 'nullable', 'string', 'max:2000'],
             // Free-form JSON payload for the change delta — validated by shape not by field.
             'changes' => ['sometimes', 'array'],
         ]);
+        if ($blocked = $this->rejectDraft($policy)) {
+            return $blocked;
+        }
 
-        $event = PolicyEvent::create([
-            'policy_id' => $policy->id,
-            'type' => $data['type'],
-            'occurred_at' => now(),
-            'by_user_id' => $request->user()->id,
-            'payload' => [
-                'reason' => $data['reason'],
-                'effectiveDate' => $data['effectiveDate'] ?? null,
-                'changes' => $data['changes'] ?? new \stdClass(),
-                'policyStatusAtEndorsement' => $policy->status,
-            ],
-        ]);
+        $event = EndorsementRecorder::record($policy, $data['type'], [
+            'reason' => $data['reason'],
+            'effectiveDate' => $data['effectiveDate'] ?? null,
+            'detail' => $data['detail'] ?? null,
+            'changes' => $data['changes'] ?? new \stdClass(),
+            'policyStatusAtEndorsement' => $policy->status,
+        ], $request->user()?->id);
 
         return response()->json([
             'message' => 'Endorsement recorded.',
-            'data' => [
-                'id' => (string) $event->id,
-                'type' => $event->type,
-                'occurredAt' => $event->occurred_at?->toIso8601String(),
-                'payload' => $event->payload,
-            ],
+            'data' => $this->row($event->load(['user:id,name'])),
         ], 201);
     }
 
@@ -117,13 +105,8 @@ class EndorsementController extends ApiController
             'additionalVat' => ['sometimes', 'nullable', 'numeric', 'min:0'],
         ]);
 
-        // Endorsements are allowed on any non-draft policy (in force is the
-        // common case, but late corrections on expired/other statuses are
-        // permitted too). Drafts have no committed premium to amend.
-        if ($policy->status === 'draft') {
-            return response()->json([
-                'message' => 'Endorsements are not allowed on a draft policy.',
-            ], 422);
+        if ($blocked = $this->rejectDraft($policy)) {
+            return $blocked;
         }
 
         $before = [
@@ -147,42 +130,26 @@ class EndorsementController extends ApiController
         $addlPremium = (float) $data['additionalPremium'];
         $addlTotal = round($addlPremium + $addlDuty + $addlVat, 2);
 
-        $event = DB::transaction(function () use (
-            $policy, $request, $data, $before, $after, $addlPremium, $addlDuty, $addlVat, $addlTotal
-        ) {
-            // Apply the new premium/coverage so renewal pulls the current figure.
-            $policy->annual_premium = $after['annualPremium'];
-            $policy->main_premium = $after['mainPremium'];
-            $policy->coverage = $after['coverage'];
-            $policy->save();
-
-            return PolicyEvent::create([
-                'policy_id' => $policy->id,
-                'type' => 'endorsement.premium_change',
-                'occurred_at' => now(),
-                'by_user_id' => $request->user()->id,
-                'payload' => [
-                    'reason' => $data['reason'],
-                    'effectiveDate' => $data['effectiveDate'],
-                    'before' => $before,
-                    'after' => $after,
-                    'additionalPremium' => round($addlPremium, 2),
-                    'additionalDutyStamp' => round($addlDuty, 2),
-                    'additionalVat' => round($addlVat, 2),
-                    'additionalTotal' => $addlTotal,
-                    'policyStatusAtEndorsement' => $policy->status,
-                ],
-            ]);
+        $event = EndorsementRecorder::record($policy, 'endorsement.premium_change', [
+            'reason' => $data['reason'],
+            'effectiveDate' => $data['effectiveDate'],
+            'before' => $before,
+            'after' => $after,
+            'additionalPremium' => round($addlPremium, 2),
+            'additionalDutyStamp' => round($addlDuty, 2),
+            'additionalVat' => round($addlVat, 2),
+            'additionalTotal' => $addlTotal,
+            'policyStatusAtEndorsement' => $policy->status,
+        ], $request->user()?->id, function (Policy $p) use ($after): void {
+            $p->annual_premium = $after['annualPremium'];
+            $p->main_premium = $after['mainPremium'];
+            $p->coverage = $after['coverage'];
+            $p->save();
         });
 
         return response()->json([
             'message' => 'Premium endorsement recorded.',
-            'data' => [
-                'id' => (string) $event->id,
-                'type' => $event->type,
-                'occurredAt' => $event->occurred_at?->toIso8601String(),
-                'payload' => $event->payload,
-            ],
+            'data' => $this->row($event->load(['user:id,name'])),
         ], 201);
     }
 
@@ -195,7 +162,11 @@ class EndorsementController extends ApiController
     public function updatePremiumChange(Request $request, Policy $policy, PolicyEvent $event): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
-        $this->authorizeEvent($policy, $event);
+        $this->authorizeEvent($policy, $event, 'endorsement.premium_change');
+        Gate::authorize('policies.update');
+        if ($blocked = $this->rejectVoided($event)) {
+            return $blocked;
+        }
 
         $data = $request->validate([
             'reason' => ['required', 'string', 'max:500'],
@@ -224,7 +195,7 @@ class EndorsementController extends ApiController
         $addlPremium = (float) $data['additionalPremium'];
 
         DB::transaction(function () use (
-            $policy, $event, $data, $before, $newCoverage, $addlPremium, $addlDuty, $addlVat
+            $policy, $event, $data, $before, $newCoverage, $addlPremium, $addlDuty, $addlVat, $payload
         ) {
             $event->payload = [
                 'reason' => $data['reason'],
@@ -244,74 +215,112 @@ class EndorsementController extends ApiController
             ];
             $event->save();
 
-            $this->resyncPolicyPremium($policy);
+            EndorsementRecorder::resyncPremium($policy);
         });
 
         return response()->json([
             'message' => 'Endorsement updated.',
-            'data' => [
-                'id' => (string) $event->id,
-                'type' => $event->type,
-                'occurredAt' => $event->occurred_at?->toIso8601String(),
-                'payload' => $event->fresh()->payload,
-            ],
+            'data' => $this->row($event->fresh(['user:id,name', 'voidedBy:id,name'])),
         ]);
     }
 
-    /**
-     * Delete a premium-change endorsement and re-sync the policy premium to
-     * whatever endorsement is now the most recent (or to this one's `before`
-     * snapshot when it was the only/last one).
-     */
-    public function destroyPremiumChange(Request $request, Policy $policy, PolicyEvent $event): JsonResponse
+    public function update(Request $request, Policy $policy, PolicyEvent $event): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
         $this->authorizeEvent($policy, $event);
+        Gate::authorize('policies.update');
+        if ($event->type === 'endorsement.premium_change') {
+            return response()->json(['message' => 'Use the premium endorsement endpoint to edit this endorsement.'], 422);
+        }
+        if ($blocked = $this->rejectVoided($event)) {
+            return $blocked;
+        }
 
-        $before = $event->payload['before'] ?? null;
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:500'],
+            'effectiveDate' => ['sometimes', 'nullable', 'date'],
+            'detail' => ['sometimes', 'nullable', 'string', 'max:2000'],
+        ]);
 
-        DB::transaction(function () use ($policy, $event, $before) {
-            $event->delete();
-            $this->resyncPolicyPremium($policy, $before);
-        });
+        $event->payload = array_merge($event->payload ?? [], [
+            'reason' => $data['reason'],
+            'effectiveDate' => $data['effectiveDate'] ?? ($event->payload['effectiveDate'] ?? null),
+            'detail' => array_key_exists('detail', $data) ? $data['detail'] : ($event->payload['detail'] ?? null),
+            'editedAt' => now()->toIso8601String(),
+        ]);
+        $event->save();
 
-        return response()->json(['message' => 'Endorsement deleted.']);
+        return response()->json([
+            'message' => 'Endorsement updated.',
+            'data' => $this->row($event->fresh(['user:id,name', 'voidedBy:id,name'])),
+        ]);
     }
 
-    /**
-     * Point the policy's premium/coverage at the most-recent premium-change
-     * endorsement's `after`. When there are none left, fall back to
-     * `$fallbackBefore` (the deleted endorsement's `before`) if given.
-     */
-    private function resyncPolicyPremium(Policy $policy, ?array $fallbackBefore = null): void
+    public function void(Request $request, Policy $policy, PolicyEvent $event): JsonResponse
     {
-        $latest = PolicyEvent::query()
-            ->where('policy_id', $policy->id)
-            ->where('type', 'endorsement.premium_change')
-            ->orderByDesc('occurred_at')
-            ->orderByDesc('id')
-            ->first(['payload']);
-
-        $target = $latest?->payload['after'] ?? $fallbackBefore;
-        if ($target === null) {
-            return; // nothing to sync to — leave the policy untouched
+        $this->authorizeTenant($request, $policy);
+        $this->authorizeEvent($policy, $event);
+        Gate::authorize('policies.update');
+        if ($blocked = $this->rejectVoided($event)) {
+            return $blocked;
         }
 
-        if (isset($target['annualPremium'])) {
-            $policy->annual_premium = (float) $target['annualPremium'];
-            $policy->main_premium = (float) $target['annualPremium'];
-        }
-        if (isset($target['coverage'])) {
-            $policy->coverage = (float) $target['coverage'];
-        }
-        $policy->save();
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'max:500'],
+        ]);
+
+        $voided = EndorsementRecorder::void($policy, $event, $request->user()?->id, $data['reason']);
+
+        return response()->json([
+            'message' => 'Endorsement voided.',
+            'data' => $this->row($voided),
+        ]);
     }
 
-    /** Guard: the event must belong to this policy and be a premium endorsement. */
-    private function authorizeEvent(Policy $policy, PolicyEvent $event): void
+    private function row(PolicyEvent $r): array
+    {
+        return [
+            'id' => (string) $r->id,
+            'seq' => $r->endorsement_seq !== null ? (int) $r->endorsement_seq : null,
+            'type' => $r->type,
+            'occurredAt' => $r->occurred_at?->toIso8601String(),
+            'byUserId' => $r->by_user_id !== null ? (string) $r->by_user_id : null,
+            'byUserName' => $r->relationLoaded('user') ? $r->user?->name : null,
+            'payload' => $r->payload,
+            'voidedAt' => $r->voided_at?->toIso8601String(),
+            'voidedByName' => $r->relationLoaded('voidedBy') ? $r->voidedBy?->name : null,
+            'voidReason' => $r->void_reason,
+        ];
+    }
+
+    private function rejectDraft(Policy $policy): ?JsonResponse
+    {
+        if ($policy->status === 'draft') {
+            return response()->json([
+                'message' => 'Endorsements are not allowed on a draft policy.',
+            ], 422);
+        }
+
+        return null;
+    }
+
+    private function rejectVoided(PolicyEvent $event): ?JsonResponse
+    {
+        if ($event->voided_at !== null) {
+            return response()->json([
+                'code' => 'endorsement_voided',
+                'message' => 'This endorsement has been voided and can no longer be changed.',
+            ], 422);
+        }
+
+        return null;
+    }
+
+    private function authorizeEvent(Policy $policy, PolicyEvent $event, ?string $type = null): void
     {
         if ((int) $event->policy_id !== (int) $policy->id
-            || $event->type !== 'endorsement.premium_change') {
+            || ! str_starts_with((string) $event->type, 'endorsement.')
+            || ($type !== null && $event->type !== $type)) {
             abort(404);
         }
     }

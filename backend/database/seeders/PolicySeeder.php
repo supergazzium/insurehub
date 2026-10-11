@@ -163,6 +163,7 @@ class PolicySeeder extends Seeder
                         'wht_status' => $this->nonEmpty($row['WHT_Status'] ?? null),
                         'wht_amt' => $this->num($row['WHT_Amt'] ?? null) ?: null,
                         'status' => $status,
+                        'imported_from_legacy' => true,
                         'freelook_active' => ($row['Freelook_Status'] ?? '') === 'True',
 
                         // Motor block — only populate if there's a vehicle.

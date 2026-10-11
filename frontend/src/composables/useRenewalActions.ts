@@ -8,11 +8,13 @@
 //
 // The composable is created with a Ref<ExpiringPolicy | null>; all actions
 // no-op while it's null (page still loading).
-import { ref, computed, type Ref } from 'vue'
+import { ref, computed, watch, type Ref } from 'vue'
 import {
-  requestRenewalQuote, sendRenewalQuote, declineRenewal, markRenewalStage,
-  markRenewalContacted, sendRenewalNotice,
-  type ExpiringPolicy, type ManualStage,
+  requestRenewalQuote, sendRenewalQuote, markRenewalStage, sendRenewalNotice,
+  fetchRenewalFollowups, createRenewalFollowup, reopenRenewal,
+  fetchRenewalNotices, createRenewalNotice,
+  type ExpiringPolicy, type ManualStage, type RenewalFollowup, type FollowupChannel, type FollowupResult,
+  type RenewalNotice,
 } from '../api/reports'
 import {
   fetchCarrierContacts, createCarrierContact, updateCarrierContact, deleteCarrierContact,
@@ -22,12 +24,55 @@ import {
   uploadPolicyDocument, fetchPolicyDocuments, downloadPolicyDocument, deletePolicyDocument,
   type PolicyDocumentRow,
 } from '../api/policies'
-import { useRenewalQuote, emptyRenewalQuoteForm, type RenewalQuoteForm } from './useRenewalQuote'
+import { fetchTenant } from '../api/tenant'
 import { ApiError } from '../api/client'
+import type { Policy } from '../stores/policies'
+import { renderRenewalNoticePdf } from './useRenewalNoticePdf'
+import { decomposeByFormula, type TaxFormula } from '../utils/premiumBreakdown'
 
-export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
-  const renewalQuote = useRenewalQuote()
+export interface RenewalNoticeForm {
+  annualPremium: number
+  autoSplit: boolean
+  formula: TaxFormula
+  netPremium: number
+  dutyStamp: number
+  vat: number
+  discount: number
+  coverage: number
+  premiumMode: 'monthly' | 'quarterly' | 'semiannual' | 'annual' | 'single'
+  dueDate: string
+  validUntil: string
+  note: string
+}
 
+export interface FollowupForm {
+  channel: FollowupChannel
+  result: FollowupResult
+  reasonCode: string
+  reasonNote: string
+  note: string
+  nextFollowupAt: string
+}
+
+const PREMIUM_MODE_LABEL: Record<string, string> = {
+  annual: 'รายปี', semiannual: 'ราย 6 เดือน', quarterly: 'รายไตรมาส', monthly: 'รายเดือน', single: 'จ่ายครั้งเดียว',
+}
+
+function addMonthsIso(iso: string, months: number): string {
+  const d = new Date(iso.slice(0, 10) + 'T00:00:00')
+  d.setMonth(d.getMonth() + months)
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+}
+
+function termMonths(from: string | null | undefined, to: string | null | undefined): number {
+  if (!from || !to) return 12
+  const a = new Date(from.slice(0, 10))
+  const b = new Date(to.slice(0, 10))
+  const m = (b.getFullYear() - a.getFullYear()) * 12 + (b.getMonth() - a.getMonth())
+  return m > 0 ? m : 12
+}
+
+export function useRenewalActions(policy: Ref<ExpiringPolicy | null>, detail?: Ref<Policy | null>) {
   // ── Transient feedback + busy flags ──────────────────────────────────────
   const saving = ref(false)
   const msg = ref<{ ok: boolean; text: string } | null>(null)
@@ -40,22 +85,80 @@ export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
     return e instanceof ApiError ? e.message : (e instanceof Error ? e.message : fallback)
   }
 
-  // ── Contact log (channel + note) ─────────────────────────────────────────
-  const contactForm = ref<{ channel: string; note: string }>({ channel: 'phone', note: '' })
-  async function submitContact(): Promise<boolean> {
+  const followups = ref<RenewalFollowup[]>([])
+  const followupsLoading = ref(false)
+  const followupsDeclined = ref(false)
+  const declineReasons = ref<Array<{ code: string; label: string }>>([])
+  const followupErrors = ref<Record<string, string[]>>({})
+  function blankFollowup(result: FollowupResult = 'thinking'): FollowupForm {
+    return { channel: 'phone', result, reasonCode: '', reasonNote: '', note: '', nextFollowupAt: '' }
+  }
+  const followupForm = ref<FollowupForm>(blankFollowup())
+  function resetFollowupForm(result: FollowupResult = 'thinking'): void {
+    followupForm.value = blankFollowup(result)
+    followupErrors.value = {}
+  }
+  async function loadFollowups(): Promise<void> {
+    const r = policy.value; if (!r) return
+    followupsLoading.value = true
+    try {
+      const res = await fetchRenewalFollowups(r.policyId)
+      followups.value = res.data
+      followupsDeclined.value = res.meta.declined
+      declineReasons.value = res.meta.reasons
+    } catch { followups.value = [] }
+    finally { followupsLoading.value = false }
+  }
+  async function submitFollowup(): Promise<boolean> {
+    const r = policy.value; if (!r) return false
+    const f = followupForm.value
+    const declining = f.result === 'not_renewing'
+    saving.value = true
+    followupErrors.value = {}
+    try {
+      const res = await createRenewalFollowup(r.policyId, {
+        channel: f.channel,
+        result: f.result,
+        reasonCode: declining ? (f.reasonCode || null) : null,
+        reasonNote: declining && f.reasonCode === 'other' ? (f.reasonNote.trim() || null) : null,
+        note: f.note.trim() || null,
+        nextFollowupAt: declining ? null : (f.nextFollowupAt || null),
+      })
+      const created = res.data
+      followups.value = [created, ...followups.value]
+      r.lastContactedAt = created.createdAt
+      r.lastFollowup = {
+        id: created.id, at: created.createdAt, channel: created.channel, result: created.result,
+        reasonCode: created.reasonCode, reasonLabel: created.reasonLabel, note: created.note,
+        nextAt: created.nextFollowupAt, byName: created.byUserName,
+      }
+      if (declining) {
+        r.renewalDeclinedAt = created.createdAt
+        r.renewalStage = 'declined'
+        followupsDeclined.value = true
+      } else if (r.renewalStage === 'not_started') {
+        r.renewalStage = 'contacted'
+      }
+      resetFollowupForm()
+      flash(true, declining ? 'บันทึกว่าลูกค้าไม่ต่ออายุแล้ว' : 'บันทึกการติดตามแล้ว')
+      return true
+    } catch (e) {
+      if (e instanceof ApiError) followupErrors.value = e.body?.errors ?? {}
+      flash(false, errText(e, 'บันทึกการติดตามล้มเหลว'))
+      return false
+    } finally { saving.value = false }
+  }
+  async function reopenFollowup(note?: string): Promise<boolean> {
     const r = policy.value; if (!r) return false
     saving.value = true
     try {
-      const res = await markRenewalContacted(r.policyId, {
-        channel: contactForm.value.channel as 'phone' | 'line' | 'email' | 'inperson' | 'other',
-        note: contactForm.value.note.trim() || undefined,
-      })
-      r.lastContactedAt = res.event.occurredAt
-      if (r.renewalStage === 'not_started') r.renewalStage = 'contacted'
-      contactForm.value = { channel: 'phone', note: '' }
-      flash(true, 'บันทึกการติดต่อแล้ว')
+      await reopenRenewal(r.policyId, note)
+      followupsDeclined.value = false
+      r.renewalDeclinedAt = null
+      r.renewalStage = r.lastContactedAt ? 'contacted' : 'not_started'
+      flash(true, 'เปิดติดตามใหม่แล้ว')
       return true
-    } catch (e) { flash(false, errText(e, 'บันทึกล้มเหลว')); return false }
+    } catch (e) { flash(false, errText(e, 'ดำเนินการล้มเหลว')); return false }
     finally { saving.value = false }
   }
 
@@ -185,19 +288,114 @@ export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
   }
 
   // ── Prepare the InsureHub-branded quotation (PDF) ─────────────────────────
-  const prepareForm = ref<RenewalQuoteForm | null>(null)
+  const prepareForm = ref<RenewalNoticeForm | null>(null)
   const preparing = ref(false)
+  const prepareErrors = ref<Record<string, string[]>>({})
+  const notices = ref<RenewalNotice[]>([])
+  const latestNotice = computed<RenewalNotice | null>(() => notices.value[0] ?? null)
+  async function loadNotices(): Promise<void> {
+    const r = policy.value; if (!r) return
+    try { notices.value = (await fetchRenewalNotices(r.policyId)).data } catch { notices.value = [] }
+  }
+  function splitPremium(form: RenewalNoticeForm): void {
+    const parts = decomposeByFormula(Number(form.annualPremium) || 0, form.formula)
+    form.netPremium = parts.net
+    form.dutyStamp = parts.duty
+    form.vat = parts.vat
+  }
   function initPrepareForm(): void {
     const r = policy.value; if (!r) return
-    prepareForm.value = emptyRenewalQuoteForm(r)
+    const d = detail?.value ?? null
+    const base = latestNotice.value
+    const form: RenewalNoticeForm = {
+      annualPremium: base?.annualPremium ?? Math.round((r.annualPremium ?? 0) * 100) / 100,
+      autoSplit: true,
+      formula: 1,
+      netPremium: 0,
+      dutyStamp: 0,
+      vat: 0,
+      discount: base?.discount ?? 0,
+      coverage: base?.coverage ?? d?.coverage ?? 0,
+      premiumMode: (base?.premiumMode as RenewalNoticeForm['premiumMode']) ?? d?.premiumMode ?? 'annual',
+      dueDate: (r.expiryDate || '').slice(0, 10),
+      validUntil: (r.expiryDate || '').slice(0, 10),
+      note: '',
+    }
+    if (base && base.netPremium !== null && base.dutyStamp !== null && base.vat !== null) {
+      form.autoSplit = false
+      form.netPremium = base.netPremium
+      form.dutyStamp = base.dutyStamp
+      form.vat = base.vat
+    } else {
+      splitPremium(form)
+    }
+    prepareForm.value = form
+    prepareErrors.value = {}
   }
+  watch(
+    () => prepareForm.value && [prepareForm.value.annualPremium, prepareForm.value.autoSplit, prepareForm.value.formula],
+    () => { const f = prepareForm.value; if (f?.autoSplit) splitPremium(f) },
+  )
   async function submitPrepareQuote(alsoDownload: boolean): Promise<boolean> {
     const r = policy.value; const form = prepareForm.value
     if (!r || !form) return false
     preparing.value = true; saving.value = true
+    prepareErrors.value = {}
     try {
-      const quotation = renewalQuote.buildQuotation(r, form)
-      const file = await renewalQuote.renderToFile(quotation)
+      const created = await createRenewalNotice(r.policyId, {
+        annualPremium: Number(form.annualPremium),
+        netPremium: Number(form.netPremium),
+        dutyStamp: Number(form.dutyStamp),
+        vat: Number(form.vat),
+        discount: Number(form.discount) || null,
+        coverage: Number(form.coverage) || null,
+        premiumMode: form.premiumMode,
+        dueDate: form.dueDate || null,
+        validUntil: form.validUntil || null,
+        note: form.note.trim() || null,
+      })
+      const notice = created.data
+      const tenant = await fetchTenant().then((x) => x.data).catch(() => null)
+      const d = detail?.value ?? null
+      const months = termMonths(d?.effectiveDate, d?.expiryDate ?? r.expiryDate)
+      const from = (r.expiryDate || '').slice(0, 10) || null
+      const file = await renderRenewalNoticePdf({
+        noticeNo: notice.noticeNo,
+        issuedAt: notice.createdAt ?? new Date().toISOString(),
+        dueDate: notice.dueDate,
+        validUntil: notice.validUntil,
+        tenant,
+        customerName: r.customerName,
+        customerPhone: r.customerPhone ?? null,
+        policyNo: r.policyNo ?? r.applicationNo,
+        carrierName: r.carrierName ?? d?.carrierName ?? null,
+        productName: r.productName ?? d?.productName ?? null,
+        productCategory: r.productSubCategory ?? r.productCategory ?? null,
+        motorLicenseNo: r.motorLicenseNo ?? null,
+        motorVehicle: r.motorVehicle ?? null,
+        currentExpiry: r.expiryDate,
+        newTermFrom: from,
+        newTermTo: from ? addMonthsIso(from, months) : null,
+        premiumModeLabel: PREMIUM_MODE_LABEL[form.premiumMode] ?? form.premiumMode,
+        current: {
+          annualPremium: notice.annualPremium,
+          netPremium: notice.netPremium,
+          dutyStamp: notice.dutyStamp,
+          vat: notice.vat,
+          discount: notice.discount,
+          coverage: notice.coverage,
+        },
+        lastYear: {
+          annualPremium: d?.annualPremium ?? r.annualPremium,
+          netPremium: d?.premium?.net ?? null,
+          dutyStamp: d?.premium?.dutyStamp ?? null,
+          vat: d?.premium?.vat ?? null,
+          discount: d?.installment?.discountAmount ?? null,
+          coverage: d?.coverage ?? null,
+        },
+        agentName: r.agentName || null,
+        note: notice.note,
+      })
       if (alsoDownload) {
         const url = URL.createObjectURL(file)
         const a = document.createElement('a')
@@ -205,14 +403,20 @@ export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
         document.body.appendChild(a); a.click(); a.remove()
         setTimeout(() => URL.revokeObjectURL(url), 10_000)
       }
-      await uploadPolicyDocument(r.policyId, 'renewal_quote_insurehub', file)
+      await uploadPolicyDocument(r.policyId, 'renewal_quote_insurehub', file, {
+        annualPremium: notice.annualPremium,
+        coverage: notice.coverage,
+        premiumMode: notice.premiumMode,
+        renewalNoticeId: notice.id,
+      })
+      await loadNotices()
       r.quotePreparedAt = new Date().toISOString()
       r.renewalStage = 'quote_prepared'
-      flash(true, 'สร้างใบเสนอราคา InsureHub แล้ว')
+      flash(true, `สร้างใบเตือนต่ออายุ ${notice.noticeNo} แล้ว`)
       return true
     } catch (err) {
-      console.error('[renewal] prepare-quote failed', err)
-      flash(false, errText(err, 'สร้างใบเสนอราคาล้มเหลว')); return false
+      if (err instanceof ApiError) prepareErrors.value = err.body?.errors ?? {}
+      flash(false, errText(err, 'สร้างใบเตือนล้มเหลว')); return false
     } finally { preparing.value = false; saving.value = false }
   }
 
@@ -237,22 +441,6 @@ export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
       flash(true, 'ส่งใบเสนอราคาถึงลูกค้าแล้ว')
       return true
     } catch (e) { flash(false, errText(e, 'ส่งใบเสนอราคาล้มเหลว')); return false }
-    finally { saving.value = false }
-  }
-
-  // ── Decline (customer said no / lost) ────────────────────────────────────
-  const declineReason = ref('')
-  async function submitDecline(): Promise<boolean> {
-    const r = policy.value; if (!r) return false
-    saving.value = true
-    try {
-      await declineRenewal(r.policyId, declineReason.value.trim() || undefined)
-      r.renewalDeclinedAt = new Date().toISOString()
-      r.renewalStage = 'declined'
-      declineReason.value = ''
-      flash(true, 'บันทึกว่าลูกค้าปฏิเสธแล้ว')
-      return true
-    } catch (e) { flash(false, errText(e, 'บันทึกล้มเหลว')); return false }
     finally { saving.value = false }
   }
 
@@ -316,7 +504,7 @@ export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
    *  prepare form. Returns true if the caller should switch to the prepare panel. */
   async function regenerateInsurehubQuote(d: PolicyDocumentRow): Promise<boolean> {
     const r = policy.value; if (!r) return false
-    if (!window.confirm('สร้างใบเสนอราคา InsureHub ใหม่ และลบฉบับเดิม?')) return false
+    if (!window.confirm('สร้างใบเตือนต่ออายุ InsureHub ใหม่ และลบไฟล์ฉบับเดิม?')) return false
     docBusy.value = d.id
     try {
       await deletePolicyDocument(r.policyId, d.id)
@@ -329,14 +517,14 @@ export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
   }
   function docTypeLabel(type: string): string {
     if (type === 'renewal_quote_carrier') return 'ใบเสนอราคาจากบริษัทประกัน'
-    if (type === 'renewal_quote_insurehub') return 'ใบเสนอราคา InsureHub'
+    if (type === 'renewal_quote_insurehub') return 'ใบเตือนต่ออายุ InsureHub'
     return type
   }
 
   return {
     saving, msg, flash,
-    // contact / notice
-    contactForm, submitContact, submitNotice,
+    followups, followupsLoading, followupsDeclined, declineReasons, followupForm, followupErrors,
+    resetFollowupForm, loadFollowups, submitFollowup, reopenFollowup, submitNotice,
     // request quote
     quoteForm, quoteCopied, quoteContacts, quoteContactsLoading, quoteContactEdit,
     quoteMailtoHref, initQuoteForm, loadQuoteContacts,
@@ -345,11 +533,10 @@ export function useRenewalActions(policy: Ref<ExpiringPolicy | null>) {
     // upload
     uploadCarrierQuote,
     // prepare
-    prepareForm, preparing, initPrepareForm, submitPrepareQuote,
+    prepareForm, preparing, prepareErrors, initPrepareForm, submitPrepareQuote, splitPremium,
+    notices, latestNotice, loadNotices,
     // send
     sendForm, initSendForm, submitSendQuote,
-    // decline
-    declineReason, submitDecline,
     // manual
     manualMark,
     // docs

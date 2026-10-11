@@ -73,3 +73,8 @@ Thumbs.db
 /backend/storage/fonts/*_[0-9a-f]*.ttf
 /backend/storage/fonts/*.ufm
 /backend/storage/fonts/*.ufm.json
+/docs/tasks/**/*.png
+/docs/tasks/**/*.gif
+/docs/tasks/**/*.jpg
+/docs/tasks/**/*.jpeg
+/docs/tasks/**/*.webp

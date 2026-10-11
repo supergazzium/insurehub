@@ -1,0 +1,6 @@
+# B4b — เปิดร่างต่ออายุ #483 แล้วพิมพ์ "test autosave" ในช่องหมายเหตุ (2026-10-03 16:55)
+# ก่อนพิมพ์
+id   application_no  status  ref_app_to_id  new_or_renew  notes
+483  A2610030001     draft   479            renew         NULL
+# หลัง autosave (PATCH /api/v1/policies/483/draft)
+483  A2610030001     draft   NULL           renew         test autosave

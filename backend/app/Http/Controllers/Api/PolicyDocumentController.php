@@ -8,6 +8,7 @@ use App\Http\Resources\PolicyDocumentResource;
 use App\Models\Policy;
 use App\Models\PolicyDocument;
 use App\Models\PolicyEvent;
+use App\Models\RenewalNotice;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -23,7 +24,7 @@ class PolicyDocumentController extends ApiController
      * `renewal_quote_*` types feed the renewal quotation pipeline: uploading
      * one advances the policy's renewal stage (see recordRenewalStageEvent).
      */
-    private const DOC_TYPES = 'application,policy,receipt,medical,endorsement,cancellation,renewal_quote_carrier,renewal_quote_insurehub,other';
+    private const DOC_TYPES = 'application,policy,receipt,medical,endorsement,cancellation,renewal_quote_carrier,renewal_quote_insurehub,freelook,other';
 
     /**
      * List a policy's documents, newest first. Optional `?type=` filter (e.g.
@@ -89,7 +90,21 @@ class PolicyDocumentController extends ApiController
         $data = $request->validate([
             'type' => ['required', 'string', 'in:'.self::DOC_TYPES],
             'file' => ['required', 'file', 'mimes:pdf,jpeg,jpg,png,webp', 'max:10240'],  // 10 MB
+            'quoteAnnualPremium' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'quoteCoverage' => ['sometimes', 'nullable', 'numeric', 'min:0'],
+            'quotePremiumMode' => ['sometimes', 'nullable', 'string', 'in:monthly,quarterly,semiannual,annual,single'],
+            'renewalNoticeId' => ['sometimes', 'nullable', 'integer'],
         ]);
+        $notice = null;
+        if (! empty($data['renewalNoticeId'])) {
+            $notice = RenewalNotice::query()
+                ->where('tenant_id', $policy->tenant_id)
+                ->where('policy_id', $policy->id)
+                ->find($data['renewalNoticeId']);
+            if ($notice === null) {
+                return response()->json(['message' => 'Renewal notice not found for this policy.', 'errors' => ['renewalNoticeId' => ['Renewal notice not found for this policy.']]], 422);
+            }
+        }
 
         /** @var UploadedFile $file */
         $file = $request->file('file');
@@ -97,7 +112,7 @@ class PolicyDocumentController extends ApiController
         $dir = "policy-documents/{$policy->tenant_id}/{$policy->id}/{$data['type']}";
         $storedPath = $file->store($dir, 'local');
 
-        $doc = DB::transaction(function () use ($policy, $data, $request, $storedPath, $originalName) {
+        $doc = DB::transaction(function () use ($policy, $data, $request, $storedPath, $originalName, $notice) {
             $doc = $policy->documents()->create([
                 'type' => $data['type'],
                 'file_name' => $originalName,
@@ -116,7 +131,29 @@ class PolicyDocumentController extends ApiController
                     'fileName' => $originalName,
                 ],
             ]);
-            $this->recordRenewalStageEvent($policy, $data['type'], $doc, $request);
+            $quote = $data['type'] === 'renewal_quote_insurehub' && isset($data['quoteAnnualPremium'])
+                ? [
+                    'annualPremium' => (float) $data['quoteAnnualPremium'],
+                    'coverage' => isset($data['quoteCoverage']) ? (float) $data['quoteCoverage'] : null,
+                    'premiumMode' => $data['quotePremiumMode'] ?? null,
+                ]
+                : null;
+            if ($notice !== null && $data['type'] === 'renewal_quote_insurehub') {
+                $notice->forceFill(['document_id' => $doc->id])->save();
+                $quote = [
+                    'annualPremium' => (float) $notice->annual_premium,
+                    'coverage' => $notice->coverage,
+                    'premiumMode' => $notice->premium_mode,
+                    'netPremium' => $notice->net_premium,
+                    'dutyStamp' => $notice->duty_stamp,
+                    'vat' => $notice->vat,
+                    'discount' => $notice->discount,
+                    'dueDate' => $notice->due_date?->toDateString(),
+                    'noticeNo' => $notice->notice_no,
+                    'noticeId' => (string) $notice->id,
+                ];
+            }
+            $this->recordRenewalStageEvent($policy, $data['type'], $doc, $request, $quote);
 
             return $doc;
         });
@@ -132,7 +169,7 @@ class PolicyDocumentController extends ApiController
      * Any other document type advances no stage. Called inside the upload/store
      * transaction so the document + stage event commit together.
      */
-    private function recordRenewalStageEvent(Policy $policy, string $docType, PolicyDocument $doc, Request $request): void
+    private function recordRenewalStageEvent(Policy $policy, string $docType, PolicyDocument $doc, Request $request, ?array $quote = null): void
     {
         $eventType = match ($docType) {
             'renewal_quote_carrier' => 'renewalQuoteReceived',
@@ -147,10 +184,11 @@ class PolicyDocumentController extends ApiController
             'type' => $eventType,
             'occurred_at' => now(),
             'by_user_id' => $request->user()->id,
-            'payload' => [
+            'payload' => array_filter([
                 'documentId' => (string) $doc->id,
                 'fileName' => $doc->file_name,
-            ],
+                'quote' => $quote,
+            ], fn ($v) => $v !== null),
         ]);
     }
 

@@ -6,15 +6,17 @@ import {
   type ExpiringPolicy, type ExpiringSoonMeta, type ExpiringSoonSummary,
 } from '../../api/reports'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
-import { fetchProductList, type ProductListRow } from '../../api/products'
+import { fetchProductList, fetchProductTaxonomy, type ProductListRow, type ProductTaxonomyRow } from '../../api/products'
 import { fetchAgentList, type AgentListRow } from '../../api/agents'
 import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 import { ApiError } from '../../api/client'
 import { toCsv, downloadCsv } from '../../util/csvExport'
 import DateInput from '../../components/DateInput.vue'
+import PolicyPeriodBadge from '../../components/PolicyPeriodBadge.vue'
 import { fmtDate } from '../../util/dateFormat'
 import { renewalStageMeta, RENEWAL_PIPELINE } from '../../utils/renewalStage'
-import type { RenewalStage } from '../../api/reports'
+import type { RenewalStage, ExpiringSoonQuery } from '../../api/reports'
+import { followupResultMeta, followupChannelMeta, isFollowupOverdue } from '../../utils/renewalFollowup'
 
 const router = useRouter()
 
@@ -25,7 +27,7 @@ function openRenewalDetail(policyId: string): void {
 
 const rows = ref<ExpiringPolicy[]>([])
 const meta = ref<ExpiringSoonMeta | null>(null)
-const summary = ref<ExpiringSoonSummary>({ totalInWindow: 0, urgentCount: 0 })
+const summary = ref<ExpiringSoonSummary>({ totalInWindow: 0, urgentCount: 0, followupDueCount: 0 })
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -83,7 +85,9 @@ const filters = reactive({
   carrierId: '',
   productId: '',
   writingAgentId: '',
-  productType: '',
+  productCategory: '',
+  productSubCategory: '',
+  followupDue: false,
   insureType: '' as '' | 'life' | 'non-life' | 'tax',
   // #48 — renewal-stage filter. renewalStage is a derived field (not a stored
   // column), so this filters the loaded rows client-side. '' = every stage.
@@ -101,7 +105,7 @@ const sortDir = ref<'asc' | 'desc'>('asc')
 // Everything the user tunes (filters / preset / sort / page-size) is
 // persisted to localStorage so the next session picks up where they left
 // off. Bumped version resets the schema on breaking changes.
-const STORAGE_KEY = 'renewal-pipeline:v1'
+const STORAGE_KEY = 'renewal-pipeline:v2'
 interface PersistedState {
   filters: typeof filters
   preset: Preset
@@ -296,19 +300,40 @@ const productOptions = computed<Option[]>(() => {
     .map((p) => ({ id: p.id, label: `${p.code} — ${p.name}` }))
     .sort((a, b) => a.label.localeCompare(b.label, 'th'))
 })
-const productTypeOptions = computed<Option[]>(() => {
-  // Same vocabulary as the create modal / product-list filter.
-  const src = filters.insureType
-  if (src === 'life') return ['Life', 'PA', 'Group-Life', 'Rider'].map((t) => ({ id: t, label: t }))
-  if (src === 'non-life') return ['Group-NL', 'Motor', 'Non-Motor'].map((t) => ({ id: t, label: t }))
-  if (src === 'tax') return [{ id: 'Tax', label: 'Tax' }]
-  return ['Life', 'PA', 'Group-Life', 'Group-NL', 'Rider', 'Motor', 'Non-Motor', 'Tax'].map((t) => ({ id: t, label: t }))
+const taxonomy = ref<ProductTaxonomyRow[]>([])
+async function loadTaxonomy(): Promise<void> {
+  try {
+    taxonomy.value = (await fetchProductTaxonomy()).data
+  } catch { taxonomy.value = [] }
+}
+const categoryOptions = computed<Option[]>(() => {
+  const seen = new Set<string>()
+  const out: Option[] = []
+  for (const t of taxonomy.value) {
+    if (seen.has(t.category)) continue
+    seen.add(t.category)
+    out.push({ id: t.category, label: t.category })
+  }
+  return out
+})
+const subCategoryOptions = computed<Option[]>(() => {
+  if (!filters.productCategory) return []
+  const seen = new Set<string>()
+  const out: Option[] = []
+  for (const t of taxonomy.value) {
+    if (t.category !== filters.productCategory || !t.subcategory || seen.has(t.subcategory)) continue
+    seen.add(t.subcategory)
+    out.push({ id: t.subcategory, label: t.subcategory })
+  }
+  out.push({ id: '__none', label: 'ยังไม่ระบุหมวดย่อย' })
+  return out
 })
 
 // Clear-filters UX
 const hasActiveFilters = computed(() =>
   filters.q !== '' || filters.carrierId !== '' || filters.productId !== '' ||
-  filters.writingAgentId !== '' || filters.productType !== '' || filters.insureType !== '' ||
+  filters.writingAgentId !== '' || filters.productCategory !== '' || filters.productSubCategory !== '' ||
+  filters.followupDue || filters.insureType !== '' ||
   // #48 — a stage pick, or un-hiding renewed (non-default), counts as active.
   filters.renewalStage !== '' || filters.hideRenewed !== true,
 )
@@ -316,7 +341,9 @@ function clearFilters(): void {
   filters.q = ''
   filters.carrierId = ''; filters.productId = ''
   filters.writingAgentId = ''
-  filters.productType = ''; filters.insureType = ''
+  filters.productCategory = ''; filters.productSubCategory = ''
+  filters.followupDue = false
+  filters.insureType = ''
   filters.renewalStage = ''; filters.hideRenewed = true
   applyPreset(60)
   // A cleared filter shouldn't carry a stale multi-page selection.
@@ -324,18 +351,16 @@ function clearFilters(): void {
 }
 
 // Cascading resets — carrier switch clears plan; insureType switch clears
-// carrier + plan + productType if they no longer make sense.
+// carrier + plan if they no longer make sense.
 watch(() => filters.carrierId, (cid) => {
   filters.productId = ''
-  void loadProducts(cid)   // reload the plan dropdown for the new carrier
+  void loadProducts(cid)   // #47 — reload the plan dropdown for the new carrier
 })
+watch(() => filters.productCategory, () => { filters.productSubCategory = '' })
 watch(() => filters.insureType, () => {
   if (filters.carrierId && !carrierOptions.value.some((c) => c.id === filters.carrierId)) {
     filters.carrierId = ''
     filters.productId = ''
-  }
-  if (filters.productType && !productTypeOptions.value.some((t) => t.id === filters.productType)) {
-    filters.productType = ''
   }
 })
 
@@ -357,19 +382,41 @@ watch(() => [filters.fromDate, filters.toDate] as const, ([from, to]) => {
   }
 })
 
+function queryParams(): ExpiringSoonQuery {
+  return {
+    from: filters.fromDate || undefined,
+    to: filters.toDate || undefined,
+    q: filters.q || undefined,
+    carrierId: filters.carrierId || undefined,
+    productId: filters.productId || undefined,
+    writingAgentId: filters.writingAgentId || undefined,
+    productCategory: filters.productCategory || undefined,
+    productSubCategory: filters.productSubCategory || undefined,
+    followupDue: filters.followupDue || undefined,
+    insureType: filters.insureType || undefined,
+  }
+}
+
+async function fetchAllRows(): Promise<ExpiringPolicy[]> {
+  const all: ExpiringPolicy[] = []
+  for (let p = 1; ; p += 1) {
+    const res = await fetchExpiringSoon({ ...queryParams(), page: p, perPage: 500, sortBy: sortBy.value, sortDir: sortDir.value })
+    all.push(...res.data)
+    if (p >= (res.meta?.lastPage ?? 1)) break
+  }
+  return all
+}
+
+function toggleFollowupDue(): void {
+  filters.followupDue = !filters.followupDue
+}
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = null
   try {
     const res = await fetchExpiringSoon({
-      from: filters.fromDate || undefined,
-      to: filters.toDate || undefined,
-      q: filters.q || undefined,
-      carrierId: filters.carrierId || undefined,
-      productId: filters.productId || undefined,
-    writingAgentId: filters.writingAgentId || undefined,
-      productType: filters.productType || undefined,
-      insureType: filters.insureType || undefined,
+      ...queryParams(),
       page: page.value,
       perPage: perPage.value,
       sortBy: sortBy.value,
@@ -388,7 +435,7 @@ async function load(): Promise<void> {
     error.value = e instanceof ApiError ? e.message : 'Unable to load renewal queue.'
     rows.value = []
     meta.value = null
-    summary.value = { totalInWindow: 0, urgentCount: 0 }
+    summary.value = { totalInWindow: 0, urgentCount: 0, followupDueCount: 0 }
   } finally {
     loading.value = false
   }
@@ -408,7 +455,8 @@ function scheduleReload(): void {
 watch(
   () => [
     filters.q, filters.fromDate, filters.toDate,
-    filters.carrierId, filters.productId, filters.writingAgentId, filters.productType, filters.insureType,
+    filters.carrierId, filters.productId, filters.writingAgentId, filters.productCategory, filters.productSubCategory,
+    filters.followupDue, filters.insureType,
     perPage.value,
   ],
   scheduleReload,
@@ -418,7 +466,8 @@ watch(
 watch(
   () => [
     filters.q, filters.fromDate, filters.toDate,
-    filters.carrierId, filters.productId, filters.writingAgentId, filters.productType, filters.insureType,
+    filters.carrierId, filters.productId, filters.writingAgentId, filters.productCategory, filters.productSubCategory,
+    filters.followupDue, filters.insureType,
     preset.value, sortBy.value, sortDir.value, perPage.value,
   ],
   saveState,
@@ -432,6 +481,7 @@ onMounted(() => {
   // empty on first paint; otherwise it stays empty until a carrier is picked.
   void loadProducts(filters.carrierId)
   void loadAgents()
+  void loadTaxonomy()
   void load()
 })
 
@@ -504,18 +554,8 @@ async function bulkExportCsv(): Promise<void> {
   if (selected.value.size === 0) return
   // Pull the current filtered set (up to server cap), then narrow to the
   // selected IDs. Simpler + more correct than trying to POST an ID list.
-  const res = await fetchExpiringSoon({
-    from: filters.fromDate || undefined,
-    to: filters.toDate || undefined,
-    q: filters.q || undefined,
-    carrierId: filters.carrierId || undefined,
-    productId: filters.productId || undefined,
-    writingAgentId: filters.writingAgentId || undefined,
-    productType: filters.productType || undefined,
-    insureType: filters.insureType || undefined,
-    page: 1, perPage: 500,
-  })
-  const picked = res.data.filter((r) => selected.value.has(r.policyId))
+  const all = await fetchAllRows()
+  const picked = all.filter((r) => selected.value.has(r.policyId))
   const csv = toCsv(picked, [
     { header: 'Application', value: (r) => r.applicationNo },
     { header: 'Policy', value: (r) => r.policyNo },
@@ -526,8 +566,13 @@ async function bulkExportCsv(): Promise<void> {
     { header: 'Agent', value: (r) => `${r.agentCode ?? ''} ${r.agentName ?? ''}`.trim() },
     { header: 'Carrier', value: (r) => r.carrierCode },
     { header: 'Product', value: (r) => r.productCode },
+    { header: 'Product name', value: (r) => r.productName ?? '' },
+    { header: 'Category', value: (r) => [r.productCategory, r.productSubCategory].filter(Boolean).join(' / ') },
+    { header: 'License plate', value: (r) => r.motorLicenseNo ?? '' },
     { header: 'Annual premium', value: (r) => r.annualPremium.toFixed(2) },
     { header: 'Renewal stage', value: (r) => renewalStageMeta(r.renewalStage).label },
+    { header: 'Last follow-up', value: (r) => followupCsv(r) },
+    { header: 'Next follow-up', value: (r) => r.lastFollowup?.nextAt ?? '' },
   ])
   downloadCsv(csv, `renewals-selected-${new Date().toISOString().slice(0, 10)}.csv`)
 }
@@ -548,7 +593,7 @@ function relativeDays(iso: string | null | undefined): string {
 // "how long ago", or null when nothing has happened yet.
 function latestStatusLine(r: ExpiringPolicy): { label: string; when: string } | null {
   const steps: Array<[string | null | undefined, string]> = [
-    [r.renewalStartedAt, 'เริ่มต่ออายุ'],
+    [r.renewalStage === 'renewed' ? r.renewalStartedAt : null, 'เริ่มต่ออายุ'],
     [r.quoteSentAt, 'ส่งใบเสนอราคา'],
     [r.quotePreparedAt, 'จัดทำใบเสนอราคา'],
     [r.quoteReceivedAt, 'รับใบเสนอราคา'],
@@ -562,6 +607,13 @@ function latestStatusLine(r: ExpiringPolicy): { label: string; when: string } | 
   return null
 }
 
+function followupCsv(r: ExpiringPolicy): string {
+  const f = r.lastFollowup
+  if (!f) return ''
+  return [f.at?.slice(0, 10), followupChannelMeta(f.channel).label, followupResultMeta(f.result).label, f.reasonLabel, f.note]
+    .filter(Boolean).join(' · ')
+}
+
 // CSV export — fetch the entire filtered set (up to the server cap) with
 // one extra request instead of only what's on the current page. Uses the
 // same filter set as the visible table.
@@ -570,19 +622,8 @@ async function exportCsv(): Promise<void> {
   if (exportingCsv.value) return
   exportingCsv.value = true
   try {
-    const res = await fetchExpiringSoon({
-      from: filters.fromDate || undefined,
-      to: filters.toDate || undefined,
-      q: filters.q || undefined,
-      carrierId: filters.carrierId || undefined,
-      productId: filters.productId || undefined,
-    writingAgentId: filters.writingAgentId || undefined,
-      productType: filters.productType || undefined,
-      insureType: filters.insureType || undefined,
-      page: 1,
-      perPage: 500,
-    })
-    const csv = toCsv(res.data, [
+    const all = await fetchAllRows()
+    const csv = toCsv(all, [
       { header: 'Application', value: (r) => r.applicationNo },
       { header: 'Policy', value: (r) => r.policyNo },
       { header: 'Expiry', value: (r) => r.expiryDate },
@@ -592,8 +633,13 @@ async function exportCsv(): Promise<void> {
       { header: 'Agent', value: (r) => `${r.agentCode ?? ''} ${r.agentName ?? ''}`.trim() },
       { header: 'Carrier', value: (r) => r.carrierCode },
       { header: 'Product', value: (r) => r.productCode },
+      { header: 'Product name', value: (r) => r.productName ?? '' },
+      { header: 'Category', value: (r) => [r.productCategory, r.productSubCategory].filter(Boolean).join(' / ') },
+      { header: 'License plate', value: (r) => r.motorLicenseNo ?? '' },
       { header: 'Annual premium', value: (r) => r.annualPremium.toFixed(2) },
       { header: 'Renewal stage', value: (r) => renewalStageMeta(r.renewalStage).label },
+      { header: 'Last follow-up', value: (r) => followupCsv(r) },
+      { header: 'Next follow-up', value: (r) => r.lastFollowup?.nextAt ?? '' },
       { header: 'Quote requested', value: (r) => r.quoteRequestedAt ?? '' },
       { header: 'Quote received', value: (r) => r.quoteReceivedAt ?? '' },
       { header: 'Last contacted', value: (r) => r.lastContactedAt ?? '' },
@@ -626,7 +672,10 @@ async function exportPdf(): Promise<void> {
     if (filters.toDate) qs.set('to', filters.toDate)
     if (filters.carrierId) qs.set('carrierId', filters.carrierId)
     if (filters.productId) qs.set('productId', filters.productId)
-    if (filters.productType) qs.set('productType', filters.productType)
+    if (filters.writingAgentId) qs.set('writingAgentId', filters.writingAgentId)
+    if (filters.productCategory) qs.set('productCategory', filters.productCategory)
+    if (filters.productSubCategory) qs.set('productSubCategory', filters.productSubCategory)
+    if (filters.followupDue) qs.set('followupDue', '1')
     if (filters.insureType) qs.set('insureType', filters.insureType)
     const url = `${base}/reports/expiring-soon/pdf?${qs.toString()}`
     const res = await fetch(url, { headers: { Authorization: `Bearer ${token}` } })
@@ -741,6 +790,16 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
         <button type="button" @click="applyNextQuarter"
           class="px-3 py-1 rounded-full border border-slate-200 text-xs text-slate-600 hover:bg-slate-50">ไตรมาสหน้า</button>
         <span v-if="preset === 'custom'" class="px-2 py-0.5 rounded-full bg-slate-100 text-slate-600 text-[10px] uppercase tracking-wider">custom</span>
+        <span class="mx-1 text-slate-300">·</span>
+        <button type="button" @click="toggleFollowupDue" data-testid="followup-due-chip"
+          :class="[
+            'px-3 py-1 rounded-full border text-xs transition-colors flex items-center gap-1',
+            filters.followupDue
+              ? 'border-amber-500 bg-amber-50 text-amber-800 font-medium'
+              : 'border-slate-200 text-slate-600 hover:bg-amber-50 hover:border-amber-200',
+          ]">
+          <i class="pi pi-bell text-[10px]" /> ถึงกำหนดติดตาม ({{ (summary.followupDueCount ?? 0).toLocaleString() }})
+        </button>
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-12 gap-3 items-end">
@@ -802,10 +861,11 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
           </select>
         </div>
         <div class="md:col-span-3">
-          <label class="text-xs font-medium text-slate-500 mb-1 block">ประเภทผลิตภัณฑ์</label>
-          <select v-model="filters.productType" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
+          <label class="text-xs font-medium text-slate-500 mb-1 block">หมวดผลิตภัณฑ์</label>
+          <select v-model="filters.productCategory" data-testid="filter-product-category"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
             <option value="">ทั้งหมด</option>
-            <option v-for="t in productTypeOptions" :key="t.id" :value="t.id">{{ t.label }}</option>
+            <option v-for="c in categoryOptions" :key="c.id" :value="c.id">{{ c.label }}</option>
           </select>
         </div>
         <div class="md:col-span-1 flex md:justify-end">
@@ -813,6 +873,18 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
             class="w-full md:w-auto px-3 py-1.5 rounded-lg border border-rose-200 text-xs text-rose-600 hover:bg-rose-50">
             ล้าง
           </button>
+        </div>
+
+        <div class="md:col-span-4">
+          <label class="text-xs font-medium text-slate-500 mb-1 block">
+            หมวดย่อย
+            <span v-if="!filters.productCategory" class="text-slate-400 ml-1">(เลือกหมวดก่อน)</span>
+          </label>
+          <select v-model="filters.productSubCategory" :disabled="!filters.productCategory" data-testid="filter-product-subcategory"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white disabled:bg-slate-50">
+            <option value="">ทั้งหมด</option>
+            <option v-for="c in subCategoryOptions" :key="c.id" :value="c.id">{{ c.label }}</option>
+          </select>
         </div>
 
         <!-- Writing-agent filter (searchable) -->
@@ -842,7 +914,7 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
       </div>
     </section>
 
-    <section class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+    <section class="grid grid-cols-1 sm:grid-cols-3 gap-4">
       <div class="card p-4">
         <div class="text-xs uppercase tracking-wider text-slate-400">รวมทั้งหมด (ตามฟิลเตอร์)</div>
         <div class="text-2xl font-semibold text-slate-900 mt-1">{{ summary.totalInWindow.toLocaleString() }}</div>
@@ -861,6 +933,16 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
         </div>
         <div class="text-2xl font-semibold text-rose-600 mt-1">{{ summary.urgentCount.toLocaleString() }}</div>
         <div v-if="error" class="text-xs text-rose-600 mt-1">{{ error }}</div>
+      </button>
+      <button type="button" @click="toggleFollowupDue" data-testid="followup-due-card"
+        :class="['card p-4 text-left hover:ring-2 hover:ring-amber-200 transition-shadow cursor-pointer', filters.followupDue ? 'ring-2 ring-amber-300' : '']"
+        title="คลิกเพื่อดูเฉพาะรายการที่ถึงกำหนดติดตามแล้ว (ไม่ขึ้นกับช่วงวันหมดอายุ)">
+        <div class="text-xs uppercase tracking-wider text-slate-400 flex items-center justify-between">
+          <span>ถึงกำหนดติดตาม</span>
+          <i class="pi pi-bell text-[10px] text-slate-300" />
+        </div>
+        <div class="text-2xl font-semibold text-amber-600 mt-1">{{ (summary.followupDueCount ?? 0).toLocaleString() }}</div>
+        <div class="text-xs text-slate-500 mt-1">{{ filters.followupDue ? 'กำลังกรองเฉพาะรายการที่ถึงกำหนด' : 'นัดติดตามวันนี้หรือเลยกำหนด' }}</div>
       </button>
     </section>
 
@@ -916,6 +998,7 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
               <th class="px-4 py-2 text-left">Application</th>
               <th class="px-4 py-2 text-left">Policy no</th>
               <th class="px-4 py-2 text-left">ลูกค้า</th>
+              <th class="px-4 py-2 text-left">ทะเบียน / ผลิตภัณฑ์</th>
               <th class="px-4 py-2 text-left">ตัวแทน</th>
               <th class="px-4 py-2 text-right cursor-pointer select-none hover:text-slate-800"
                 @click="toggleSort('annualPremium')">
@@ -947,13 +1030,26 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
                   class="accent-brand-500 cursor-pointer" />
               </td>
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ r.applicationNo ?? '—' }}</td>
-              <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ r.policyNo ?? '—' }}</td>
+              <td class="px-4 py-2 font-mono text-xs text-slate-700">
+                <div>{{ r.policyNo ?? '—' }}</div>
+                <PolicyPeriodBadge v-if="r.periodLabel" :label="r.periodLabel" class="mt-0.5" />
+              </td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ r.customerName || r.customerCode }}</div>
                 <div class="text-xs text-slate-500">
                   <span>{{ r.customerCode }}</span>
                   <span v-if="r.customerEmail" class="ml-1">· {{ r.customerEmail }}</span>
                 </div>
+              </td>
+              <td class="px-4 py-2 max-w-[240px]" data-testid="col-product">
+                <template v-if="r.motorLicenseNo">
+                  <div class="text-slate-900 font-medium whitespace-nowrap">{{ r.motorLicenseNo }}</div>
+                  <div class="text-xs text-slate-500 truncate" :title="r.productName ?? ''">{{ r.productName || r.productCode || '—' }}</div>
+                </template>
+                <template v-else>
+                  <div class="text-slate-900 truncate" :title="r.productName ?? ''">{{ r.productName || r.productCode || '—' }}</div>
+                  <div class="text-xs text-slate-500 truncate">{{ r.productSubCategory || r.productCategory || '' }}</div>
+                </template>
               </td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ r.agentName || r.agentCode }}</div>
@@ -975,17 +1071,27 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
                   {{ renewalStageMeta(r.renewalStage).label }}
                 </span>
                 <!-- Only the latest step, so the column stays clean -->
-                <div v-if="latestStatusLine(r)" class="mt-1 text-slate-500">
+                <div v-if="r.lastFollowup" class="mt-1 flex items-center gap-1 flex-wrap" data-testid="col-last-followup">
+                  <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium', followupResultMeta(r.lastFollowup.result).badgeClass]">
+                    <i :class="['pi', followupChannelMeta(r.lastFollowup.channel).icon, 'text-[9px]']" />
+                    {{ followupResultMeta(r.lastFollowup.result).label }}
+                  </span>
+                  <span class="text-slate-500">{{ relativeDays(r.lastFollowup.at) }}</span>
+                </div>
+                <div v-else-if="latestStatusLine(r)" class="mt-1 text-slate-500">
                   {{ latestStatusLine(r)!.label }} · {{ latestStatusLine(r)!.when }}
+                </div>
+                <div v-if="r.lastFollowup?.nextAt" :class="['mt-0.5', isFollowupOverdue(r.lastFollowup.nextAt) ? 'text-rose-600 font-medium' : 'text-slate-500']">
+                  <i class="pi pi-calendar text-[9px]" /> นัด {{ fmtDate(r.lastFollowup.nextAt) }}
                 </div>
               </td>
             </tr>
             <tr v-if="!loading && displayRows.length === 0">
-              <td colspan="9" class="px-4 py-6 text-center text-slate-500">
+              <td colspan="10" class="px-4 py-6 text-center text-slate-500">
                 <template v-if="rows.length > 0">
                   ไม่มีกรมธรรม์ตรงกับตัวกรองสถานะ — ลองล้างตัวกรอง หรือเปิด "ต่ออายุแล้ว"
                 </template>
-                <template v-else>ไม่พบกรมธรรม์ที่จะครบกำหนดในช่วงเวลานี้</template>
+                <template v-else>{{ filters.followupDue ? 'ไม่มีรายการที่ถึงกำหนดติดตาม' : 'ไม่พบกรมธรรม์ที่จะครบกำหนดในช่วงเวลานี้' }}</template>
               </td>
             </tr>
           </tbody>
@@ -1050,10 +1156,17 @@ const windowLabel = computed(() => meta.value ? `${fmtDate(meta.value.from)} →
               class="card p-3 text-sm cursor-pointer hover:ring-1 hover:ring-brand-200"
               @click="openRenewalDetail(r.policyId)">
               <div class="font-medium text-slate-900 truncate">{{ r.customerName || r.customerCode || '—' }}</div>
-              <div class="text-xs text-slate-500 font-mono mt-0.5 truncate">
+              <div class="text-xs text-slate-500 font-mono mt-0.5 truncate flex items-center gap-1">
                 {{ r.policyNo || r.applicationNo || '—' }}
+                <PolicyPeriodBadge v-if="r.periodLabel" :label="r.periodLabel" />
               </div>
               <div class="text-xs text-slate-500 mt-1 truncate">{{ r.carrierName || r.carrierCode || '—' }}</div>
+              <div class="text-xs text-slate-700 mt-0.5 truncate">
+                <span v-if="r.motorLicenseNo" class="font-medium">{{ r.motorLicenseNo }} · </span>{{ r.productName || r.productCode || '—' }}
+              </div>
+              <div v-if="r.lastFollowup?.nextAt" :class="['text-[11px] mt-1', isFollowupOverdue(r.lastFollowup.nextAt) ? 'text-rose-600 font-medium' : 'text-slate-500']">
+                <i class="pi pi-calendar text-[9px]" /> นัด {{ fmtDate(r.lastFollowup.nextAt) }}
+              </div>
               <div class="flex items-center justify-between mt-2">
                 <span :class="['inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium', badge(r.daysRemaining).cls]">
                   {{ r.daysRemaining }} วัน

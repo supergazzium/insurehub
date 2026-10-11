@@ -96,15 +96,9 @@ class CustomerSeeder extends Seeder
         $this->command?->info('  customers: '.Customer::where('tenant_id', $tenantId)->count());
     }
 
-    private function mapGender(?string $raw): string
+    private function mapGender(?string $raw): ?string
     {
-        $raw = trim((string) $raw);
-        return match ($raw) {
-            'ชาย', 'M', 'm' => 'male',
-            'หญิง', 'F', 'f' => 'female',
-            '' => '',
-            default => 'other',
-        };
+        return \App\Support\GenderFromTitle::normalize($raw);
     }
 
     private function mailingMatchesPermanent(array $row): bool

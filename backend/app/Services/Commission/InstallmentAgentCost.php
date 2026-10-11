@@ -46,6 +46,14 @@ class InstallmentAgentCost
         if (CommissionLedger::query()->where('idempotency_key', $key)->exists()) {
             return; // already booked (replay/retry)
         }
+        $bookedForPolicy = CommissionLedger::query()
+            ->where('policy_id', $policy->id)
+            ->where('payout_type', CommissionLedger::TYPE_INSTALLMENT_AGENT_COST)
+            ->where('status', '!=', CommissionLedger::STATUS_REVERSED)
+            ->exists();
+        if ($bookedForPolicy) {
+            return;
+        }
 
         CommissionLedger::create([
             'tenant_id' => $policy->tenant_id,

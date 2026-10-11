@@ -7,9 +7,12 @@ use App\Http\Controllers\Api\AdminRoleController;
 use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AgentCommissionController;
 use App\Http\Controllers\Api\AgentController;
+use App\Http\Controllers\Api\AgentDocumentController;
 use App\Http\Controllers\Api\AgentNoteController;
 use App\Http\Controllers\Api\CollectionsController;
 use App\Http\Controllers\Api\FollowUpController;
+use App\Http\Controllers\Api\PolicyFollowUpActionController;
+use App\Http\Controllers\Api\VerificationController;
 use App\Http\Controllers\Api\AgentHierarchyController;
 use App\Http\Controllers\Api\RankPromotionController;
 use App\Http\Controllers\Api\RankController;
@@ -49,6 +52,8 @@ use App\Http\Controllers\Api\PublicController;
 use App\Http\Controllers\Api\QuoteController;
 use App\Http\Controllers\Api\RecruitmentLinkController;
 use App\Http\Controllers\Api\ReportController;
+use App\Http\Controllers\Api\RenewalFollowUpController;
+use App\Http\Controllers\Api\RenewalNoticeController;
 use App\Http\Controllers\Api\TenantController;
 use Illuminate\Support\Facades\Route;
 
@@ -100,6 +105,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('me/agent/referral-link', [MeAgentController::class, 'referralLink']);
     Route::get('me/agent/downline', [MeAgentController::class, 'downline']);
     Route::get('me/agent/earnings', [MeAgentController::class, 'earnings']);
+    Route::get('me/agent/payouts/{batch}/statement', [MeAgentController::class, 'payoutStatement']);
+    Route::get('me/agent/payouts/{batch}/certificate', [MeAgentController::class, 'payoutCertificate']);
 
     // RBAC admin — roles, permissions catalog, user role assignment.
     Route::get('admin/roles', [AdminRoleController::class, 'index']);
@@ -159,6 +166,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('commission-payout-batches/{batch}/generate-pdfs', [CommissionPayoutController::class, 'generatePdfs']);
     Route::get('commission-payout-batches/{batch}/agents/{code}/pdf', [CommissionPayoutController::class, 'agentPdf']);
     Route::get('commission-payout-batches/{batch}/export.csv', [CommissionPayoutController::class, 'exportCsv']);
+    Route::get('commission-payout-batches/{batch}/bank.csv', [CommissionPayoutController::class, 'bankCsv']);
+    Route::get('commission-payout-batches/{batch}/payees/{payee}/certificate', [CommissionPayoutController::class, 'certificate']);
     Route::post('commission-payout-batches/{batch}/cancel', [CommissionPayoutController::class, 'cancel']);
     // Per-agent bulk-run pay (each agent = separate transfer with its own ref).
     Route::post('commission-payout-batches/{batch}/agents/{agent}/mark-paid', [CommissionPayoutController::class, 'markAgentPaid']);
@@ -176,9 +185,17 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // รับค่าคอมจากบริษัทประกัน (insurer commission receipt — Phase 1 manual).
     Route::get('commission-receivables', [CommissionReceiptController::class, 'index']);
+    Route::get('commission-receivables/export', [CommissionReceiptController::class, 'export']);
+    Route::post('commission-receivables/bulk-review', [CommissionReceiptController::class, 'bulkReview']);
+    Route::post('commission-receivables/bulk-receive', [CommissionReceiptController::class, 'bulkReceive']);
+    Route::post('commission-receivables/statement-match', [CommissionReceiptController::class, 'statementMatch']);
+    Route::post('commission-receivables/adjustments', [CommissionReceiptController::class, 'storeAdjustment']);
+    Route::get('commission-receivables/adjustments/suggest', [CommissionReceiptController::class, 'suggestAdjustment']);
     Route::get('commission-receivables/{receivable}', [CommissionReceiptController::class, 'show']);
+    Route::delete('commission-receivables/{receivable}', [CommissionReceiptController::class, 'destroyAdjustment']);
     Route::patch('commission-receivables/{receivable}/review', [CommissionReceiptController::class, 'review']);
-    Route::post('commission-receivables/{receivable}/confirm-received', [CommissionReceiptController::class, 'confirmReceived']);
+    Route::post('commission-receivables/{receivable}/receive', [CommissionReceiptController::class, 'receive']);
+    Route::post('commission-receivables/{receivable}/confirm-received', [CommissionReceiptController::class, 'receive']);
     Route::post('commission-receivables/{receivable}/mark-no-commission', [CommissionReceiptController::class, 'markNoCommission']);
     Route::post('commission-receivables/{receivable}/reopen', [CommissionReceiptController::class, 'reopen']);
     Route::post('commission-receivables/{receivable}/resync-expected', [CommissionReceiptController::class, 'resyncExpected']);
@@ -216,12 +233,23 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('collections', [CollectionsController::class, 'index']);
     Route::get('collections/{policy}', [CollectionsController::class, 'show']);
     Route::get('follow-ups', [FollowUpController::class, 'index']);
+    Route::patch('policies/{policy}/freelook', [PolicyFollowUpActionController::class, 'freelook']);
+    Route::get('policies/{policy}/cancellation-review', [PolicyFollowUpActionController::class, 'showCancellationReview']);
+    Route::patch('policies/{policy}/cancellation-review', [PolicyFollowUpActionController::class, 'cancellationReview']);
+    Route::get('verifications', [VerificationController::class, 'index']);
+    Route::get('verifications/{verification}', [VerificationController::class, 'show']);
+    Route::post('verifications/{verification}/approve', [VerificationController::class, 'approve']);
+    Route::post('verifications/{verification}/reject', [VerificationController::class, 'reject']);
+    Route::post('verifications/{verification}/cancel', [VerificationController::class, 'cancel']);
     Route::get('policies/{policy}/reminders', [CollectionsController::class, 'reminders']);
     Route::post('policies/{policy}/reminders', [CollectionsController::class, 'storeReminder']);
 
     // สายงาน (agent hierarchy) + level management + promotion approval queue
     Route::patch('agents/{agent}/hierarchy', [AgentHierarchyController::class, 'update']);
     Route::get('agents/{agent}/relations', [AgentHierarchyController::class, 'relations']);
+    Route::post('agents/{agent}/documents/{kind}', [AgentDocumentController::class, 'upload']);
+    Route::get('agents/{agent}/documents/{kind}', [AgentDocumentController::class, 'show']);
+    Route::delete('agents/{agent}/documents/{kind}', [AgentDocumentController::class, 'destroy']);
     Route::get('agents/{agent}/notes', [AgentNoteController::class, 'index']);
     Route::post('agents/{agent}/notes', [AgentNoteController::class, 'store']);
     Route::get('agents/{agent}/level-progress', [LevelProgressController::class, 'show']);
@@ -229,6 +257,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('agents/{agent}/photo/{kind}', [AgentController::class, 'uploadPhoto']);
     Route::get('agents/{agent}/photo/{kind}', [AgentController::class, 'photo']);
     Route::get('ranks', [RankController::class, 'index']);
+    Route::patch('ranks/{rank}', [RankController::class, 'update']);
+    Route::post('agents/{agent}/rank-requests', [RankPromotionController::class, 'requestChange']);
     Route::get('rank-promotions', [RankPromotionController::class, 'index']);
     Route::post('rank-promotions/{rankPromotion}/approve', [RankPromotionController::class, 'approve']);
     Route::post('rank-promotions/{rankPromotion}/reject', [RankPromotionController::class, 'reject']);
@@ -241,6 +271,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // sub-paths correctly either way, but keeping it grouped with the
     // apiResource makes intent clear).
     Route::get('customers/{customer}/prior-assets', [CustomerController::class, 'priorAssets']);
+    Route::get('customers/{customer}/audit', [CustomerController::class, 'audit']);
     Route::apiResource('customers', CustomerController::class);
     Route::apiResource('carriers', CarrierController::class);
     Route::apiResource('carriers.bank-accounts', CarrierBankAccountController::class)
@@ -255,6 +286,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // Registered above the resource routes wouldn't be needed (no path
     // collision), but kept adjacent so the credentials surface is grouped.
     Route::get('carrier-credentials/labels', [CarrierCredentialController::class, 'labels']);
+    Route::get('products/taxonomy-gaps', [ProductController::class, 'taxonomyGaps']);
     Route::apiResource('products', ProductController::class);
     Route::get('carriers/{carrier}/products/next-code', [ProductController::class, 'nextCode']);
     Route::get('product-categories', [ProductTaxonomyController::class, 'index']);
@@ -277,6 +309,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::patch('policies/{policy}/draft', [PolicyController::class, 'updateDraft']);
     Route::post('policies/{policy}/promote-to-quotation', [PolicyController::class, 'promoteToQuotation']);
     Route::post('policies/{policy}/promote-to-submitted', [PolicyController::class, 'promoteToSubmitted']);
+    Route::get('policies/{policy}/renewal-draft', [PolicyController::class, 'renewalDraft']);
     Route::apiResource('policies', PolicyController::class);
     // Phase 6 — sectioned edit (parties/dates/premium/payment/notes/identifiers).
     Route::patch('policies/{policy}/section/{section}', [PolicyController::class, 'patchSection']);
@@ -291,13 +324,19 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('policies/{policy}/renewal/decline', [PolicyController::class, 'declineRenewal']);
     // Manual stage marker — log a stage without performing its real side-effect.
     Route::post('policies/{policy}/renewal/mark-stage', [PolicyController::class, 'markRenewalStage']);
+    Route::post('policies/{policy}/renewal/reopen', [RenewalFollowUpController::class, 'reopen']);
+    Route::get('policies/{policy}/renewal-followups', [RenewalFollowUpController::class, 'index']);
+    Route::post('policies/{policy}/renewal-followups', [RenewalFollowUpController::class, 'store']);
+    Route::get('policies/{policy}/renewal-notices', [RenewalNoticeController::class, 'index']);
+    Route::post('policies/{policy}/renewal-notices', [RenewalNoticeController::class, 'store']);
     // Phase 9 — endorsements (event log per policy).
     Route::get('policies/{policy}/endorsements', [EndorsementController::class, 'index']);
     Route::post('policies/{policy}/endorsements', [EndorsementController::class, 'store']);
     // สลักหลังเบี้ยเพิ่ม (v1) — mutates the policy premium + records the delta.
     Route::post('policies/{policy}/endorsements/premium', [EndorsementController::class, 'storePremiumChange']);
     Route::patch('policies/{policy}/endorsements/premium/{event}', [EndorsementController::class, 'updatePremiumChange']);
-    Route::delete('policies/{policy}/endorsements/premium/{event}', [EndorsementController::class, 'destroyPremiumChange']);
+    Route::patch('policies/{policy}/endorsements/{event}', [EndorsementController::class, 'update']);
+    Route::post('policies/{policy}/endorsements/{event}/void', [EndorsementController::class, 'void']);
     // Phase 9 — motor tariff admin CRUD.
     Route::get('motor-act-tariffs', [MotorActTariffController::class, 'index']);
     Route::post('motor-act-tariffs', [MotorActTariffController::class, 'store']);
@@ -337,8 +376,9 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
 
     // Policy children: payments + documents + lifecycle events.
     Route::get('policies/{policy}/payments', [PolicyPaymentController::class, 'index']);
+    Route::get('policies/{policy}/installments', [PolicyPaymentController::class, 'installments']);
     Route::post('policies/{policy}/payments', [PolicyPaymentController::class, 'store']);
-    Route::delete('policies/{policy}/payments/{payment}', [PolicyPaymentController::class, 'destroy']);
+    Route::post('policies/{policy}/payments/{payment}/void', [PolicyPaymentController::class, 'void'])->whereNumber('payment');
     Route::post('policies/{policy}/documents', [PolicyDocumentController::class, 'store']);
     Route::delete('policies/{policy}/documents/{document}', [PolicyDocumentController::class, 'destroy']);
     Route::get('policies/{policy}/events', [PolicyEventController::class, 'index']);

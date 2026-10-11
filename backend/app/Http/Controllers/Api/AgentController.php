@@ -34,8 +34,8 @@ class AgentController extends ApiController
             ->select([
                 'a.id', 'a.agent_code', 'a.agent_type',
                 'a.first_name', 'a.last_name', 'a.nickname',
-                'a.email', 'a.phone', 'a.level',
-                'a.head_status',
+                'a.email', 'a.level', 'a.kind', 'a.juristic_name',
+                'a.head_status', 'a.approval_status',
                 'a.license_life_no', 'a.license_life_expiry',
                 'a.license_non_life_no', 'a.license_non_life_expiry',
                 'a.parent_agent_id', 'a.joined_at', 'a.active',
@@ -53,7 +53,9 @@ class AgentController extends ApiController
                     ->orWhere('a.first_name', 'like', $like)
                     ->orWhere('a.last_name', 'like', $like)
                     ->orWhere('a.email', 'like', $like)
-                    ->orWhere('a.phone', 'like', $like);
+                    ->orWhere('a.phone', 'like', $like)
+                    ->orWhere('a.juristic_name', 'like', $like)
+                    ->orWhere('a.tax_id', 'like', $like);
             });
         }
         if ($request->boolean('activeOnly')) {
@@ -68,7 +70,18 @@ class AgentController extends ApiController
         if ($atype = $request->input('agentType')) {
             $q->where('a.agent_type', $atype);
         }
-        if ($licenseStatus = $request->input('licenseStatus')) {
+        $licenseType = $request->input('licenseType');
+        if (in_array($licenseType, ['life', 'non_life'], true)) {
+            $col = $licenseType === 'life' ? 'a.license_life_expiry' : 'a.license_non_life_expiry';
+            $today = now()->toDateString();
+            match ($request->input('licenseStatus')) {
+                'valid' => $q->where($col, '>=', $today),
+                'expired' => $q->whereNotNull($col)->where($col, '<', $today),
+                'expiring60d' => $q->whereBetween($col, [$today, now()->addDays(60)->toDateString()]),
+                'none' => $q->whereNull($col),
+                default => $q->whereNotNull($col),
+            };
+        } elseif ($licenseStatus = $request->input('licenseStatus')) {
             $today = now()->toDateString();
             match ($licenseStatus) {
                 'valid' => $q->where(function ($w) use ($today): void {

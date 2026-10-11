@@ -18,6 +18,8 @@ const range = reactive({ from: first, to: today })
 const rows = ref<PaymentRow[]>([])
 const total = ref(0)
 const totalAmount = ref(0)
+const toInsureHub = ref(0)
+const toCarrier = ref(0)
 const loading = ref(false)
 const error = ref<string | null>(null)
 
@@ -28,6 +30,8 @@ async function load(): Promise<void> {
     rows.value = res.data
     total.value = res.meta.total
     totalAmount.value = res.meta.totalAmount
+    toInsureHub.value = res.meta.toInsureHub ?? res.meta.totalAmount
+    toCarrier.value = res.meta.toCarrier ?? 0
   } catch (e: unknown) {
     error.value = e instanceof ApiError ? e.message : 'Failed.'
   } finally { loading.value = false }
@@ -39,6 +43,8 @@ function exportCsv(): void {
     { header: 'Payment date', value: (r) => r.paymentDate },
     { header: 'Amount', value: (r) => r.amount.toFixed(2) },
     { header: 'Method', value: (r) => r.method },
+    { header: 'Payee', value: (r) => (r.payee === 'carrier' ? 'carrier' : 'insurehub') },
+    { header: 'Adjustment', value: (r) => (r.adjustmentAmount ? `${r.adjustmentKind ?? ''} ${r.adjustmentAmount.toFixed(2)}`.trim() : '') },
     { header: 'Reference', value: (r) => r.reference },
     { header: 'Application', value: (r) => r.applicationNo },
     { header: 'Policy', value: (r) => r.policyNo },
@@ -81,9 +87,19 @@ function fmt(n: number): string {
         <i :class="loading ? 'pi pi-spin pi-spinner' : 'pi pi-search'" class="text-xs mr-1" />
         {{ t('reports.load') }}
       </button>
-      <div class="ml-auto text-sm">
-        <div class="text-xs text-slate-500">{{ t('reports.payments.totalAmount') }}</div>
-        <div class="font-mono font-semibold text-brand-700">฿ {{ fmt(totalAmount) }}</div>
+      <div class="ml-auto flex gap-6 text-sm">
+        <div>
+          <div class="text-xs text-slate-500">เข้า InsureHub</div>
+          <div class="font-mono font-semibold text-slate-800" data-testid="report-to-insurehub">฿ {{ fmt(toInsureHub) }}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">จ่ายตรงบริษัทประกัน</div>
+          <div class="font-mono font-semibold text-indigo-700" data-testid="report-to-carrier">฿ {{ fmt(toCarrier) }}</div>
+        </div>
+        <div>
+          <div class="text-xs text-slate-500">{{ t('reports.payments.totalAmount') }}</div>
+          <div class="font-mono font-semibold text-brand-700">฿ {{ fmt(totalAmount) }}</div>
+        </div>
       </div>
     </section>
 
@@ -96,6 +112,8 @@ function fmt(n: number): string {
             <th class="px-3 py-2 text-left">{{ t('reports.payments.date') }}</th>
             <th class="px-3 py-2 text-right">{{ t('reports.payments.amount') }}</th>
             <th class="px-3 py-2 text-left">{{ t('reports.payments.method') }}</th>
+            <th class="px-3 py-2 text-left">ผู้รับชำระ</th>
+            <th class="px-3 py-2 text-right">ส่วนลด / ค่าคอมที่หัก</th>
             <th class="px-3 py-2 text-left">{{ t('reports.col.application') }}</th>
             <th class="px-3 py-2 text-left">{{ t('reports.col.customer') }}</th>
             <th class="px-3 py-2 text-left">{{ t('reports.col.agent') }}</th>
@@ -104,12 +122,23 @@ function fmt(n: number): string {
           </tr>
         </thead>
         <tbody class="divide-y divide-slate-100">
-          <tr v-if="!rows.length && !loading"><td colspan="8" class="text-center py-8 text-slate-400 text-xs">{{ t('reports.empty') }}</td></tr>
+          <tr v-if="!rows.length && !loading"><td colspan="10" class="text-center py-8 text-slate-400 text-xs">{{ t('reports.empty') }}</td></tr>
           <tr v-for="r in rows" :key="r.paymentId">
             <td class="px-3 py-2 text-xs font-mono">{{ fmtDate(r.paymentDate) }}</td>
             <td class="px-3 py-2 text-right font-mono">฿ {{ fmt(r.amount) }}</td>
             <td class="px-3 py-2 text-xs">
               <span class="inline-flex px-2 py-0.5 rounded bg-slate-100 text-slate-700">{{ r.method }}</span>
+            </td>
+            <td class="px-3 py-2 text-xs">
+              <span v-if="r.payee === 'carrier'" class="inline-flex px-2 py-0.5 rounded bg-indigo-50 text-indigo-700 ring-1 ring-indigo-200">จ่ายตรงบริษัทประกัน</span>
+              <span v-else class="text-slate-600">InsureHub</span>
+            </td>
+            <td class="px-3 py-2 text-right font-mono text-xs">
+              <template v-if="r.adjustmentAmount">
+                <span :class="r.adjustmentKind === 'commission_deducted' ? 'text-violet-700' : 'text-amber-700'">฿ {{ fmt(r.adjustmentAmount) }}</span>
+                <div class="text-[10px] text-slate-400">{{ r.adjustmentKind === 'commission_deducted' ? 'ค่าคอมที่หัก' : 'ส่วนลด' }}</div>
+              </template>
+              <span v-else class="text-slate-300">—</span>
             </td>
             <td class="px-3 py-2 font-mono text-xs">{{ r.applicationNo }}</td>
             <td class="px-3 py-2 truncate max-w-xs">{{ r.customerName }}</td>

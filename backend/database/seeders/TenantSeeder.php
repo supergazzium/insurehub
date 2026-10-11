@@ -46,6 +46,20 @@ class TenantSeeder extends Seeder
                 'name' => 'Platform Admin',
                 'password' => Hash::make('insurehub'),
                 'role' => 'super_admin',
+                'role_id' => \App\Models\Role::query()->where('key', 'super_admin')->value('id'),
+                'locale' => 'th',
+                'active' => true,
+            ],
+        );
+
+        User::updateOrCreate(
+            ['email' => 'staff@insurehub.co.th'],
+            [
+                'tenant_id' => $tenant->id,
+                'name' => 'เจ้าหน้าที่คีย์งาน (ทดสอบ)',
+                'password' => Hash::make('insurehub'),
+                'role' => 'sales_support',
+                'role_id' => \App\Models\Role::query()->where('key', 'sales_support')->value('id'),
                 'locale' => 'th',
                 'active' => true,
             ],

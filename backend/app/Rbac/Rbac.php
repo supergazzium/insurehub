@@ -29,7 +29,7 @@ final class Rbac
 
     public function userHasPermission(User $user, string $permissionKey): bool
     {
-        $role = $user->roleRel;
+        $role = $this->roleFor($user);
         if ($role === null) {
             return false;
         }
@@ -58,7 +58,7 @@ final class Rbac
     /** @return list<string> */
     public function userPermissions(User $user): array
     {
-        $role = $user->roleRel;
+        $role = $this->roleFor($user);
         if ($role === null) {
             return [];
         }
@@ -85,6 +85,16 @@ final class Rbac
             if ($effect === 'deny')  unset($set[$key]);
         }
         return array_keys($set);
+    }
+
+    private function roleFor(User $user): ?Role
+    {
+        if ($user->roleRel !== null) {
+            return $user->roleRel;
+        }
+        $legacy = (string) ($user->role ?? '');
+
+        return $legacy === '' ? null : Role::query()->where('key', $legacy)->first();
     }
 
     /** @return list<string> */

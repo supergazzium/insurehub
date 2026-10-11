@@ -14,6 +14,8 @@ class PolicyEvent extends Model
     protected $casts = [
         'occurred_at' => 'datetime',
         'payload' => 'array',
+        'endorsement_seq' => 'integer',
+        'voided_at' => 'datetime',
     ];
 
     public function policy(): BelongsTo
@@ -24,5 +26,15 @@ class PolicyEvent extends Model
     public function user(): BelongsTo
     {
         return $this->belongsTo(User::class, 'by_user_id');
+    }
+
+    public function voidedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'voided_by_user_id');
+    }
+
+    public function isVoided(): bool
+    {
+        return $this->voided_at !== null;
     }
 }

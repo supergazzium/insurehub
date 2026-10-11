@@ -11,6 +11,7 @@
 import { defineStore } from 'pinia'
 import { ref, computed } from 'vue'
 import { api, type Single } from '../api/client'
+import type { VerifyRow } from '../api/followups'
 import {
   fetchPolicyList,
   type PolicyListRow,
@@ -63,6 +64,9 @@ export type PolicyEventType =
   | 'reinstated'
   | 'backfillMigrated'
   | 'premiumPaid'
+  | 'premiumPaymentVoided'
+  | 'fulfilmentUpdated'
+  | 'approvalUpdated'
   | 'detailsUpdated'
   | 'documentUploaded'
 
@@ -243,8 +247,26 @@ export interface PolicyRebate {
 
 export type NewOrRenew = 'new' | 'renew'
 
+export interface PolicyChainLink {
+  id: string
+  applicationNo: string | null
+  policyNo: string | null
+  status: PolicyStatus
+  policyYear: number
+  customerYear?: number | null
+  effectiveDate: string | null
+  expiryDate: string | null
+  periodLabel?: string
+}
+
 export interface Policy {
   id: string
+  productCode?: string | null
+  productName?: string | null
+  productCategory?: string | null
+  productSubCategory?: string | null
+  carrierCode?: string | null
+  carrierName?: string | null
   quoteNo: string
   applicationNo: string | null
   policyNo: string | null
@@ -268,9 +290,21 @@ export interface Policy {
   periodPaidEnd?: string | null
   policyEnd?: string | null
   policyYear: number
+  customerYear?: number | null
+  yearsOverridden?: boolean
+  refAppToId?: string | null
+  renewedFrom?: PolicyChainLink | null
+  renewedTo?: (PolicyChainLink & { live: boolean; count: number }) | null
+  periodLabel?: string
   actYear: number
   newOrRenew: NewOrRenew
   freelookActive: boolean
+  salesChannel?: 'face_to_face' | 'telephone' | 'online'
+  freelookEndDate?: string | null
+  freelookDocSentAt?: string | null
+  freelookDocSignedAt?: string | null
+  freelookDocReturnedAt?: string | null
+  verification?: { pending: VerifyRow | null; lastRejected: VerifyRow | null }
   premium?: PolicyPremium
   mainCommission?: PolicyMainCommission
   commissionSnapshot?: PolicyCommissionSnapshot

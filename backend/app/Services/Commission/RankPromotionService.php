@@ -8,9 +8,11 @@ use App\Models\Agent;
 use App\Models\MemberVolumeAccumulation;
 use App\Models\Rank;
 use App\Models\RankPromotion;
+use App\Support\AgentLicense;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Validation\ValidationException;
 
 /**
  * Evaluates agents for rank promotion based on their volume accumulations.
@@ -23,7 +25,6 @@ use Illuminate\Support\Facades\Log;
  *   4. Instant + skip-level: an agent qualifying for Lv7 goes STRAIGHT
  *      to Lv7 from wherever they are, no month-end wait, no one-step-
  *      at-a-time cap.
- *   Lv7+ require agents.has_license = true.
  *
  * Qualification metric: rolling_3_month_volume vs ranks.three_month_accum_target
  * (see design conversation with the operator — the two threshold columns on
@@ -113,30 +114,90 @@ class RankPromotionService
             return null;
         }
 
+        if ($this->wasRejected($agent, $qualifiedRank, $currentMonth)) {
+            return null;
+        }
+
         return $this->promote($agent, $qualifiedRank, $volume, $currentMonth);
+    }
+
+    public function requestManual(Agent $agent, Rank $toRank, int $userId, string $note): RankPromotion
+    {
+        return DB::transaction(function () use ($agent, $toRank, $userId, $note): RankPromotion {
+            $locked = Agent::query()->lockForUpdate()->findOrFail($agent->id);
+
+            if ((int) $toRank->level === $this->currentLevel($locked)) {
+                throw ValidationException::withMessages(['toLevel' => 'ระดับที่ขอต้องต่างจากระดับปัจจุบัน']);
+            }
+            if ($toRank->license_required && ! AgentLicense::isValid($locked)) {
+                throw ValidationException::withMessages(['toLevel' => "ระดับ {$toRank->level} ต้องมีใบอนุญาตชีวิตหรือวินาศที่ยังไม่หมดอายุ"]);
+            }
+            $hasPending = RankPromotion::query()
+                ->where('agent_id', $locked->id)
+                ->where('status', 'pending')
+                ->where('trigger', 'manual')
+                ->exists();
+            if ($hasPending) {
+                throw ValidationException::withMessages(['toLevel' => 'มีคำขอปรับระดับที่รออนุมัติอยู่แล้ว']);
+            }
+
+            $yearMonth = now()->format('Y-m');
+            $volume = MemberVolumeAccumulation::query()
+                ->where('tenant_id', $locked->tenant_id)
+                ->where('agent_id', $locked->id)
+                ->where('period_year_month', $yearMonth)
+                ->value('rolling_3_month_volume');
+
+            return RankPromotion::create([
+                'agent_id' => $locked->id,
+                'from_rank_id' => $locked->rank_id,
+                'to_rank_id' => $toRank->id,
+                'qualifying_rolling_3_month_volume' => (float) ($volume ?? 0),
+                'qualifying_period_year_month' => $yearMonth,
+                'trigger' => 'manual',
+                'status' => 'pending',
+                'requested_at' => Carbon::now(),
+                'requested_by_user_id' => $userId,
+                'request_note' => $note,
+                'promoted_at' => null,
+            ]);
+        });
+    }
+
+    private function wasRejected(Agent $agent, Rank $rank, string $yearMonth): bool
+    {
+        return RankPromotion::query()
+            ->where('agent_id', $agent->id)
+            ->where('to_rank_id', $rank->id)
+            ->where('status', 'rejected')
+            ->where('qualifying_period_year_month', $yearMonth)
+            ->exists();
     }
 
     /**
      * The highest rank an agent qualifies for based on their volume and
-     * license status. Returns null if not even Lv1's threshold is met
-     * (which is 0, so this only happens if there are no ranks seeded).
+     * license status.
      */
     private function highestQualifyingRank(Agent $agent, float $volume): ?Rank
     {
+        if ($volume <= 0) {
+            return null;
+        }
+
         $q = Rank::query()
             ->where('three_month_accum_target', '<=', $volume)
             ->orderByDesc('level');
 
         // Lv7+ require a license. If the agent doesn't have one, cap at
         // the highest non-licensed rank.
-        if (! $agent->has_license) {
+        if (! AgentLicense::isValid($agent)) {
             $q->where('license_required', false);
         }
 
         return $q->first();
     }
 
-    private function currentLevel(Agent $agent): int
+    public function currentLevel(Agent $agent): int
     {
         if ($agent->rank_id === null) {
             return 0;  // never promoted — any rank ≥ Lv1 is an upgrade
@@ -161,19 +222,30 @@ class RankPromotionService
     {
         return DB::transaction(function () use ($agent, $toRank, $volume, $yearMonth): RankPromotion {
             $existing = RankPromotion::query()
-                ->where('agent_id', $agent->id)
-                ->where('to_rank_id', $toRank->id)
-                ->where('status', 'pending')
+                ->where('rank_promotions.agent_id', $agent->id)
+                ->where('rank_promotions.status', 'pending')
+                ->join('ranks', 'ranks.id', '=', 'rank_promotions.to_rank_id')
+                ->where('ranks.level', '>=', $toRank->level)
+                ->orderByDesc('ranks.level')
+                ->select('rank_promotions.*')
                 ->first();
             if ($existing !== null) {
                 // Keep the qualifying figures fresh but don't re-queue.
-                $existing->update([
-                    'qualifying_rolling_3_month_volume' => $volume,
-                    'qualifying_period_year_month' => $yearMonth,
-                ]);
+                if ((int) $existing->to_rank_id === (int) $toRank->id && $existing->trigger === 'auto') {
+                    $existing->update([
+                        'qualifying_rolling_3_month_volume' => $volume,
+                        'qualifying_period_year_month' => $yearMonth,
+                    ]);
+                }
 
                 return $existing;
             }
+
+            RankPromotion::query()
+                ->where('agent_id', $agent->id)
+                ->where('status', 'pending')
+                ->where('trigger', 'auto')
+                ->update(['status' => 'superseded', 'decided_at' => Carbon::now()]);
 
             $promotion = RankPromotion::create([
                 'agent_id' => $agent->id,

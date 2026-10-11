@@ -1,6 +1,8 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, ref, watch } from 'vue'
 import { fetchPendingAgents, fetchRankPromotions } from '../../api/agents'
+
+const props = defineProps<{ refreshKey?: number }>()
 
 const tabs = [
   { name: 'agents', to: '/agents', label: 'รายชื่อ', icon: 'pi pi-users' },
@@ -11,7 +13,7 @@ const tabs = [
 
 // Combined pending count (agents awaiting approval + promotions awaiting approval).
 const pendingCount = ref(0)
-onMounted(async () => {
+async function loadCount(): Promise<void> {
   try {
     const [ag, promo] = await Promise.all([
       fetchPendingAgents().catch(() => ({ data: [] })),
@@ -19,7 +21,9 @@ onMounted(async () => {
     ])
     pendingCount.value = ag.data.length + (promo.meta?.pendingCount ?? 0)
   } catch { /* badge stays 0 */ }
-})
+}
+onMounted(loadCount)
+watch(() => props.refreshKey, () => { void loadCount() })
 </script>
 
 <template>

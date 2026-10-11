@@ -184,38 +184,65 @@ export function fetchDownline() {
   return api.get<{ data: MyAgent[] }>('me/agent/downline')
 }
 
-/** Phase 7a — earnings ledger. */
-export interface EarningsSummary {
-  accrued: number
-  paid: number
-  total: number
-  txnCount: number
+export interface EarningsLine {
+  key: string
+  lineType: 'base' | 'self_mgmt' | 'referral' | 'override'
+  lineLabel: string
+  policyId: number
+  policyNo: string | null
+  applicationNo: string | null
+  customerName: string | null
+  policyDate: string | null
+  sourceAgent: string | null
+  amount: number
+  entitlement: number
+  ratioLabel: string | null
+  reasons: Array<{ code: string; label: string }>
 }
-export interface MonthlyEarning {
-  month: string        // YYYY-MM
-  unsettled: number
-  settled: number
-  count: number
-}
-export interface EarningsTxn {
-  id: string
-  type: 'agent' | 'override' | 'inh' | string
-  status: 'unsettled' | 'settled' | string
-  policyId: string
-  basePremium: number
-  diffPct: number
-  amount: number       // can be negative (reversal)
-  isReversal: boolean
-  createdAt: string
+export interface EarningsPayout {
+  batchId: string
+  version: number
+  paymentDate: string | null
+  base: number
+  selfMgmt: number
+  referral: number
+  override: number
+  gross: number
+  deduction: number
+  vat: number
+  wht: number
+  net: number
+  certificate: string | null
 }
 export interface EarningsResponse {
-  summary: EarningsSummary
-  byMonth: MonthlyEarning[]
-  recent: EarningsTxn[]
+  summary: {
+    readyAmount: number
+    readyNet: number
+    waitingAmount: number
+    pendingDeduction: number
+    paidThisYear: number
+    whtThisYear: number
+    paidTotal: number
+  }
+  agent: { agentCode: string | null; agentName: string; vatType: string | null; whtRate?: number; whtFormLabel?: string | null } | null
+  ready: EarningsLine[]
+  waiting: EarningsLine[]
+  deductions: Array<{ id: string; typeLabel?: string; type: string; amount: number; policyNo: string | null }>
+  totals: { byType: Record<string, number>; taxableAmount: number; vatAmount: number; whtAmount: number; netAmount: number; appliedDeduction: number }
+  history: EarningsPayout[]
+  byMonth: Array<{ month: string; gross: number; wht: number; net: number; count: number }>
 }
 
 export function fetchEarnings() {
   return api.get<EarningsResponse>('me/agent/earnings')
+}
+
+export function myStatementPath(batchId: string): string {
+  return `me/agent/payouts/${batchId}/statement`
+}
+
+export function myCertificatePath(batchId: string): string {
+  return `me/agent/payouts/${batchId}/certificate`
 }
 
 export function changePassword(currentPassword: string, newPassword: string) {

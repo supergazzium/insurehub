@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\Agent;
 use App\Models\MemberVolumeAccumulation;
 use App\Models\Rank;
+use App\Support\AgentLicense;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 
@@ -51,7 +52,7 @@ class LevelProgressController extends Controller
             ->where('tenant_id', $tenantId)
             ->whereNull('deleted_at')
             ->where('active', true)
-            ->get(['id', 'agent_code', 'first_name', 'last_name', 'rank_id', 'has_license']);
+            ->get(['id', 'agent_code', 'first_name', 'last_name', 'rank_id', 'license_life_no', 'license_life_expiry', 'license_non_life_no', 'license_non_life_expiry']);
 
         $rows = [];
         foreach ($agents as $a) {
@@ -115,8 +116,8 @@ class LevelProgressController extends Controller
         }
 
         $target = (float) $next->three_month_accum_target;
-        $pct = $target > 0 ? (int) min(100, floor(($volume / $target) * 100)) : 0;
-        $licenseBlocked = (bool) $next->license_required && ! (bool) $agent->has_license;
+        $pct = $target > 0 ? (int) min(100, floor(($volume / $target) * 100)) : ($volume > 0 ? 100 : 0);
+        $licenseBlocked = (bool) $next->license_required && ! AgentLicense::isValid($agent);
 
         return [
             'currentLevel' => $currentLevel,

@@ -5,6 +5,7 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Agent;
+use App\Support\AgentLicense;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -96,7 +97,7 @@ class AgentCommissionController extends ApiController
                 'rankCode' => $agent->rank?->code,
                 'rankLevel' => $agent->rank?->level,
                 'active' => (bool) $agent->active,
-                'hasLicense' => (bool) $agent->has_license,
+                'hasLicense' => AgentLicense::isValid($agent),
             ],
             'uplineChain' => $uplineChain,
             'downlineTree' => $downlineTree,

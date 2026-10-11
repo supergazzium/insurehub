@@ -112,6 +112,7 @@ export const api = {
     request<T>('PUT', path, body, init),
   delete: <T>(path: string, init?: RequestInit) =>
     request<T>('DELETE', path, undefined, init),
+  deleteJson: <T>(path: string, body: unknown) => request<T>('DELETE', path, body),
 }
 
 /** Shape of paginated list responses from the Laravel API. */

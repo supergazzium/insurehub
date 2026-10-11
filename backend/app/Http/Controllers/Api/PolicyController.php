@@ -10,10 +10,17 @@ use App\Http\Resources\PolicyResource;
 use App\Mail\PolicyRenewalNoticeMail;
 use App\Mail\RenewalQuoteRequestMail;
 use App\Mail\RenewalQuoteToCustomerMail;
+use App\Models\PendingChange;
 use App\Models\Policy;
 use App\Models\PolicyEvent;
 use App\Services\Commission\CommissionBandCoverage;
+use App\Services\Policy\PolicyVerification;
+use App\Services\Policy\RenewalBlueprint;
+use App\Services\Policy\RenewalService;
 use App\Support\PolicyNumbering;
+use App\Support\PolicyPeriodLabel;
+use App\Support\PolicyYears;
+use App\Support\PremiumMode;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
@@ -55,6 +62,7 @@ class PolicyController extends ApiController
                 'p.id', 'p.quote_no', 'p.application_no', 'p.policy_no',
                 'p.customer_id', 'p.product_id', 'p.carrier_id', 'p.writing_agent_id',
                 'p.status', 'p.legacy_policy_status_id', 'p.new_or_renew',
+                'p.policy_year', 'p.customer_year', 'p.ref_app_to_id', 'p.installment_term',
                 'p.coverage', 'p.annual_premium', 'p.premium_mode',
                 'p.app_date', 'p.effective_date', 'p.expiry_date',
                 'p.issue_date', 'p.cancel_date',
@@ -87,6 +95,9 @@ class PolicyController extends ApiController
                     ->orWhere('c.customer_code', 'like', $like)
                     ->orWhere('c.first_name', 'like', $like)
                     ->orWhere('c.last_name', 'like', $like)
+                    ->orWhereRaw("CONCAT_WS(' ', c.first_name, c.last_name) LIKE ?", [$like])
+                    ->orWhere('c.juristic_name', 'like', $like)
+                    ->orWhere('c.tax_id', 'like', $like)
                     ->orWhere('c.id_card', 'like', $like)
                     ->orWhere('c.passport', 'like', $like)
                     ->orWhere('c.phone', 'like', $like)
@@ -136,17 +147,42 @@ class PolicyController extends ApiController
         if ($to = $request->input('toDate')) {
             $q->where('p.effective_date', '<=', $to);
         }
+        if ($request->boolean('renewable')) {
+            $q->whereIn('p.status', Policy::RENEWABLE_STATUSES)
+                ->whereNotExists(function ($s): void {
+                    $s->select(DB::raw(1))
+                        ->from('policies as rn')
+                        ->whereColumn('rn.ref_app_to_id', 'p.id')
+                        ->whereNull('rn.deleted_at')
+                        ->whereNotIn('rn.status', Policy::DEAD_STATUSES);
+                })
+                ->orderByRaw('ABS(DATEDIFF(p.expiry_date, CURDATE()))');
+        }
 
         $paginator = $q->orderBy('p.id', 'desc')->paginate($this->perPage($request));
+        $labels = PolicyPeriodLabel::forListRows($paginator->items());
+        foreach ($paginator->items() as $row) {
+            $row->period_label = $labels[(string) $row->id] ?? null;
+        }
 
         return PolicyListResource::collection($paginator);
     }
 
     public function store(PolicyRequest $request): JsonResponse
     {
-        $policy = DB::transaction(function () use ($request) {
+        $target = $request->toModel()['status'] ?? null;
+        $verify = PolicyVerification::enabled($this->tenantId($request))
+            && $target !== null && ! in_array($target, PolicyVerification::NON_CREATE_TARGETS, true);
+
+        $policy = DB::transaction(function () use ($request, $verify) {
             $tenantId = $this->tenantId($request);
             $model = $request->toModel();
+            if ($verify) {
+                $model['status'] = 'draft';
+            }
+            $source = ($model['ref_app_to_id'] ?? null) !== null
+                ? RenewalService::assertCanLink($tenantId, $model['ref_app_to_id'])
+                : null;
             // Assign directly (not via array-union `+`, which keeps a client-sent
             // null and discards the mint). Only mint when the client did not
             // supply a value.
@@ -157,13 +193,49 @@ class PolicyController extends ApiController
                 $model['job_no'] = PolicyNumbering::nextJobNo($tenantId);
             }
             $payload = $model + ['tenant_id' => $tenantId];
-            $policy = Policy::create($payload);
+            $policy = new Policy($payload);
+            PolicyYears::resolve($policy, $request->user(), $request->yearsOverride());
+            $policy->save();
             $this->syncChildren($request, $policy);
+            if ($source !== null) {
+                RenewalService::recordLink($source, $policy, $request->user()?->id);
+            }
 
             return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType']);
         });
 
+        if ($verify) {
+            $change = PolicyVerification::submit($policy, 'create', ['status' => $target], [], $request->user());
+
+            return PolicyVerification::pendingResponse($policy, $change);
+        }
+
         return $this->withBandWarning(new PolicyResource($policy))->response()->setStatusCode(201);
+    }
+
+    public function renewalDraft(Request $request, Policy $policy): JsonResponse
+    {
+        $this->authorizeTenant($request, $policy);
+        RenewalService::assertRenewable($policy, null, $request->input('exceptId'));
+        ['policy' => $draft, 'meta' => $meta] = RenewalBlueprint::build($policy);
+
+        return (new PolicyResource($draft))->additional(['meta' => $meta])->response();
+    }
+
+    private function saveWithRenewalGuard(PolicyRequest $request, Policy $policy, ?array $model = null): void
+    {
+        DB::transaction(function () use ($request, $policy, $model): void {
+            $policy->fill($model ?? $request->toModel());
+            $source = RenewalService::needsCheck($policy)
+                ? RenewalService::assertCanLink((int) $policy->tenant_id, $policy->ref_app_to_id, $policy)
+                : null;
+            PolicyYears::resolve($policy, $request->user(), $request->yearsOverride());
+            $policy->save();
+            $this->syncChildren($request, $policy);
+            if ($source !== null) {
+                RenewalService::recordLink($source, $policy, $request->user()?->id);
+            }
+        });
     }
 
     public function show(Request $request, Policy $policy): PolicyResource
@@ -175,22 +247,59 @@ class PolicyController extends ApiController
         );
     }
 
-    public function update(PolicyRequest $request, Policy $policy): PolicyResource
+    public function update(PolicyRequest $request, Policy $policy): PolicyResource|JsonResponse
     {
         $this->authorizeTenant($request, $policy);
-        DB::transaction(function () use ($request, $policy): void {
-            $policy->update($request->toModel());
-            $this->syncChildren($request, $policy);
-        });
+        PolicyVerification::assertNotLocked($policy);
+        if (PolicyVerification::enabled((int) $policy->tenant_id)) {
+            $change = $this->interceptUpdate($request, $policy);
+            if ($change !== null) {
+                return PolicyVerification::pendingResponse($policy, $change);
+            }
+        }
+        $this->saveWithRenewalGuard($request, $policy);
 
         return new PolicyResource(
             $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
         );
     }
 
+    private function interceptUpdate(PolicyRequest $request, Policy $policy): ?PendingChange
+    {
+        $model = $request->toModel();
+        $target = $model['status'] ?? null;
+        if (PolicyVerification::isCreateTransition($policy, $target)) {
+            unset($model['status']);
+            $this->saveWithRenewalGuard($request, $policy, $model);
+
+            return PolicyVerification::submit($policy->fresh(), 'create', ['status' => $target], [], $request->user());
+        }
+        if (in_array($policy->status, PolicyVerification::CREATE_FROM, true)) {
+            return null;
+        }
+        $keys = PolicyVerification::keyChanges($policy, $model);
+        if ($keys === []) {
+            return null;
+        }
+        $this->saveWithRenewalGuard($request, $policy, array_diff_key($model, $keys));
+
+        return PolicyVerification::submit($policy->fresh(), 'update', $keys, [], $request->user());
+    }
+
     public function destroy(Request $request, Policy $policy): JsonResponse
     {
         $this->authorizeTenant($request, $policy);
+        PolicyVerification::assertNotLocked($policy);
+
+        if ($policy->status !== 'draft' && PolicyVerification::enabled((int) $policy->tenant_id)) {
+            $reason = trim((string) $request->input('reason', ''));
+            if ($reason === '') {
+                throw ValidationException::withMessages(['reason' => 'กรุณาระบุเหตุผลที่ขอลบกรมธรรม์']);
+            }
+            $change = PolicyVerification::submit($policy, 'delete', [], [], $request->user(), $reason);
+
+            return PolicyVerification::pendingResponse($policy, $change);
+        }
 
         // C-11: only drafts are truly deletable. Non-draft rows go through
         // the Cancel workflow so the audit trail and refund pipeline stay
@@ -229,6 +338,9 @@ class PolicyController extends ApiController
         $policy = DB::transaction(function () use ($request) {
             $tenantId = $this->tenantId($request);
             $model = $request->toModel();
+            $source = ($model['ref_app_to_id'] ?? null) !== null
+                ? RenewalService::assertCanLink($tenantId, $model['ref_app_to_id'])
+                : null;
             // Assign directly (not via array-union `+`, which keeps a
             // client-sent null and discards the mint). Only mint when the
             // client did not supply a value (edit-draft re-save keeps it).
@@ -245,7 +357,9 @@ class PolicyController extends ApiController
                     ?? $request->user()?->agent_id
                     ?? null,
             ];
-            $policy = Policy::create($payload);
+            $policy = new Policy($payload);
+            PolicyYears::resolve($policy, $request->user(), $request->yearsOverride());
+            $policy->save();
             $this->syncChildren($request, $policy);
             PolicyEvent::create([
                 'policy_id' => $policy->id,
@@ -257,32 +371,9 @@ class PolicyController extends ApiController
 
             // Renewal draft: this is the moment the renewal actually STARTS, so
             // fire renewalStarted on the SOURCE policy — that flips its renewal
-            // stage to "renewed" in the expiring-soon pipeline. Guarded so a
-            // re-created draft for the same source doesn't double-log.
-            $sourceId = $payload['ref_app_to_id'] ?? null;
-            if ($sourceId !== null) {
-                $source = Policy::query()
-                    ->where('tenant_id', $tenantId)
-                    ->whereKey($sourceId)
-                    ->first();
-                if ($source !== null) {
-                    $alreadyStarted = PolicyEvent::query()
-                        ->where('policy_id', $source->id)
-                        ->where('type', 'renewalStarted')
-                        ->exists();
-                    if (! $alreadyStarted) {
-                        PolicyEvent::create([
-                            'policy_id' => $source->id,
-                            'type' => 'renewalStarted',
-                            'occurred_at' => now(),
-                            'by_user_id' => $request->user()?->id,
-                            'payload' => [
-                                'source' => 'renewal-draft',
-                                'newPolicyId' => (string) $policy->id,
-                            ],
-                        ]);
-                    }
-                }
+            // stage to "renewed" in the expiring-soon pipeline.
+            if ($source !== null) {
+                RenewalService::recordLink($source, $policy, $request->user()?->id);
             }
 
             return $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType']);
@@ -296,9 +387,10 @@ class PolicyController extends ApiController
      * auto-save. 409 if the row already promoted past draft (racing wizard
      * autosave vs a manual promote button).
      */
-    public function updateDraft(PolicyRequest $request, Policy $policy): PolicyResource
+    public function updateDraft(PolicyRequest $request, Policy $policy): PolicyResource|JsonResponse
     {
         $this->authorizeTenant($request, $policy);
+        PolicyVerification::assertNotLocked($policy);
         if ($policy->status !== 'draft') {
             abort(response()->json([
                 'code' => 'not_draft',
@@ -306,10 +398,13 @@ class PolicyController extends ApiController
                 'currentStatus' => $policy->status,
             ], 409));
         }
-        DB::transaction(function () use ($request, $policy): void {
-            $policy->update($request->toModel());
-            $this->syncChildren($request, $policy);
-        });
+        if (PolicyVerification::enabled((int) $policy->tenant_id)) {
+            $change = $this->interceptUpdate($request, $policy);
+            if ($change !== null) {
+                return PolicyVerification::pendingResponse($policy, $change);
+            }
+        }
+        $this->saveWithRenewalGuard($request, $policy);
 
         return new PolicyResource(
             $policy->fresh()->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
@@ -365,9 +460,10 @@ class PolicyController extends ApiController
      * The wizard's "Submit to carrier" button hits this on both the draft
      * short-path and the two-step draft → quotation → submit path.
      */
-    public function promoteToSubmitted(Request $request, Policy $policy): PolicyResource
+    public function promoteToSubmitted(Request $request, Policy $policy): PolicyResource|JsonResponse
     {
         $this->authorizeTenant($request, $policy);
+        PolicyVerification::assertNotLocked($policy);
         if (! in_array($policy->status, ['draft', 'quotation', 'quote'], true)) {
             abort(response()->json([
                 'code' => 'invalid_transition',
@@ -395,12 +491,59 @@ class PolicyController extends ApiController
             }
         }
 
+        $isRenewal = $policy->ref_app_to_id !== null;
+        if ($isRenewal && ! $request->boolean('renewalTermsConfirmed')) {
+            abort(response()->json([
+                'code' => 'renewal_terms_unconfirmed',
+                'message' => 'กรุณายืนยันเบี้ยประกัน / ทุนประกัน / ส่วนลด และวันคุ้มครองของปีต่ออายุก่อนส่งพิจารณา',
+                'errors' => ['renewalTermsConfirmed' => ['กรุณายืนยันเบี้ยและทุนประกันของปีต่ออายุ']],
+            ], 422));
+        }
+
         $applicationNo = $policy->application_no
             ?? PolicyNumbering::nextApplicationNo($policy->tenant_id);
         $appDate = now()->toDateString();
         $verb = $policy->status === 'draft' ? 'submittedFromDraft' : 'convertedToApplication';
 
-        DB::transaction(function () use ($policy, $applicationNo, $appDate, $verb, $request): void {
+        if (PolicyVerification::enabled((int) $policy->tenant_id)) {
+            $events = [];
+            if ($isRenewal) {
+                $events[] = ['type' => 'renewalTermsConfirmed', 'payload' => [
+                    'mainPremium' => $policy->main_premium !== null ? (float) $policy->main_premium : null,
+                    'netPremium' => $policy->net_premium !== null ? (float) $policy->net_premium : null,
+                    'totalPremiumPaid' => $policy->total_premium_paid !== null ? (float) $policy->total_premium_paid : null,
+                    'coverage' => $policy->coverage !== null ? (float) $policy->coverage : null,
+                    'discountAmount' => $policy->discount_amount !== null ? (float) $policy->discount_amount : null,
+                    'effectiveDate' => $policy->effective_date?->toDateString(),
+                    'expiryDate' => $policy->expiry_date?->toDateString(),
+                ]];
+            }
+            $events[] = ['type' => $verb, 'payload' => ['applicationNo' => $applicationNo, 'appDate' => $appDate, 'source' => 'wizard']];
+            $change = PolicyVerification::submit($policy, 'create', [
+                'status' => 'submitted', 'application_no' => $applicationNo, 'app_date' => $appDate,
+            ], $events, $request->user());
+
+            return PolicyVerification::pendingResponse($policy, $change);
+        }
+
+        DB::transaction(function () use ($policy, $applicationNo, $appDate, $verb, $request, $isRenewal): void {
+            if ($isRenewal) {
+                PolicyEvent::create([
+                    'policy_id' => $policy->id,
+                    'type' => 'renewalTermsConfirmed',
+                    'occurred_at' => now(),
+                    'by_user_id' => $request->user()?->id,
+                    'payload' => [
+                        'mainPremium' => $policy->main_premium !== null ? (float) $policy->main_premium : null,
+                        'netPremium' => $policy->net_premium !== null ? (float) $policy->net_premium : null,
+                        'totalPremiumPaid' => $policy->total_premium_paid !== null ? (float) $policy->total_premium_paid : null,
+                        'coverage' => $policy->coverage !== null ? (float) $policy->coverage : null,
+                        'discountAmount' => $policy->discount_amount !== null ? (float) $policy->discount_amount : null,
+                        'effectiveDate' => $policy->effective_date?->toDateString(),
+                        'expiryDate' => $policy->expiry_date?->toDateString(),
+                    ],
+                ]);
+            }
             $policy->update([
                 'status' => 'submitted',
                 'application_no' => $applicationNo,
@@ -458,6 +601,7 @@ class PolicyController extends ApiController
             'mailingDate' => 'mailing_date',
             'appDate' => 'app_date',
             'policyYear' => 'policy_year',
+            'customerYear' => 'customer_year',
             'actYear' => 'act_year',
             'newOrRenew' => 'new_or_renew',
         ],
@@ -527,6 +671,7 @@ class PolicyController extends ApiController
             'mailingDate' => ['sometimes', 'nullable', 'date'],
             'appDate' => ['sometimes', 'nullable', 'date'],
             'policyYear' => ['sometimes', 'nullable', 'integer', 'min:0'],
+            'customerYear' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:99'],
             'actYear' => ['sometimes', 'nullable', 'integer', 'min:0'],
             'newOrRenew' => ['sometimes', 'nullable', 'string', 'in:new,renew'],
         ],
@@ -583,14 +728,30 @@ class PolicyController extends ApiController
         ],
     ];
 
-    public function patchSection(Request $request, Policy $policy, string $section): PolicyResource
+    public function patchSection(Request $request, Policy $policy, string $section): PolicyResource|JsonResponse
     {
         $this->authorizeTenant($request, $policy);
+        PolicyVerification::assertNotLocked($policy);
 
         $rules = self::SECTION_RULES[$section] ?? abort(404, "Unknown section: {$section}");
         $map = self::SECTION_MAPS[$section];
 
         $v = Validator::make($request->all(), $rules)->validate();
+
+        $yearsOverride = null;
+        if (array_key_exists('policyYear', $v) || array_key_exists('customerYear', $v)) {
+            if (PolicyYears::canOverride($request->user())) {
+                $yearsOverride = array_filter([
+                    'policy_year' => $v['policyYear'] ?? null,
+                    'customer_year' => $v['customerYear'] ?? null,
+                ], fn ($y) => $y !== null);
+            }
+            unset($v['policyYear'], $v['customerYear']);
+        }
+
+        if (isset($v['premiumMode']) && $v['premiumMode'] !== $policy->premium_mode) {
+            PremiumMode::assertAllowed($policy->product()->with('carrier')->first(), $v['premiumMode']);
+        }
 
         $updates = [];
         foreach ($map as $camel => $snake) {
@@ -607,8 +768,21 @@ class PolicyController extends ApiController
             $updates[$snake] = $v[$camel];
         }
 
-        if ($updates !== []) {
-            $policy->update($updates);
+        $keys = [];
+        if (PolicyVerification::enabled((int) $policy->tenant_id) && ! in_array($policy->status, PolicyVerification::CREATE_FROM, true)) {
+            $keys = PolicyVerification::keyChanges($policy, $updates);
+            $updates = array_diff_key($updates, $keys);
+        }
+
+        $policy->fill($updates);
+        if ($yearsOverride !== null && $yearsOverride !== []) {
+            PolicyYears::resolve($policy, $request->user(), $yearsOverride);
+        }
+        if ($policy->isDirty()) {
+            $policy->save();
+        }
+        if ($keys !== []) {
+            return PolicyVerification::pendingResponse($policy, PolicyVerification::submit($policy->fresh(), 'update', $keys, [], $request->user()));
         }
 
         return new PolicyResource(

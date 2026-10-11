@@ -32,4 +32,14 @@ class RankPromotion extends Model
     {
         return $this->belongsTo(Rank::class, 'to_rank_id');
     }
+
+    public function requestedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'requested_by_user_id');
+    }
+
+    public function decidedBy(): BelongsTo
+    {
+        return $this->belongsTo(User::class, 'decided_by_user_id');
+    }
 }

@@ -50,15 +50,6 @@ const value = computed<string>({
   set: (v) => emit('update:modelValue', v ?? ''),
 })
 
-// Function-form formatter — bypasses any locale/textInput format inheritance
-// and guarantees DD/MM/YYYY in the input field regardless of picker version.
-function formatDate(d: Date): string {
-  const dd = String(d.getDate()).padStart(2, '0')
-  const mm = String(d.getMonth() + 1).padStart(2, '0')
-  const yyyy = d.getFullYear()
-  return `${dd}/${mm}/${yyyy}`
-}
-
 // Year range for the header year-overlay. Upper bound uses `max` when
 // provided (birthday capped at today), otherwise +5 years for policies.
 const yearRange = computed<[number, number]>(() => {
@@ -72,17 +63,17 @@ const yearRange = computed<[number, number]>(() => {
   <VueDatePicker
     v-model="value"
     model-type="yyyy-MM-dd"
-    :format="formatDate"
-    :enable-time-picker="false"
+    :formats="{ input: 'dd/MM/yyyy' }"
+    :time-config="{ enableTimePicker: false }"
     :min-date="min ?? undefined"
     :max-date="max ?? undefined"
     :start-date="startDate ?? undefined"
     :placeholder="placeholder ?? 'dd/mm/yyyy'"
     :disabled="disabled"
-    :clearable="clearable !== false"
+    :input-attrs="{ clearable: clearable !== false }"
     auto-apply
     :teleport="true"
-    :input-class-name="inputClass ?? ''"
+    :ui="{ input: inputClass ?? '' }"
     :year-range="yearRange"
     prevent-min-max-navigation
     :text-input="{ format: ['dd/MM/yyyy', 'd/M/yyyy', 'dd-MM-yyyy'], openMenu: 'toggle' }"

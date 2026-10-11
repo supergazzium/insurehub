@@ -6,6 +6,8 @@ namespace App\Observers;
 
 use App\Models\Agent;
 use App\Models\AuditEntry;
+use App\Models\Rank;
+use App\Models\User;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\Request;
 
@@ -37,6 +39,23 @@ class AgentObserver
         'license_non_life_expiry',
         'approval_status',
         'active',
+        'rank_id',
+        'kind',
+        'juristic_name',
+        'tax_id',
+        'has_vat',
+        'vat_mode',
+        'vat_type',
+        'wht_rate',
+        'agent_type',
+        'id_card_photo_path',
+        'bank_book_photo_path',
+        'license_life_doc_path',
+        'license_non_life_doc_path',
+    ];
+
+    private const MASKED_COLUMNS = [
+        'tax_id',
     ];
 
     /**
@@ -46,7 +65,28 @@ class AgentObserver
     private const VALUE_LOGGABLE_COLUMNS = [
         'approval_status',
         'active',
+        'rank_id',
+        'kind',
+        'juristic_name',
+        'tax_id',
+        'has_vat',
+        'vat_mode',
+        'vat_type',
+        'wht_rate',
+        'agent_type',
     ];
+
+    public function creating(Agent $agent): void
+    {
+        if ($agent->rank_id !== null) {
+            return;
+        }
+        $lv1 = Rank::query()->where('level', 1)->value('id');
+        if ($lv1 !== null) {
+            $agent->rank_id = $lv1;
+            $agent->level = 'l1';
+        }
+    }
 
     public function created(Agent $agent): void
     {
@@ -71,12 +111,32 @@ class AgentObserver
         $metadata = ['fields' => $changed];
         foreach ($changed as $col) {
             if (in_array($col, self::VALUE_LOGGABLE_COLUMNS, true)) {
-                $metadata['old'][$col] = $agent->getOriginal($col);
-                $metadata['new'][$col] = $agent->getAttribute($col);
+                $old = $agent->getOriginal($col);
+                $new = $agent->getAttribute($col);
+                if (in_array($col, self::MASKED_COLUMNS, true)) {
+                    $old = $this->mask($old);
+                    $new = $this->mask($new);
+                }
+                $metadata['old'][$col] = $old;
+                $metadata['new'][$col] = $new;
             }
         }
 
         $this->log($agent, 'agent.updated', $metadata);
+
+        if ($agent->wasChanged('active') && ! $agent->active) {
+            User::query()->where('agent_id', $agent->id)->get()->each(fn (User $u) => $u->tokens()->delete());
+        }
+    }
+
+    private function mask(mixed $value): ?string
+    {
+        if ($value === null || $value === '') {
+            return null;
+        }
+        $s = (string) $value;
+
+        return str_repeat('•', max(0, strlen($s) - 4)).substr($s, -4);
     }
 
     public function deleted(Agent $agent): void

@@ -159,17 +159,18 @@
       <tr>
         <th style="width:20px;" class="center">#</th>
         <th style="width:80px;">เลขกรมธรรม์</th>
+        <th style="width:45px;" class="center">ปี/งวด</th>
         <th>ลูกค้า</th>
         <th style="width:80px;">เบอร์โทร</th>
         <th style="width:120px;">อีเมล</th>
-        <th style="width:70px;">ทะเบียนรถ</th>
+        <th style="width:110px;">ทะเบียน / ผลิตภัณฑ์</th>
         <th style="width:100px;">ยี่ห้อ/รุ่น</th>
         <th style="width:75px;">บริษัท</th>
         <th style="width:80px;" class="num">Premium</th>
         <th style="width:60px;">หมดอายุ</th>
         <th style="width:35px;" class="center">วัน</th>
         <th style="width:80px;">ตัวแทน</th>
-        <th style="width:80px;" class="notes-col">บันทึกการติดต่อ</th>
+        <th style="width:100px;" class="notes-col">ติดตามล่าสุด</th>
       </tr>
     </thead>
     <tbody>
@@ -177,13 +178,22 @@
         <tr>
           <td class="center">{{ $i + 1 }}</td>
           <td>{{ $r->policy_no ?? $r->application_no ?? '—' }}</td>
+          <td class="center">{{ $r->period_label ?? '—' }}</td>
           <td>
             {{ $r->customer_name ?? '—' }}
             @if ($r->customer_code)<div style="font-size:8px;color:#94a3b8;">{{ $r->customer_code }}</div>@endif
           </td>
           <td>{{ $r->customer_phone ?? '—' }}</td>
           <td style="word-break: break-all;">{{ $r->customer_email ?? '—' }}</td>
-          <td>{{ $r->motor_license_no ?? '—' }}</td>
+          <td>
+            @if ($r->motor_license_no)
+              {{ $r->motor_license_no }}
+              @if ($r->product_name)<div style="font-size:8px;color:#94a3b8;">{{ $r->product_name }}</div>@endif
+            @else
+              {{ $r->product_name ?? '—' }}
+              @if ($r->product_sub_category ?? $r->product_category)<div style="font-size:8px;color:#94a3b8;">{{ $r->product_sub_category ?? $r->product_category }}</div>@endif
+            @endif
+          </td>
           <td>
             @if ($r->motor_vehicle_brand || $r->motor_vehicle_model)
               {{ trim(($r->motor_vehicle_brand ?? '') . ' ' . ($r->motor_vehicle_model ?? '')) }}
@@ -205,11 +215,11 @@
             {{ $r->agent_code ?? '—' }}
             @if ($r->agent_name)<div style="font-size:8px;color:#94a3b8;">{{ $r->agent_name }}</div>@endif
           </td>
-          <td class="notes-col">&nbsp;</td>
+          <td class="notes-col" style="font-size:8px;color:#475569;">{{ $r->lf_summary ?? '' }}&nbsp;</td>
         </tr>
       @empty
         <tr>
-          <td colspan="13" style="text-align:center;color:#94a3b8;padding:24px 0;">
+          <td colspan="14" style="text-align:center;color:#94a3b8;padding:24px 0;">
             ไม่พบกรมธรรม์ตามเงื่อนไขที่เลือก
           </td>
         </tr>

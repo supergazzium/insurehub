@@ -1,17 +1,9 @@
 <script setup lang="ts">
-// สลักหลังเบี้ยเพิ่ม (v1) — premium-increase endorsement modal.
-//
-// The operator enters the new annual premium and the additional (pro-rata)
-// premium to collect for the remaining period. We DO NOT auto-compute the
-// charge (carriers use their own proration), but we DO show a reference
-// suggestion (annual delta × remaining-days / total-days) as a sanity check
-// the operator can copy or ignore. On confirm the parent calls the API,
-// which updates the policy premium and records a before→after audit event.
-
 import { ref, computed, watch } from 'vue'
 import FormField from '../../components/FormField.vue'
-import MoneyInput from '../../components/MoneyInput.vue'
+import DateInput from '../../components/DateInput.vue'
 import { useI18n } from 'vue-i18n'
+import { ENDORSEMENT_TYPES } from '../../api/endorsements'
 
 const { t } = useI18n()
 
@@ -21,8 +13,11 @@ function fmt(x: number): string {
 
 /** Prefill shape when editing an existing endorsement. */
 export interface EndorsementInitial {
+  type: string
+  seq: number | null
   reason: string
   effectiveDate: string
+  detail: string
   newAnnualPremium: number
   newCoverage: number
   additionalPremium: number
@@ -32,6 +27,18 @@ export interface EndorsementInitial {
    *  shown while editing (so the diff still reads old → new correctly). */
   beforeAnnualPremium: number
   beforeCoverage: number
+}
+
+export interface EndorsementSubmit {
+  type: string
+  reason: string
+  effectiveDate: string
+  detail: string | null
+  newAnnualPremium: number
+  newCoverage: number | null
+  additionalPremium: number
+  additionalDutyStamp: number | null
+  additionalVat: number | null
 }
 
 const props = defineProps<{
@@ -44,6 +51,7 @@ const props = defineProps<{
   expiryDate: string | null
   /** When set, the modal opens in edit mode prefilled from this endorsement. */
   initial?: EndorsementInitial | null
+  nextSeq?: number | null
   /** Disable the submit while the parent's request is in flight. */
   saving?: boolean
   /** Backend validation errors keyed by field. */
@@ -59,20 +67,17 @@ const baseCoverage = computed<number>(() =>
 
 const emit = defineEmits<{
   (e: 'close'): void
-  (e: 'submit', payload: {
-    reason: string
-    effectiveDate: string
-    newAnnualPremium: number
-    newCoverage: number | null
-    additionalPremium: number
-    additionalDutyStamp: number | null
-    additionalVat: number | null
-  }): void
+  (e: 'submit', payload: EndorsementSubmit): void
 }>()
+
+const type = ref<string>('endorsement.premium_change')
+const isPremium = computed(() => type.value === 'endorsement.premium_change')
+const seqLabel = computed<number | null>(() => (props.initial ? props.initial.seq : props.nextSeq ?? null))
 
 // ── Form state ───────────────────────────────────────────────────────────
 const reason = ref('')
 const endorsementDate = ref('')
+const detail = ref('')
 const newAnnualPremium = ref<number | null>(null)
 const newCoverage = ref<number | null>(null)
 const additionalPremium = ref<number | null>(null)
@@ -83,16 +88,20 @@ const additionalVat = ref<number | null>(null)
 watch(() => props.open, (open) => {
   if (!open) return
   if (props.initial) {
+    type.value = props.initial.type
     reason.value = props.initial.reason
     endorsementDate.value = props.initial.effectiveDate
+    detail.value = props.initial.detail
     newAnnualPremium.value = props.initial.newAnnualPremium
     newCoverage.value = props.initial.newCoverage || null
     additionalPremium.value = props.initial.additionalPremium
     additionalDutyStamp.value = props.initial.additionalDutyStamp || null
     additionalVat.value = props.initial.additionalVat || null
   } else {
+    type.value = 'endorsement.premium_change'
     reason.value = ''
     endorsementDate.value = ''
+    detail.value = ''
     newAnnualPremium.value = null
     newCoverage.value = props.currentCoverage || null
     additionalPremium.value = null
@@ -139,21 +148,22 @@ function applySuggestion(): void {
 }
 
 // ── Validation ───────────────────────────────────────────────────────────
-const canSubmit = computed<boolean>(() =>
-  !props.saving &&
-  reason.value.trim().length > 0 &&
-  !!endorsementDate.value &&
-  Number(newAnnualPremium.value) > 0 &&
-  Number(newAnnualPremium.value) > Number(baseAnnualPremium.value) &&
-  additionalPremium.value !== null &&
-  Number(additionalPremium.value) >= 0,
-)
+const canSubmit = computed<boolean>(() => {
+  if (props.saving || reason.value.trim().length === 0 || !endorsementDate.value) return false
+  if (!isPremium.value) return true
+  return Number(newAnnualPremium.value) > 0 &&
+    Number(newAnnualPremium.value) > Number(baseAnnualPremium.value) &&
+    additionalPremium.value !== null &&
+    Number(additionalPremium.value) >= 0
+})
 
 function submit(): void {
   if (!canSubmit.value) return
   emit('submit', {
+    type: type.value,
     reason: reason.value.trim(),
     effectiveDate: endorsementDate.value,
+    detail: detail.value.trim() || null,
     newAnnualPremium: Number(newAnnualPremium.value),
     newCoverage: newCoverage.value !== null ? Number(newCoverage.value) : null,
     additionalPremium: Number(additionalPremium.value),
@@ -167,16 +177,25 @@ const additionalTotal = computed<number>(() =>
     + (Number(additionalDutyStamp.value) || 0)
     + (Number(additionalVat.value) || 0)) * 100) / 100,
 )
+
+function typeKey(full: string): string {
+  return full.replace('endorsement.', '')
+}
 </script>
 
 <template>
-  <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+  <div v-if="open" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="endorsement-modal">
     <div class="bg-white rounded-xl shadow-xl w-full max-w-2xl max-h-[90vh] overflow-y-auto">
-      <!-- Header -->
       <div class="flex items-center justify-between px-5 py-4 border-b border-slate-100">
         <div>
-          <h3 class="font-semibold text-slate-900">{{ isEditing ? t('endorsement.editTitle') : t('endorsement.modalTitle') }}</h3>
-          <p class="text-xs text-slate-500 mt-0.5">{{ t('endorsement.modalSubtitle') }}</p>
+          <div class="flex items-center gap-2">
+            <h3 class="font-semibold text-slate-900">{{ isEditing ? t('endorsement.editTitle') : t('endorsement.modalTitle') }}</h3>
+            <span v-if="seqLabel" data-testid="endorsement-modal-seq"
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 ring-1 ring-amber-200 text-xs font-semibold">
+              ${{ seqLabel }} · {{ t('periodBadge.endorsement', { n: seqLabel }) }}
+            </span>
+          </div>
+          <p class="text-xs text-slate-500 mt-0.5">{{ isPremium ? t('endorsement.modalSubtitle') : t('endorsement.generalSubtitle') }}</p>
         </div>
         <button type="button" @click="emit('close')" class="text-slate-400 hover:text-slate-600">
           <i class="pi pi-times" />
@@ -184,93 +203,111 @@ const additionalTotal = computed<number>(() =>
       </div>
 
       <div class="p-5 space-y-5">
-        <!-- Reason + date -->
+        <div>
+          <div class="text-xs font-medium text-slate-600 mb-1.5">{{ t('endorsement.typeLabel') }}</div>
+          <div class="flex flex-wrap gap-2" data-testid="endorsement-type-picker">
+            <button v-for="tp in ENDORSEMENT_TYPES" :key="tp" type="button"
+              :disabled="isEditing && tp !== type"
+              :data-testid="`endorsement-type-${typeKey(tp)}`"
+              :class="[
+                'px-3 py-1.5 rounded-lg text-sm border transition',
+                tp === type ? 'bg-brand-600 border-brand-600 text-white' : 'bg-white border-slate-200 text-slate-700 hover:border-brand-300',
+                isEditing && tp !== type ? 'opacity-40 cursor-not-allowed' : '',
+              ]"
+              @click="type = tp">
+              {{ t(`endorsement.types.${typeKey(tp)}`) }}
+            </button>
+          </div>
+        </div>
+
         <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
           <FormField :label="t('endorsement.effectiveDate')" required errorKey="effectiveDate" :errors="errors">
-            <input type="date" v-model="endorsementDate"
-              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            <DateInput v-model="endorsementDate" />
           </FormField>
           <FormField :label="t('endorsement.reason')" required errorKey="reason" :errors="errors">
-            <input type="text" v-model="reason" :placeholder="t('endorsement.reasonPlaceholder')"
+            <input type="text" v-model="reason" :placeholder="t('endorsement.reasonPlaceholder')" data-testid="endorsement-reason"
               class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
           </FormField>
         </div>
 
-        <!-- Premium change -->
-        <div class="rounded-lg border border-slate-200 p-4 space-y-3">
-          <div class="text-sm font-medium text-slate-700">{{ t('endorsement.premiumSection') }}</div>
-          <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <FormField :label="t('endorsement.currentPremium')">
-              <div class="w-full border border-slate-100 bg-slate-50 rounded-lg px-3 py-1.5 text-sm text-slate-600">
-                {{ fmt(baseAnnualPremium) }}
-              </div>
-            </FormField>
-            <FormField :label="t('endorsement.newPremium')" required errorKey="newAnnualPremium" :errors="errors">
-              <MoneyInput v-model="newAnnualPremium"
-                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
-            </FormField>
-            <FormField :label="t('endorsement.currentCoverage')">
-              <div class="w-full border border-slate-100 bg-slate-50 rounded-lg px-3 py-1.5 text-sm text-slate-600">
-                {{ fmt(baseCoverage) }}
-              </div>
-            </FormField>
-            <FormField :label="t('endorsement.newCoverage')" :hint="t('endorsement.newCoverageHint')">
-              <MoneyInput v-model="newCoverage"
-                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
-            </FormField>
-          </div>
-        </div>
+        <FormField v-if="!isPremium" :label="t('endorsement.detail')" errorKey="detail" :errors="errors">
+          <textarea v-model="detail" rows="3" :placeholder="t('endorsement.detailPlaceholder')" data-testid="endorsement-detail"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
 
-        <!-- Reference pro-rata helper -->
-        <div v-if="annualDelta > 0" class="rounded-lg bg-brand-50 border border-brand-100 p-4 text-xs text-slate-600 space-y-1">
-          <div class="font-medium text-slate-700 mb-1">{{ t('endorsement.referenceTitle') }}</div>
-          <div class="flex justify-between"><span>{{ t('endorsement.annualDelta') }}</span><span>{{ fmt(annualDelta) }}</span></div>
-          <div v-if="remainingDays !== null && totalDays !== null" class="flex justify-between">
-            <span>{{ t('endorsement.remainingRatio') }}</span><span>{{ remainingDays }} / {{ totalDays }} {{ t('endorsement.days') }}</span>
+        <template v-if="isPremium">
+          <div class="rounded-lg border border-slate-200 p-4 space-y-3">
+            <div class="text-sm font-medium text-slate-700">{{ t('endorsement.premiumSection') }}</div>
+            <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <FormField :label="t('endorsement.currentPremium')">
+                <div class="w-full border border-slate-100 bg-slate-50 rounded-lg px-3 py-1.5 text-sm text-slate-600">
+                  {{ fmt(baseAnnualPremium) }}
+                </div>
+              </FormField>
+              <FormField :label="t('endorsement.newPremium')" required errorKey="newAnnualPremium" :errors="errors">
+                <input type="number" min="0" step="0.01" v-model.number="newAnnualPremium"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField :label="t('endorsement.currentCoverage')">
+                <div class="w-full border border-slate-100 bg-slate-50 rounded-lg px-3 py-1.5 text-sm text-slate-600">
+                  {{ fmt(baseCoverage) }}
+                </div>
+              </FormField>
+              <FormField :label="t('endorsement.newCoverage')" :hint="t('endorsement.newCoverageHint')">
+                <input type="number" min="0" step="1" v-model.number="newCoverage"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
           </div>
-          <div v-if="suggestedProrata !== null" class="flex justify-between font-medium text-brand-700">
-            <span>{{ t('endorsement.suggestedProrata') }}</span>
-            <span class="flex items-center gap-2">
-              {{ fmt(suggestedProrata) }}
-              <button type="button" @click="applySuggestion"
-                class="px-2 py-0.5 rounded bg-brand-600 text-white text-[10px] hover:bg-brand-700">
-                {{ t('endorsement.useSuggestion') }}
-              </button>
-            </span>
-          </div>
-        </div>
 
-        <!-- Additional premium to collect -->
-        <div class="rounded-lg border border-slate-200 p-4 space-y-3">
-          <div class="text-sm font-medium text-slate-700">{{ t('endorsement.additionalSection') }}</div>
-          <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <FormField :label="t('endorsement.additionalPremium')" required errorKey="additionalPremium" :errors="errors">
-              <MoneyInput v-model="additionalPremium"
-                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
-            </FormField>
-            <FormField :label="t('endorsement.additionalDuty')">
-              <MoneyInput v-model="additionalDutyStamp"
-                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
-            </FormField>
-            <FormField :label="t('endorsement.additionalVat')">
-              <MoneyInput v-model="additionalVat"
-                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
-            </FormField>
+          <div v-if="annualDelta > 0" class="rounded-lg bg-brand-50 border border-brand-100 p-4 text-xs text-slate-600 space-y-1">
+            <div class="font-medium text-slate-700 mb-1">{{ t('endorsement.referenceTitle') }}</div>
+            <div class="flex justify-between"><span>{{ t('endorsement.annualDelta') }}</span><span>{{ fmt(annualDelta) }}</span></div>
+            <div v-if="remainingDays !== null && totalDays !== null" class="flex justify-between">
+              <span>{{ t('endorsement.remainingRatio') }}</span><span>{{ remainingDays }} / {{ totalDays }} {{ t('endorsement.days') }}</span>
+            </div>
+            <div v-if="suggestedProrata !== null" class="flex justify-between font-medium text-brand-700">
+              <span>{{ t('endorsement.suggestedProrata') }}</span>
+              <span class="flex items-center gap-2">
+                {{ fmt(suggestedProrata) }}
+                <button type="button" @click="applySuggestion"
+                  class="px-2 py-0.5 rounded bg-brand-600 text-white text-[10px] hover:bg-brand-700">
+                  {{ t('endorsement.useSuggestion') }}
+                </button>
+              </span>
+            </div>
           </div>
-          <div class="flex justify-between text-sm font-medium text-slate-800 pt-1 border-t border-slate-100">
-            <span>{{ t('endorsement.additionalTotal') }}</span>
-            <span>{{ fmt(additionalTotal) }}</span>
+
+          <div class="rounded-lg border border-slate-200 p-4 space-y-3">
+            <div class="text-sm font-medium text-slate-700">{{ t('endorsement.additionalSection') }}</div>
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <FormField :label="t('endorsement.additionalPremium')" required errorKey="additionalPremium" :errors="errors">
+                <input type="number" min="0" step="0.01" v-model.number="additionalPremium"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField :label="t('endorsement.additionalDuty')">
+                <input type="number" min="0" step="0.01" v-model.number="additionalDutyStamp"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField :label="t('endorsement.additionalVat')">
+                <input type="number" min="0" step="0.01" v-model.number="additionalVat"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+            <div class="flex justify-between text-sm font-medium text-slate-800 pt-1 border-t border-slate-100">
+              <span>{{ t('endorsement.additionalTotal') }}</span>
+              <span>{{ fmt(additionalTotal) }}</span>
+            </div>
           </div>
-        </div>
+        </template>
       </div>
 
-      <!-- Footer -->
       <div class="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">
         <button type="button" @click="emit('close')"
           class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
           {{ t('endorsement.cancel') }}
         </button>
-        <button type="button" @click="submit" :disabled="!canSubmit"
+        <button type="button" @click="submit" :disabled="!canSubmit" data-testid="endorsement-submit"
           class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 disabled:cursor-not-allowed">
           {{ saving ? t('endorsement.saving') : (isEditing ? t('endorsement.saveEdit') : t('endorsement.confirm')) }}
         </button>

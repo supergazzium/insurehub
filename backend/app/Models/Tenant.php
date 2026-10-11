@@ -18,6 +18,16 @@ class Tenant extends Model
         'payout_min_balance' => 'decimal:2',
         'payout_auto_approve' => 'boolean',
         'active' => 'boolean',
+        'customer_tiers' => 'array',
+        'policy_verify_required' => 'boolean',
+        'freelook_days_standard' => 'integer',
+        'freelook_days_remote' => 'integer',
+        'no_commission_window_days' => 'integer',
+        'payout_require_freelook' => 'boolean',
+        'payout_require_insurer_received' => 'boolean',
+        'payout_require_customer_paid' => 'boolean',
+        'wht_rate_individual' => 'decimal:2',
+        'wht_rate_corporate' => 'decimal:2',
     ];
 
     public function users(): HasMany

@@ -4,8 +4,14 @@ declare(strict_types=1);
 
 namespace App\Http\Requests;
 
+use App\Models\Agent;
+use App\Models\Product;
+use App\Support\PolicyYears;
+use App\Support\PremiumMode;
+use Illuminate\Contracts\Validation\Validator;
 use Illuminate\Foundation\Http\FormRequest;
 use Illuminate\Validation\Rule;
+use Illuminate\Validation\ValidationException;
 
 class PolicyRequest extends FormRequest
 {
@@ -88,6 +94,8 @@ class PolicyRequest extends FormRequest
             'cancelDate' => ['sometimes', 'nullable', 'date'],
             'lapseDate' => ['sometimes', 'nullable', 'date'],
             'policyYear' => ['sometimes', 'integer', 'min:1'],
+            'customerYear' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:99'],
+            'yearsOverride' => ['sometimes', 'boolean'],
             'actYear' => ['sometimes', 'integer', 'min:1'],
             'newOrRenew' => ['sometimes', 'string', 'in:new,renew'],
             'freelookActive' => ['sometimes', 'boolean'],
@@ -142,6 +150,16 @@ class PolicyRequest extends FormRequest
             'mailingAddByPolicy' => ['sometimes', 'nullable', 'string', 'max:255'],
             'mailingDate' => ['sometimes', 'nullable', 'date'],
             'mailingNote' => ['sometimes', 'nullable', 'string'],
+            'approvedDate' => ['sometimes', 'nullable', 'date'],
+            'approvalRef' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'approvalNote' => ['sometimes', 'nullable', 'string'],
+            'deliveryMethod' => ['sometimes', 'nullable', 'string', 'in:'.implode(',', \App\Models\Policy::DELIVERY_METHODS)],
+            'courier' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'trackingNo' => ['sometimes', 'nullable', 'string', 'max:64'],
+            'shippedDate' => ['sometimes', 'nullable', 'date'],
+            'deliveredDate' => ['sometimes', 'nullable', 'date'],
+            'deliveredTo' => ['sometimes', 'nullable', 'string', 'max:255'],
+            'salesChannel' => ['sometimes', 'string', 'in:face_to_face,telephone,online'],
             // Children — accepted; persisted by PolicyController::syncChildren.
             'riders' => ['sometimes', 'array'],
             'riders.*.name' => ['required_with:riders', 'string', 'max:255'],
@@ -246,7 +264,6 @@ class PolicyRequest extends FormRequest
             'nextPremiumDue' => 'next_premium_due',
             'cancelDate' => 'cancel_date',
             'lapseDate' => 'lapse_date',
-            'policyYear' => 'policy_year',
             'actYear' => 'act_year',
             'newOrRenew' => 'new_or_renew',
             'freelookActive' => 'freelook_active',
@@ -276,6 +293,16 @@ class PolicyRequest extends FormRequest
             'mailingAddByPolicy' => 'mailing_add_by_policy',
             'mailingDate' => 'mailing_date',
             'mailingNote' => 'mailing_note',
+            'approvedDate' => 'approved_date',
+            'approvalRef' => 'approval_ref',
+            'approvalNote' => 'approval_note',
+            'deliveryMethod' => 'delivery_method',
+            'courier' => 'courier',
+            'trackingNo' => 'tracking_no',
+            'shippedDate' => 'shipped_date',
+            'deliveredDate' => 'delivered_date',
+            'deliveredTo' => 'delivered_to',
+            'salesChannel' => 'sales_channel',
             // Phase B-2 context fields.
             'tripDestination' => 'trip_destination',
             'tripStart' => 'trip_start',
@@ -308,7 +335,81 @@ class PolicyRequest extends FormRequest
             $out['risk_data'] = $shimRiskData;
         }
 
+        // งวดการผ่อน follows the frequency when the operator left it blank:
+        // monthly 12 / quarterly 4 / semiannual 2. Annual + single stay
+        // null (one payment) so an InsureHub-financed annual plan with an
+        // explicit term is never overwritten.
+        $mode = $out['premium_mode'] ?? null;
+        if ($mode !== null && PremiumMode::installmentsFor($mode) > 1) {
+            $term = array_key_exists('installment_term', $out)
+                ? $out['installment_term']
+                : $this->route('policy')?->installment_term;
+            if ($term === null || trim((string) $term) === '') {
+                $out['installment_term'] = (string) PremiumMode::installmentsFor($mode);
+            }
+        }
+
         return $out;
+    }
+
+    public function yearsOverride(): ?array
+    {
+        if (! $this->boolean('yearsOverride') || ! PolicyYears::canOverride($this->user())) {
+            return null;
+        }
+        $v = $this->validated();
+        $years = array_filter([
+            'policy_year' => $v['policyYear'] ?? null,
+            'customer_year' => $v['customerYear'] ?? null,
+        ], fn ($y) => $y !== null && $y !== '');
+
+        return $years === [] ? null : $years;
+    }
+
+    /**
+     * งวดการชำระ must be one the product offers (non-life defaults to annual
+     * unless the product opts in). Only checked when the request sets or
+     * changes the mode, so editing a legacy policy whose stored mode predates
+     * the product's list doesn't get blocked.
+     */
+    public function withValidator(Validator $validator): void
+    {
+        $validator->after(function (Validator $validator) {
+            $agentId = $this->input('writingAgentId');
+            if ($agentId === null || $agentId === '' || $validator->errors()->has('writingAgentId')) {
+                return;
+            }
+            $policy = $this->route('policy');
+            if ($policy !== null && (string) $agentId === (string) $policy->writing_agent_id) {
+                return;
+            }
+            $active = Agent::query()->where('tenant_id', $this->user()->tenant_id)->whereKey($agentId)->value('active');
+            if ($active !== null && ! (bool) $active) {
+                $validator->errors()->add('writingAgentId', 'ตัวแทนนี้ถูกปิดใช้งาน เลือกเป็นผู้ขายไม่ได้');
+            }
+        });
+
+        $validator->after(function (Validator $validator) {
+            $mode = $this->input('premiumMode');
+            if (! is_string($mode) || $mode === '' || $validator->errors()->has('premiumMode')) {
+                return;
+            }
+            $policy = $this->route('policy');
+            $productId = $this->input('productId', $policy?->product_id);
+            if ($policy !== null && $mode === $policy->premium_mode && (string) $productId === (string) $policy->product_id) {
+                return;
+            }
+            $product = $productId ? Product::with('carrier')->where('tenant_id', $this->user()->tenant_id)->find($productId) : null;
+            try {
+                PremiumMode::assertAllowed($product, $mode);
+            } catch (ValidationException $e) {
+                foreach ($e->errors() as $field => $messages) {
+                    foreach ($messages as $message) {
+                        $validator->errors()->add($field, $message);
+                    }
+                }
+            }
+        });
     }
 
     /**

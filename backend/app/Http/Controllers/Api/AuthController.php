@@ -55,6 +55,13 @@ class AuthController extends Controller
             ]);
         }
 
+        $agentActive = $user->agent_id !== null ? Agent::query()->whereKey($user->agent_id)->value('active') : null;
+        if ($agentActive !== null && ! (bool) $agentActive) {
+            throw ValidationException::withMessages([
+                'email' => ['บัญชีตัวแทนนี้ถูกปิดใช้งาน กรุณาติดต่อ InsureHub'],
+            ]);
+        }
+
         $deviceName = $data['deviceName'] ?? $request->userAgent() ?? 'api';
         $token = $user->createToken($deviceName)->plainTextToken;
 
@@ -112,6 +119,9 @@ class AuthController extends Controller
             $agent = Agent::create([
                 'tenant_id' => $tenantId,
                 'agent_code' => $this->nextAgentCode($tenantId),
+                'agent_type' => 'IN',
+                'kind' => $data['signupType'] === 'corporate' ? 'corporate' : 'individual',
+                'tax_id' => $data['signupType'] === 'corporate' ? $data['idCard'] : null,
                 'first_name' => $data['firstName'],
                 'last_name' => $data['lastName'],
                 'email' => $data['email'],

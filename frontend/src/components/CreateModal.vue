@@ -90,7 +90,7 @@ async function submit(keepOpen = false): Promise<void> {
 // Enter submits (unless a textarea is focused so line breaks still work);
 // Esc closes. Only bound while the modal is open.
 function onKey(e: KeyboardEvent): void {
-  if (!props.open) return
+  if (!props.open || e.defaultPrevented) return
   if (e.key === 'Enter' && !(e.target instanceof HTMLTextAreaElement)) {
     e.preventDefault()
     void submit(false)

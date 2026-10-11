@@ -51,6 +51,10 @@ export interface PaymentRow {
   paymentDate: string | null
   amount: number
   method: string
+  payee?: 'insurehub' | 'carrier'
+  payMode?: string
+  adjustmentAmount?: number
+  adjustmentKind?: 'commission_deducted' | 'discount' | null
   reference: string | null
   policyId: string
   applicationNo: string | null
@@ -65,7 +69,7 @@ export interface PaymentRow {
 export function fetchPaymentHistory(from: string, to: string) {
   return api.get<{
     data: PaymentRow[]
-    meta: { from: string; to: string; total: number; totalAmount: number }
+    meta: { from: string; to: string; total: number; totalAmount: number; toInsureHub?: number; toCarrier?: number }
   }>(`reports/payment-history${buildQuery({ from, to })}`)
 }
 

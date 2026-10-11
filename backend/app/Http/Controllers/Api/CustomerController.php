@@ -7,11 +7,16 @@ namespace App\Http\Controllers\Api;
 use App\Http\Requests\CustomerRequest;
 use App\Http\Resources\CustomerListResource;
 use App\Http\Resources\CustomerResource;
+use App\Models\Agent;
+use App\Models\AuditEntry;
 use App\Models\Customer;
+use App\Models\Tenant;
+use App\Support\CustomerTier;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 
 class CustomerController extends ApiController
@@ -24,6 +29,9 @@ class CustomerController extends ApiController
     public function index(Request $request): AnonymousResourceCollection
     {
         $tenantId = $this->tenantId($request);
+        $tiers = CustomerTier::forTenant(Tenant::query()->find($tenantId));
+        $totalSql = CustomerTier::totalPremiumSql('c.id');
+        [$tierCase, $tierBindings] = CustomerTier::caseSql($totalSql, $tiers);
 
         // Live policy counts via correlated subqueries. The customers table
         // *does* store denormalized `active_policy_count` / `total_policy_count`
@@ -42,7 +50,7 @@ class CustomerController extends ApiController
                 // juristic + tax + passport are needed so the list row can
                 // render corporate / foreign customer names + identity numbers.
                 'c.juristic_name', 'c.tax_id', 'c.passport',
-                'c.id_card', 'c.phone', 'c.email', 'c.province', 'c.gender',
+                'c.id_card', 'c.phone', 'c.tel_phone', 'c.email', 'c.province', 'c.gender',
                 'c.assigned_agent_id',
                 'c.active', 'c.registered_at',
                 'a.agent_code as assigned_agent_code',
@@ -50,7 +58,9 @@ class CustomerController extends ApiController
                 'a.last_name as assigned_agent_last_name',
                 DB::raw("(SELECT COUNT(*) FROM policies p WHERE p.customer_id = c.id AND p.deleted_at IS NULL) AS total_policy_count"),
                 DB::raw("(SELECT COUNT(*) FROM policies p WHERE p.customer_id = c.id AND p.deleted_at IS NULL AND p.status = 'active') AS active_policy_count"),
-            ]);
+                DB::raw("{$totalSql} AS total_premium"),
+            ])
+            ->selectRaw("{$tierCase} AS tier", $tierBindings);
 
         if ($search = $request->string('q')->toString()) {
             $like = "%{$search}%";
@@ -67,8 +77,20 @@ class CustomerController extends ApiController
                     ->orWhere('c.tax_id', 'like', $like)
                     ->orWhere('c.passport', 'like', $like)
                     ->orWhere('c.email', 'like', $like)
-                    ->orWhere('c.phone', 'like', $like);
+                    ->orWhere('c.phone', 'like', $like)
+                    ->orWhere('c.tel_phone', 'like', $like)
+                    ->orWhere('c.contact_phone', 'like', $like);
             });
+        }
+        if ($gender = $request->input('gender')) {
+            $gender === 'none'
+                ? $q->where(fn ($w) => $w->whereNull('c.gender')->orWhere('c.gender', ''))
+                : $q->where('c.gender', $gender);
+        }
+        if ($tier = $request->input('tier')) {
+            $tier === 'none'
+                ? $q->whereRaw("({$tierCase}) IS NULL", $tierBindings)
+                : $q->whereRaw("({$tierCase}) = ?", [...$tierBindings, $tier]);
         }
         if ($agentId = $request->input('assignedAgentId')) {
             $q->where('c.assigned_agent_id', $agentId);
@@ -101,16 +123,20 @@ class CustomerController extends ApiController
             'lastName' => 'c.last_name',
             'province' => 'c.province',
             'gender' => 'c.gender',
+            'totalPremium' => 'total_premium',
             'registeredAt' => 'c.registered_at',
             'newest' => 'c.id',
         ];
         $sortBy = $sortMap[$request->input('sortBy', 'newest')] ?? 'c.id';
-        $defaultDir = $sortBy === 'c.id' ? 'desc' : 'asc';
+        $defaultDir = in_array($sortBy, ['c.id', 'total_premium'], true) ? 'desc' : 'asc';
         $sortDir = strtolower((string) $request->input('sortDir', $defaultDir)) === 'desc' ? 'desc' : 'asc';
 
         $paginator = $q->orderBy($sortBy, $sortDir)
             ->orderBy('c.id', 'desc') // deterministic tiebreak
             ->paginate($this->perPage($request));
+        foreach ($paginator->items() as $row) {
+            $row->tier_label = CustomerTier::label($row->tier, $tiers);
+        }
 
         return CustomerListResource::collection($paginator);
     }
@@ -168,27 +194,78 @@ class CustomerController extends ApiController
         return (new CustomerResource($customer))->response()->setStatusCode(201);
     }
 
+    public const DETAIL_RELATIONS = ['kycDocs', 'assignmentHistory.fromAgent', 'assignmentHistory.toAgent', 'assignmentHistory.user', 'assignedAgent', 'createdByAgent', 'createdByUser'];
+
     public function show(Request $request, Customer $customer): CustomerResource
     {
         $this->authorizeTenant($request, $customer);
-        return new CustomerResource($customer->load([
-            'kycDocs', 'assignmentHistory', 'assignedAgent',
-            'createdByAgent', 'createdByUser',
-        ]));
+        return new CustomerResource($customer->load(self::DETAIL_RELATIONS));
     }
 
     public function update(CustomerRequest $request, Customer $customer): CustomerResource
     {
         $this->authorizeTenant($request, $customer);
+        Gate::authorize('customers.update');
         $customer->update($request->toModel());
-        return new CustomerResource($customer->fresh());
+        return new CustomerResource($customer->fresh()->load(self::DETAIL_RELATIONS));
     }
 
     public function destroy(Request $request, Customer $customer): JsonResponse
     {
         $this->authorizeTenant($request, $customer);
+        Gate::authorize('customers.delete');
+        $policyCount = $customer->policies()->whereNull('deleted_at')->count();
+        if ($policyCount > 0) {
+            return response()->json([
+                'code' => 'customer_has_policies',
+                'message' => "ลบไม่ได้ เพราะลูกค้ารายนี้มีกรมธรรม์ {$policyCount} ฉบับ — ให้ปิดการใช้งานแทน",
+                'policyCount' => $policyCount,
+            ], 409);
+        }
         $customer->delete();
         return response()->json(['message' => 'Deleted.']);
+    }
+
+    public function audit(Request $request, Customer $customer): JsonResponse
+    {
+        $this->authorizeTenant($request, $customer);
+        $rows = AuditEntry::query()
+            ->where('tenant_id', $customer->tenant_id)
+            ->where('target', 'customer:'.$customer->id)
+            ->orderByDesc('occurred_at')
+            ->orderByDesc('id')
+            ->limit(100)
+            ->get();
+
+        $agentIds = $rows->flatMap(fn (AuditEntry $a) => array_values(array_filter([
+            $a->metadata['changes']['assigned_agent_id']['from'] ?? null,
+            $a->metadata['changes']['assigned_agent_id']['to'] ?? null,
+        ], fn ($v) => $v !== null && $v !== '')))->unique()->values();
+        $agentLabels = $agentIds->isEmpty() ? collect() : Agent::query()
+            ->where('tenant_id', $customer->tenant_id)
+            ->whereIn('id', $agentIds)
+            ->get(['id', 'agent_code', 'first_name', 'last_name'])
+            ->mapWithKeys(fn (Agent $ag) => [(string) $ag->id => trim($ag->agent_code.' · '.trim(($ag->first_name ?? '').' '.($ag->last_name ?? '')), ' ·')]);
+
+        return response()->json(['data' => $rows->map(function (AuditEntry $a) use ($agentLabels) {
+            $changes = $a->metadata['changes'] ?? [];
+            if (isset($changes['assigned_agent_id']) && is_array($changes['assigned_agent_id'])) {
+                foreach (['from', 'to'] as $side) {
+                    $id = $changes['assigned_agent_id'][$side] ?? null;
+                    if ($id !== null && $id !== '') {
+                        $changes['assigned_agent_id'][$side] = $agentLabels[(string) $id] ?? $id;
+                    }
+                }
+            }
+
+            return [
+                'id' => (string) $a->id,
+                'occurredAt' => $a->occurred_at?->toIso8601String(),
+                'actor' => $a->actor,
+                'action' => $a->action,
+                'changes' => $changes,
+            ];
+        })->values()]);
     }
 
     /**

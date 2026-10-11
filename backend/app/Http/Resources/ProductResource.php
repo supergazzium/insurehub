@@ -7,6 +7,7 @@ namespace App\Http\Resources;
 use App\Models\Product;
 use App\Models\ProductCommissionBand;
 use App\Models\ProductCommissionRate;
+use App\Support\PremiumMode;
 use App\Support\ProductKind;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\JsonResource;
@@ -65,6 +66,10 @@ class ProductResource extends JsonResource
             'durationYears' => (int) $this->duration_years,
             'payYears' => (int) $this->pay_years,
             'premiumMode' => $this->premium_mode,
+            // Raw per-product list (null = not set) + the effective list the
+            // policy wizard should offer (falls back to the insure-type default).
+            'allowedPremiumModes' => $this->allowed_premium_modes,
+            'effectivePremiumModes' => PremiumMode::allowedFor($this->resource),
             'minPremium' => (float) $this->min_premium,
             'maxPremium' => (float) $this->max_premium,
             'minAge' => (int) $this->min_age,

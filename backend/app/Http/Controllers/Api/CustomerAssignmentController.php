@@ -12,6 +12,7 @@ use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Validation\Rule;
 
 class CustomerAssignmentController extends ApiController
@@ -29,6 +30,7 @@ class CustomerAssignmentController extends ApiController
     public function store(Request $request, Customer $customer): JsonResponse
     {
         $this->authorizeTenant($request, $customer);
+        Gate::authorize('customers.update');
         $tenantId = $this->tenantId($request);
         $data = $request->validate([
             'toAgentId' => ['required', Rule::exists('agents', 'id')->where('tenant_id', $tenantId)],
@@ -48,7 +50,7 @@ class CustomerAssignmentController extends ApiController
             ]);
         });
 
-        return (new CustomerResource($customer->fresh()))->response();
+        return (new CustomerResource($customer->fresh()->load(CustomerController::DETAIL_RELATIONS)))->response();
     }
 
     private function authorizeTenant(Request $request, Customer $customer): void

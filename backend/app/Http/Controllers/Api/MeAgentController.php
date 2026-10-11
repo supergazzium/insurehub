@@ -7,11 +7,16 @@ namespace App\Http\Controllers\Api;
 use App\Http\Resources\MyAgentResource;
 use App\Models\Agent;
 use App\Models\AuditEntry;
+use App\Models\CommissionPayoutBatch;
+use App\Models\CommissionPayoutPayee;
 use App\Models\RecruitmentLink;
+use App\Services\Commission\CommissionPayoutService;
+use App\Services\Commission\PayoutDocuments;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
@@ -279,69 +284,106 @@ class MeAgentController extends ApiController
         return MyAgentResource::collection($rows);
     }
 
-    // ── Earnings (Phase 7a — real-time commission ledger) ────────────────
-
-    /**
-     * Real-time earnings ledger for the current agent.
-     *
-     *   accrued  = sum of unsettled txns  (has been earned, not yet paid)
-     *   paid     = sum of settled txns    (transferred to bank)
-     *   pending  = subset of accrued whose parent policy has approvalStatus
-     *              not yet in-force — a "you'll get this once activated" bucket
-     *   byMonth  = grouped rows keyed by YYYY-MM for the chart / history view
-     *
-     * Includes reversals (negative amounts) so displayed numbers are net.
-     */
-    public function earnings(Request $request): JsonResponse
+    public function earnings(Request $request, CommissionPayoutService $payouts): JsonResponse
     {
         $agent = $this->currentAgent($request);
+        $detail = $payouts->agentDetail((int) $agent->tenant_id, (int) $agent->id);
 
-        $rows = \Illuminate\Support\Facades\DB::table('commission_transactions')
-            ->where('agent_id', $agent->id)
-            ->where('tenant_id', $agent->tenant_id)
-            ->orderByDesc('created_at')
-            ->get([
-                'id', 'type', 'status', 'policy_id', 'base_premium',
-                'diff_pct', 'amount', 'reverses_txn_id', 'created_at',
+        $paidV2 = CommissionPayoutPayee::query()
+            ->join('commission_payout_batches as b', 'b.id', '=', 'commission_payout_payees.batch_id')
+            ->where('commission_payout_payees.agent_id', $agent->id)
+            ->where('b.status', CommissionPayoutBatch::STATUS_PAID)
+            ->orderByDesc('b.payment_date')
+            ->orderByDesc('b.id')
+            ->limit(36)
+            ->get(['commission_payout_payees.*', 'b.payment_date as batch_payment_date', 'b.payment_reference as batch_reference'])
+            ->map(fn ($p): array => [
+                'batchId' => (string) $p->batch_id,
+                'version' => 2,
+                'paymentDate' => $p->batch_payment_date ? substr((string) $p->batch_payment_date, 0, 10) : null,
+                'base' => (float) $p->base_amount,
+                'selfMgmt' => (float) $p->self_mgmt_amount,
+                'referral' => (float) $p->referral_amount,
+                'override' => (float) $p->override_amount,
+                'gross' => (float) $p->gross_amount,
+                'deduction' => (float) $p->deduction_amount,
+                'vat' => (float) $p->vat_amount,
+                'wht' => (float) $p->wht_amount,
+                'net' => (float) $p->net_amount,
+                'certificate' => $p->certificateLabel(),
             ]);
 
-        $unsettled = 0.0; $settled = 0.0;
-        $byMonth = [];
-        $recent = [];
-        foreach ($rows as $r) {
-            $amt = (float) $r->amount;
-            if ($r->status === 'settled') $settled += $amt; else $unsettled += $amt;
+        $paidV1 = DB::table('commission_payout_batch_items as bi')
+            ->join('commission_payout_batches as b', 'b.id', '=', 'bi.batch_id')
+            ->where('bi.agent_id', $agent->id)
+            ->where('b.status', CommissionPayoutBatch::STATUS_PAID)
+            ->where('b.calc_version', CommissionPayoutBatch::CALC_V1)
+            ->groupBy('b.id', 'b.payment_date')
+            ->orderByDesc('b.payment_date')
+            ->limit(36)
+            ->selectRaw('b.id, b.payment_date, SUM(bi.snapshot_agent_commission + bi.snapshot_rider_commission) as gross')
+            ->get()
+            ->map(fn ($r): array => [
+                'batchId' => (string) $r->id,
+                'version' => 1,
+                'paymentDate' => $r->payment_date ? substr((string) $r->payment_date, 0, 10) : null,
+                'base' => round((float) $r->gross, 2),
+                'selfMgmt' => 0.0, 'referral' => 0.0, 'override' => 0.0,
+                'gross' => round((float) $r->gross, 2),
+                'deduction' => 0.0, 'vat' => 0.0, 'wht' => 0.0,
+                'net' => round((float) $r->gross, 2),
+                'certificate' => null,
+            ]);
 
-            $mon = substr((string) $r->created_at, 0, 7);
-            if (! isset($byMonth[$mon])) $byMonth[$mon] = ['month' => $mon, 'unsettled' => 0.0, 'settled' => 0.0, 'count' => 0];
-            if ($r->status === 'settled') $byMonth[$mon]['settled'] += $amt; else $byMonth[$mon]['unsettled'] += $amt;
-            $byMonth[$mon]['count']++;
-
-            if (count($recent) < 20) {
-                $recent[] = [
-                    'id' => (string) $r->id,
-                    'type' => $r->type,
-                    'status' => $r->status,
-                    'policyId' => (string) $r->policy_id,
-                    'basePremium' => (float) $r->base_premium,
-                    'diffPct' => (float) $r->diff_pct,
-                    'amount' => $amt,
-                    'isReversal' => $r->reverses_txn_id !== null,
-                    'createdAt' => $r->created_at,
-                ];
-            }
-        }
+        $history = $paidV2->concat($paidV1)->sortByDesc('paymentDate')->values();
+        $byMonth = $history->groupBy(fn ($h) => substr((string) $h['paymentDate'], 0, 7))
+            ->map(fn ($rows, $month): array => [
+                'month' => $month,
+                'gross' => round($rows->sum('gross'), 2),
+                'wht' => round($rows->sum('wht'), 2),
+                'net' => round($rows->sum('net'), 2),
+                'count' => $rows->count(),
+            ])->values();
+        $year = now('Asia/Bangkok')->format('Y');
 
         return response()->json([
             'summary' => [
-                'accrued' => round($unsettled, 2),   // to-be-paid
-                'paid' => round($settled, 2),        // already transferred
-                'total' => round($unsettled + $settled, 2),
-                'txnCount' => count($rows),
+                'readyAmount' => $detail['totals']['totalAmount'],
+                'readyNet' => $detail['totals']['netAmount'],
+                'waitingAmount' => $detail['totals']['waitingAmount'],
+                'pendingDeduction' => $detail['totals']['pendingDeduction'],
+                'paidThisYear' => round($history->filter(fn ($h) => str_starts_with((string) $h['paymentDate'], $year))->sum('net'), 2),
+                'whtThisYear' => round($history->filter(fn ($h) => str_starts_with((string) $h['paymentDate'], $year))->sum('wht'), 2),
+                'paidTotal' => round($history->sum('net'), 2),
             ],
-            'byMonth' => array_values($byMonth),
-            'recent' => $recent,
+            'agent' => $detail['agent'],
+            'ready' => $detail['items'],
+            'waiting' => $detail['waiting'],
+            'deductions' => $detail['pendingDeductions'],
+            'totals' => $detail['totals'],
+            'history' => $history->all(),
+            'byMonth' => $byMonth->all(),
         ]);
+    }
+
+    public function payoutStatement(Request $request, CommissionPayoutBatch $batch, CommissionPayoutService $payouts, PayoutDocuments $docs)
+    {
+        $agent = $this->currentAgent($request);
+        abort_unless((int) $batch->tenant_id === (int) $agent->tenant_id && $batch->status === CommissionPayoutBatch::STATUS_PAID, 404);
+        $data = $payouts->buildAgentPdfData($batch, (int) $agent->id, null);
+        abort_if($data === null, 404);
+
+        return $docs->respond($request, $docs->statement($data), $docs->statementFilename($batch, $data));
+    }
+
+    public function payoutCertificate(Request $request, CommissionPayoutBatch $batch, PayoutDocuments $docs)
+    {
+        $agent = $this->currentAgent($request);
+        abort_unless((int) $batch->tenant_id === (int) $agent->tenant_id, 404);
+        $payee = $batch->payees()->where('agent_id', $agent->id)->whereNotNull('cert_no')->first();
+        abort_if($payee === null, 404);
+
+        return $docs->respond($request, $docs->certificate($payee), $docs->certificateFilename($payee));
     }
 
     // ── Change password ──────────────────────────────────────────────────

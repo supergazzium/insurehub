@@ -29,6 +29,7 @@
 import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { useAuthStore } from '../../stores/auth'
 import FormField from '../../components/FormField.vue'
 import MoneyInput from '../../components/MoneyInput.vue'
 import DateInput from '../../components/DateInput.vue'
@@ -36,17 +37,25 @@ import DurationChip from '../../components/DurationChip.vue'
 import RiskFieldRenderer from '../../components/RiskFieldRenderer.vue'
 import EntityPicker from '../../components/EntityPicker.vue'
 import ProductSearchSelect from '../../components/ProductSearchSelect.vue'
+import PolicyPeriodBadge from '../../components/PolicyPeriodBadge.vue'
+import RenewalSourceSearchModal from '../../components/RenewalSourceSearchModal.vue'
+import CustomerCreateModal from '../customers/CustomerCreateModal.vue'
+import { splitCustomerQuery } from '../../utils/genderFromTitle'
 import { INSTALLMENT_MODES } from '../../utils/installmentCalc'
-import PolicyPaymentModal, { type ExpectedPremium } from './PolicyPaymentModal.vue'
-import PolicyEndorsementModal, { type EndorsementInitial } from './PolicyEndorsementModal.vue'
+import PolicyPaymentPanel from './PolicyPaymentPanel.vue'
+import type { ExpectedPremium } from './PolicyPaymentModal.vue'
+import PolicyEndorsementModal, { type EndorsementInitial, type EndorsementSubmit } from './PolicyEndorsementModal.vue'
 import {
   fetchEndorsements,
+  createEndorsement,
+  updateEndorsement,
+  voidEndorsement,
   createPremiumEndorsement,
   updatePremiumEndorsement,
-  deletePremiumEndorsement,
   type Endorsement,
   type PremiumEndorsementPayload,
 } from '../../api/endorsements'
+import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
 import { fetchCustomerList, fetchPriorAssets, type CustomerListRow, type PriorAsset } from '../../api/customers'
 import { fetchProduct, fetchProductList, type ProductDetail, type ProductListRow } from '../../api/products'
@@ -59,8 +68,13 @@ import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchPolicyStatuses, type PolicyStatusRow } from '../../api/portal'
 import {
   createDraftPolicy, updateDraftPolicy, updatePolicy,
-  promotePolicyToQuotation, promotePolicyToSubmitted,
+  promotePolicyToQuotation, promotePolicyToSubmitted, requestPolicyDelete,
+  fetchRenewalDraft,
+  type PolicyListRow, type RenewalBlockedError, type RenewalDraftMeta,
 } from '../../api/policies'
+import type { Policy, PolicyChainLink } from '../../stores/policies'
+import { fetchTenant } from '../../api/tenant'
+import { updateFreelookDocs, type VerifyRow } from '../../api/followups'
 import { durationConfig } from '../../utils/durationPresets'
 import { statusBadgeClass, type PolicyStatus } from '../../utils/policyStatus'
 import {
@@ -87,6 +101,40 @@ const draftId = ref<string | null>(props.id ?? null)
 // instead of /draft (which rejects non-draft rows).
 const loadedStatus = ref<string | null>(null)
 const isDraftMode = computed(() => loadedStatus.value === null || loadedStatus.value === 'draft')
+
+const verifyOn = ref(false)
+const freelookDays = reactive({ standard: 15, remote: 30 })
+const pendingChange = ref<VerifyRow | null>(null)
+const lastRejected = ref<VerifyRow | null>(null)
+const verifyLocked = computed(() => !!pendingChange.value && pendingChange.value.action !== 'update')
+const holdForVerify = computed(() => verifyOn.value && !isDraftMode.value)
+const freelookDocs = reactive({ sentAt: '', signedAt: '', returnedAt: '' })
+const showDeleteRequest = ref(false)
+const deleteReason = ref('')
+const SALES_CHANNELS = [
+  { value: 'face_to_face', label: 'ขายตรง (พบลูกค้า)' },
+  { value: 'telephone', label: 'ทางโทรศัพท์' },
+  { value: 'online', label: 'ทางออนไลน์' },
+]
+
+async function loadTenantRules(): Promise<void> {
+  try {
+    const row = (await fetchTenant()).data
+    verifyOn.value = !!row.policyVerifyRequired
+    freelookDays.standard = Number(row.freelookDaysStandard ?? 15)
+    freelookDays.remote = Number(row.freelookDaysRemote ?? 30)
+  } catch {
+    verifyOn.value = false
+  }
+}
+
+function takePending(res: unknown): boolean {
+  const pc = (res as { meta?: { pendingChange?: VerifyRow } } | null)?.meta?.pendingChange
+  if (!pc) return false
+  pendingChange.value = pc
+  lastRejected.value = null
+  return true
+}
 
 // ── Policy status lookup (manually-editable status dropdown) ──────────────
 const policyStatuses = ref<PolicyStatusRow[]>([])
@@ -118,25 +166,15 @@ function yearsSince(startIso: string | null): number | null {
   return years + 1 // ordinal: within the first year → ปีที่ 1
 }
 
-/** Add `n` years to an ISO date string; null-safe. Rolls a renewal's coverage
- *  window forward from the source's expiry. */
-function rollForwardYear(iso: string | null, n = 1): string | null {
-  if (!iso) return null
-  const d = new Date(iso)
-  if (Number.isNaN(d.getTime())) return null
-  d.setFullYear(d.getFullYear() + n)
-  return d.toISOString().slice(0, 10)
-}
-
 // ── Renewal (ต่ออายุ) prefill context ────────────────────────────────────
 // Set when the wizard is opened via ?renewFrom=<sourceId>. Holds the source
-// policy's year figures so the renewed badges compute from them:
-//   customer year = source tenure + 1 (always)
+// policy's STORED year figures (task 1.4) so the renewal's years follow:
+//   customer year = source customer year + 1 (always)
 //   policy year   = source policy year + 1, UNLESS the product was changed,
 //                   in which case it resets to 1 (a new product = fresh policy).
 const renewSource = ref<{
-  policyYear: number | null
-  customerTenure: number | null
+  policyYear: number
+  customerYear: number | null
   productId: string
 } | null>(null)
 const isRenewingFromSource = computed(() => renewSource.value !== null)
@@ -145,25 +183,47 @@ const renewProductChanged = computed(() =>
   isRenewingFromSource.value && String(form.productId) !== String(renewSource.value?.productId ?? ''),
 )
 
-/** ปีที่ของกรมธรรม์. In a renewal: source year + 1, or reset to 1 if the
- *  product was changed. Otherwise computed from this policy's effective_date. */
-const policyYear = computed<number | null>(() => {
-  if (isRenewingFromSource.value) {
-    if (renewProductChanged.value) return 1
-    const base = renewSource.value?.policyYear
-    return base != null ? base + 1 : 1
-  }
-  return yearsSince(form.effectiveDate || null)
+/** ปีของกรมธรรม์ to suggest for a renewal: source + 1, or 1 when the product
+ *  was changed. Null outside a renewal (the stored value stands). */
+const suggestedPolicyYear = computed<number | null>(() => {
+  if (!isRenewingFromSource.value) return null
+  return renewProductChanged.value ? 1 : (renewSource.value?.policyYear ?? 0) + 1
 })
-/** อายุการเป็นลูกค้า. In a renewal: source tenure + 1. Otherwise from the
- *  customer's earliest policy effective_date. */
-const customerTenureYears = computed<number | null>(() => {
-  if (isRenewingFromSource.value) {
-    const base = renewSource.value?.customerTenure
-    return base != null ? base + 1 : yearsSince(customerFirstPolicyDate.value)
-  }
-  return yearsSince(customerFirstPolicyDate.value)
+// ปีของกรมธรรม์ / ปีของลูกค้า are STORED on the policy (task 1.4) — the badges
+// show the saved figures, not a date calculation. The operator may type them
+// while the policy is a draft/quotation; past that only an admin can correct
+// them (the backend enforces this and audits the change).
+const auth = useAuthStore()
+const yearsTouched = ref(false)
+const canEditYears = computed(() => auth.user?.role === 'super_admin' || auth.user?.role === 'admin')
+
+const renewalMeta = ref<RenewalDraftMeta | null>(null)
+const renewalBlocked = ref<RenewalBlockedError | null>(null)
+const renewalConfirmed = ref(false)
+const showRenewalSearch = ref(false)
+const renewalLoading = ref(false)
+const renewedFrom = ref<PolicyChainLink | null>(null)
+const renewedTo = ref<(PolicyChainLink & { live: boolean; count: number }) | null>(null)
+const periodLabel = ref<string | null>(null)
+const isRenewalInProgress = computed(() =>
+  !!form.refAppToId && (isDraftMode.value || loadedStatus.value === 'quotation'),
+)
+function needsConfirm(key: string): boolean {
+  return isRenewalInProgress.value && !renewalConfirmed.value && !!renewalMeta.value?.mustConfirm.includes(key)
+}
+const confirmRing = 'ring-2 ring-amber-300 ring-offset-2 rounded-lg'
+/** ปีของลูกค้า for the badge: the stored value, else (new policy, not yet
+ *  saved) the customer's tenure — the backend fills it on create. */
+const customerYearDisplay = computed<number | null>(() =>
+  // `||` not `??`: a cleared number input yields '' rather than null.
+  form.customerYear || yearsSince(customerFirstPolicyDate.value),
+)
+watch(suggestedPolicyYear, (n) => {
+  if (n !== null && !yearsTouched.value && !hydrating.value) form.policyYear = n
 })
+const DELIVERY_METHODS = ['post', 'kerry', 'flash', 'pickup', 'e_policy', 'other'] as const
+const needsTracking = computed(() => !['pickup', 'e_policy'].includes(form.deliveryMethod))
+const needsCourier = computed(() => ['post', 'other'].includes(form.deliveryMethod))
 const saving = ref(false)
 const error = ref<string | null>(null)
 const flash = ref<string | null>(null)
@@ -197,6 +257,7 @@ const form = reactive({
   carrierId: '' as string,
   productId: '' as string,
   policyYear: 1,
+  customerYear: null as number | null,  // ปีของลูกค้า — null until stored
   actYear: 1,
   appDate: '' as string,
   effectiveDate: '' as string,
@@ -252,14 +313,33 @@ const form = reactive({
   // การรับกรมธรรม์และจัดส่ง — received-from-carrier + delivered-to-customer
   // tracking. `received`/`delivered` are UI-only "done" checkboxes derived
   // from / driving the presence of the paired date.
+  approved: false as boolean,
+  approvedDate: '' as string,
+  approvalRef: '' as string,
+  approvalNote: '' as string,
   received: false as boolean,
   receivedDate: '' as string,
   receivedNote: '' as string,
   delivered: false as boolean,
-  mailingDate: '' as string,
+  shippedDate: '' as string,
   mailingNote: '' as string,
+  deliveryMethod: '' as string,
+  courier: '' as string,
+  trackingNo: '' as string,
+  deliveredDate: '' as string,
+  deliveredTo: '' as string,
   // Free Look date — life products only.
   freelookEndDate: '' as string,
+  salesChannel: 'face_to_face' as string,
+})
+
+const freelookComputed = computed(() => {
+  if (!form.delivered || !form.deliveredDate) return null
+  const days = ['telephone', 'online'].includes(form.salesChannel) ? freelookDays.remote : freelookDays.standard
+  const d = new Date(`${form.deliveredDate}T00:00:00`)
+  if (Number.isNaN(d.getTime())) return null
+  d.setDate(d.getDate() + days)
+  return { date: d.toLocaleDateString('sv-SE'), days }
 })
 
 // Touched flags for auto-fills (mirrors legacy wizard L556-681).
@@ -290,6 +370,8 @@ const agentPicked = ref<AgentListRow | null>(null)
  *  is available. The picker returns a lean ProductListRow — we re-fetch
  *  on pick to hydrate the full shape. */
 const productDetail = ref<ProductDetail | null>(null)
+// True while hydrateFromDraft is restoring a saved policy — see there.
+const hydrating = ref(false)
 const productDetailLoading = ref(false)
 
 /** C-20: commission frozen onto an existing policy (edit mode). Null in
@@ -315,10 +397,21 @@ const commissionDisplay = computed<{ rate: number | null; frozen: boolean; isLif
   const rates = productDetail.value?.commissionRates
   const isLife = rates?.scheme === 'life_years'
   const live = isLife
-    ? (rates?.hubToAgent?.yr1 ?? null)
+    ? (rates?.hubToAgent ? panelYearRate(rates.hubToAgent, form.policyYear) : null)
     : (rates?.hubToAgent?.flatRate ?? null)
   return { rate: live, frozen: false, isLife, capturedAt: null }
 })
+
+function bandYearKey(year: number): 'yr1' | 'yr2' | 'yr3' | 'yr4' | 'yr5' | 'yr6Up' {
+  const y = Math.max(1, Number(year) || 1)
+  return y >= 6 ? 'yr6Up' : (`yr${y}` as 'yr1' | 'yr2' | 'yr3' | 'yr4' | 'yr5')
+}
+
+function panelYearRate(panel: Record<string, number | null | undefined>, year: number): number | null {
+  const y = Math.max(1, Number(year) || 1)
+  const key = y >= 11 ? 'yr11Up' : y >= 6 ? 'yr6_10' : `yr${y}`
+  return panel[key] ?? null
+}
 
 /** Context passed to RiskFieldRenderer's product_search sub-fields (rider
  *  picker): the main product's carrier + insure_type, so riders are filtered
@@ -350,14 +443,17 @@ function productHeadlineRate(direction: 'carrierToHub' | 'hubToAgent'): number |
       if (max != null && sa > Number(max)) return false
       return true
     })
-    if (match && match.yr1 != null) return Number(match.yr1)
+    const bandRate = match?.[bandYearKey(form.policyYear)]
+    if (bandRate != null) return Number(bandRate)
   }
 
   // 2. single rate row
   const rates = pd.commissionRates
   const panel = direction === 'carrierToHub' ? rates?.carrierToHub : rates?.hubToAgent
   if (!panel) return null
-  return rates?.scheme === 'life_years' ? (panel.yr1 ?? null) : (panel.flatRate ?? null)
+  return rates?.scheme === 'life_years'
+    ? panelYearRate(panel as unknown as Record<string, number | null>, form.policyYear)
+    : (panel.flatRate ?? null)
 }
 
 /** Seed a direction's rate + amount from the product, unless the operator
@@ -374,7 +470,7 @@ function seedCommission(direction: 'carrierToHub' | 'hubToAgent'): void {
 // In edit mode the frozen values are hydrated from the policy and marked
 // touched, so this won't overwrite them.
 watch(
-  () => [form.productId, form.coverage, productDetail.value] as const,
+  () => [form.productId, form.coverage, productDetail.value, form.policyYear] as const,
   () => { seedCommission('carrierToHub'); seedCommission('hubToAgent') },
 )
 
@@ -415,7 +511,7 @@ const isVectorScheme = computed(() => productDetail.value?.commissionRates?.sche
 const showAllVectorYears = ref(false)
 /** Map the policy-year ordinal (1,2,3,…) to its vector key; year ≥6 → yr_6_up. */
 const currentVectorYear = computed<typeof VECTOR_YEARS[number]>(() => {
-  const n = policyYear.value ?? 1
+  const n = (Number(form.policyYear) || 1)
   if (n <= 1) return 'yr_1'
   if (n === 2) return 'yr_2'
   if (n === 3) return 'yr_3'
@@ -699,19 +795,33 @@ function applyPriorAsset(asset: PriorAsset): void {
   form.risk = { ...form.risk, ...patch }
 }
 
-// ── Payment frequency (งวดการชำระ) by product type ───────────────────────
-// ประกันชีวิต (Life): monthly / quarterly / semiannual / annual / single.
-// ประกันวินาศภัย (Non-Life) + ภาษี (Tax): annual only.
+// ── Payment frequency (งวดการชำระ) ───────────────────────────────────────
+// The product decides (ProductResource.effectivePremiumModes, which already
+// falls back to the insure-type default). Before a product is picked:
+// Life → every mode, Non-Life / Tax → annual only. The backend
+// (PolicyRequest) rejects a mode the product doesn't offer.
 type PremiumMode = typeof form.premiumMode
-const premiumModeOptions = computed<PremiumMode[]>(() =>
-  form.insureType === 'Life'
+const premiumModeOptions = computed<PremiumMode[]>(() => {
+  const fromProduct = productDetail.value?.effectivePremiumModes
+  if (fromProduct && fromProduct.length > 0) return fromProduct
+  return form.insureType === 'Life'
     ? ['monthly', 'quarterly', 'semiannual', 'annual', 'single']
-    : ['annual'],
+    : ['annual']
+})
+// What the <select> lists: the allowed modes, plus a legacy stored mode the
+// product no longer offers so the saved value still displays (the backend
+// only re-checks the mode when it changes).
+const premiumModeChoices = computed<PremiumMode[]>(() =>
+  premiumModeOptions.value.includes(form.premiumMode)
+    ? premiumModeOptions.value
+    : [...premiumModeOptions.value, form.premiumMode],
 )
-// When the product type changes, snap premiumMode back to a valid option
-// (defaults to annual, which is valid for every type).
-watch(() => form.insureType, () => {
-  if (!premiumModeOptions.value.includes(form.premiumMode)) form.premiumMode = 'annual'
+// When the product / insure type changes, snap premiumMode back to a valid
+// option (prefer annual). Skipped while hydrating so a stored mode isn't
+// clobbered before the product detail arrives.
+watch(premiumModeOptions, (opts) => {
+  if (hydrating.value || opts.includes(form.premiumMode)) return
+  form.premiumMode = opts.includes('annual') ? 'annual' : opts[0]
 })
 
 // จำนวนงวด per payment frequency. รายเดือน 12 / รายสามเดือน 4 /
@@ -723,7 +833,13 @@ const INSTALLMENTS_BY_MODE: Record<PremiumMode, number> = {
 // still edit installmentCount afterwards (this only fires when the mode
 // changes, so a manual override survives until the next mode switch).
 watch(() => form.premiumMode, (mode) => {
-  form.installmentCount = INSTALLMENTS_BY_MODE[mode] ?? 1
+  // Hydration restores both from the saved policy instead.
+  if (hydrating.value) return
+  const n = INSTALLMENTS_BY_MODE[mode] ?? 1
+  form.installmentCount = n
+  // งวดการผ่อน (installment_term) is what gets saved — keep it in step
+  // for multi-installment modes; annual/single = one payment (blank).
+  form.installmentTerm = n > 1 ? String(n) : ''
 }, { immediate: true })
 
 // #43 — งวดการผ่อน (รายปี) ทำให้สับสน: the installment detail fields (count /
@@ -820,8 +936,7 @@ const visibleFormulas = computed<(1 | 2 | 3 | 4)[]>(() =>
   form.insureType === 'Life' ? [2] : [1, 2, 3, 4],
 )
 
-// ── Payment tracking (C-24, frontend-only skeleton) ──────────────────────
-const showPaymentModal = ref(false)
+// ── Payment tracking ─────────────────────────────────────────────────────
 /** Human label for the picked carrier (for the payment modal's payee radio). */
 const carrierLabel = computed<string>(() => {
   const c = carriers.value.find((x) => String(x.id) === String(form.carrierId))
@@ -846,11 +961,13 @@ const expectedPremium = computed<ExpectedPremium>(() => ({
 // ── สลักหลัง (endorsement) — history + premium-increase modal ─────────────
 const showEndorsementModal = ref(false)
 const endorsements = ref<Endorsement[]>([])
+const endorsementNextSeq = ref<number | null>(null)
 const endorsementSaving = ref(false)
 const endorsementErrors = ref<Record<string, string[]>>({})
 /** The endorsement being edited (null = create mode) + its prefill. */
 const editingEndorsementId = ref<string | null>(null)
 const endorsementInitial = ref<EndorsementInitial | null>(null)
+const canManageEndorsements = computed(() => auth.hasPermission('policies.update'))
 
 function openNewEndorsement(): void {
   editingEndorsementId.value = null
@@ -860,33 +977,56 @@ function openNewEndorsement(): void {
 }
 
 function openEditEndorsement(ev: Endorsement): void {
-  const p = endorsementSummary(ev)
-  if (!p) return
+  const isPremium = ev.type === 'endorsement.premium_change'
+  const p = isPremium ? endorsementSummary(ev) : null
+  const raw = (ev.payload ?? {}) as Record<string, unknown>
   editingEndorsementId.value = ev.id
   endorsementInitial.value = {
-    reason: p.reason,
-    effectiveDate: p.effectiveDate,
-    newAnnualPremium: p.after.annualPremium,
-    newCoverage: p.after.coverage,
-    additionalPremium: p.additionalPremium,
-    additionalDutyStamp: p.additionalDutyStamp,
-    additionalVat: p.additionalVat,
-    beforeAnnualPremium: p.before.annualPremium,
-    beforeCoverage: p.before.coverage,
+    type: ev.type,
+    seq: ev.seq,
+    reason: String(raw.reason ?? ''),
+    effectiveDate: String(raw.effectiveDate ?? ''),
+    detail: String(raw.detail ?? ''),
+    newAnnualPremium: p?.after?.annualPremium ?? 0,
+    newCoverage: p?.after?.coverage ?? 0,
+    additionalPremium: p?.additionalPremium ?? 0,
+    additionalDutyStamp: p?.additionalDutyStamp ?? 0,
+    additionalVat: p?.additionalVat ?? 0,
+    beforeAnnualPremium: p?.before?.annualPremium ?? 0,
+    beforeCoverage: p?.before?.coverage ?? 0,
   }
   endorsementErrors.value = {}
   showEndorsementModal.value = true
 }
 
-async function deleteEndorsement(ev: Endorsement): Promise<void> {
-  if (!draftId.value) return
-  if (!window.confirm(t('endorsement.confirmDelete'))) return
+const voidTarget = ref<Endorsement | null>(null)
+const voidReason = ref('')
+const voidSaving = ref(false)
+const voidError = ref<string | null>(null)
+
+function openVoidEndorsement(ev: Endorsement): void {
+  voidTarget.value = ev
+  voidReason.value = ''
+  voidError.value = null
+}
+
+async function confirmVoidEndorsement(): Promise<void> {
+  if (!draftId.value || !voidTarget.value || !voidReason.value.trim()) return
+  voidSaving.value = true
+  voidError.value = null
   try {
-    await deletePremiumEndorsement(draftId.value, ev.id)
+    await voidEndorsement(draftId.value, voidTarget.value.id, voidReason.value.trim())
+    voidTarget.value = null
     await hydrateFromDraft(draftId.value)
     await loadEndorsements()
-    flash.value = t('endorsement.deleted')
-  } catch { /* surfaced by the reload; keep the row */ }
+    flash.value = t('endorsement.voided')
+  } catch (e: unknown) {
+    voidError.value = e instanceof ApiError
+      ? (e.status === 403 ? t('endorsement.noPermission') : (e.body?.message ?? e.message))
+      : (e instanceof Error ? e.message : 'Error')
+  } finally {
+    voidSaving.value = false
+  }
 }
 
 /** Endorsements are available on any saved (non-draft) policy — most useful
@@ -896,36 +1036,38 @@ const canEndorse = computed<boolean>(() =>
   !!draftId.value && !isDraftMode.value,
 )
 
-/** Only the premium-change endorsements, newest first, for the history list. */
-const premiumEndorsements = computed(() =>
-  endorsements.value.filter((e) => e.type === 'endorsement.premium_change'),
-)
-
 async function loadEndorsements(): Promise<void> {
   if (!draftId.value) return
   try {
     const res = await fetchEndorsements(draftId.value)
     endorsements.value = res.data ?? []
+    endorsementNextSeq.value = res.meta?.nextSeq ?? null
   } catch { /* non-fatal — history just stays empty */ }
 }
 
-async function submitEndorsement(payload: {
-  reason: string
-  effectiveDate: string
-  newAnnualPremium: number
-  newCoverage: number | null
-  additionalPremium: number
-  additionalDutyStamp: number | null
-  additionalVat: number | null
-}): Promise<void> {
+async function submitEndorsement(payload: EndorsementSubmit): Promise<void> {
   if (!draftId.value) return
   endorsementSaving.value = true
   endorsementErrors.value = {}
+  const isPremium = payload.type === 'endorsement.premium_change'
+  const premiumBody = {
+    reason: payload.reason,
+    effectiveDate: payload.effectiveDate,
+    newAnnualPremium: payload.newAnnualPremium,
+    newCoverage: payload.newCoverage,
+    additionalPremium: payload.additionalPremium,
+    additionalDutyStamp: payload.additionalDutyStamp,
+    additionalVat: payload.additionalVat,
+  }
+  const generalBody = { reason: payload.reason, effectiveDate: payload.effectiveDate, detail: payload.detail }
   try {
     if (editingEndorsementId.value) {
-      await updatePremiumEndorsement(draftId.value, editingEndorsementId.value, payload)
+      if (isPremium) await updatePremiumEndorsement(draftId.value, editingEndorsementId.value, premiumBody)
+      else await updateEndorsement(draftId.value, editingEndorsementId.value, generalBody)
+    } else if (isPremium) {
+      await createPremiumEndorsement(draftId.value, premiumBody)
     } else {
-      await createPremiumEndorsement(draftId.value, payload)
+      await createEndorsement(draftId.value, { type: payload.type, ...generalBody })
     }
     showEndorsementModal.value = false
     // The policy premium changed server-side — re-hydrate so the form and the
@@ -936,8 +1078,9 @@ async function submitEndorsement(payload: {
     editingEndorsementId.value = null
     endorsementInitial.value = null
   } catch (e: unknown) {
-    const err = e as { response?: { data?: { errors?: Record<string, string[]> } } }
-    endorsementErrors.value = err.response?.data?.errors ?? {}
+    if (e instanceof ApiError) {
+      endorsementErrors.value = e.body?.errors ?? (e.body?.message ? { reason: [e.status === 403 ? t('endorsement.noPermission') : e.body.message] } : {})
+    }
   } finally {
     endorsementSaving.value = false
   }
@@ -947,6 +1090,16 @@ async function submitEndorsement(payload: {
 function endorsementSummary(ev: Endorsement): PremiumEndorsementPayload | null {
   return (ev.payload as unknown as PremiumEndorsementPayload) ?? null
 }
+
+function endorsementField(ev: Endorsement, key: string): string {
+  const v = (ev.payload ?? {})[key]
+  return v === null || v === undefined ? '' : String(v)
+}
+
+function endorsementTypeLabel(type: string): string {
+  return t(`endorsement.types.${type.replace('endorsement.', '')}`)
+}
+
 function fmtMoney(x: number): string {
   return new Intl.NumberFormat('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(x || 0)
 }
@@ -1074,6 +1227,75 @@ function runFormula(n: 1 | 2 | 3 | 4) {
   }
 }
 
+function customerRowFromResource(r: Record<string, unknown>): CustomerListRow {
+  return {
+    id: String(r.id ?? ''),
+    customerCode: String(r.customerCode ?? ''),
+    customerType: String(r.customerType ?? ''),
+    titleTh: String(r.titleTh ?? ''),
+    firstName: String(r.firstName ?? ''),
+    lastName: String(r.lastName ?? ''),
+    nickname: String(r.nickname ?? ''),
+    juristicName: String(r.juristicName ?? ''),
+    idCard: String(r.idCard ?? ''),
+    taxId: String(r.taxId ?? ''),
+    passport: String(r.passport ?? ''),
+    phone: String(r.phone ?? ''),
+    email: String(r.email ?? ''),
+    province: String(r.province ?? ''),
+    assignedAgentId: (r.assignedAgentId as string | null) ?? null,
+    assignedAgentCode: (r.assignedAgentCode as string | null) ?? null,
+    assignedAgentName: String(r.assignedAgentName ?? ''),
+    activePolicyCount: Number(r.activePolicyCount ?? 0),
+    totalPolicyCount: Number(r.totalPolicyCount ?? 0),
+    active: r.active !== false,
+    registeredAt: (r.registeredAt as string | null) ?? null,
+  } as CustomerListRow
+}
+
+function defaultAgentFromCustomer(row: CustomerListRow | null): void {
+  if (!row?.assignedAgentId || form.writingAgentId) return
+  const [firstName = '', ...rest] = (row.assignedAgentName ?? '').split(' ')
+  form.writingAgentId = String(row.assignedAgentId)
+  agentPicked.value = {
+    id: String(row.assignedAgentId),
+    agentCode: row.assignedAgentCode ?? '',
+    firstName,
+    lastName: rest.join(' '),
+  } as unknown as AgentListRow
+}
+
+function applyPickedCustomer(row: CustomerListRow): void {
+  form.customerId = row.id
+  customerPicked.value = row
+  defaultAgentFromCustomer(row)
+}
+
+const showCustomerCreate = ref(false)
+const customerCreateInitial = ref<ReturnType<typeof splitCustomerQuery> | null>(null)
+
+function openCustomerCreate(query: string): void {
+  customerCreateInitial.value = splitCustomerQuery(query)
+  showCustomerCreate.value = true
+}
+
+function onCustomerCreated(row: Record<string, unknown>): void {
+  showCustomerCreate.value = false
+  applyPickedCustomer(customerRowFromResource(row))
+}
+
+async function onCustomerOpenExisting(id: string): Promise<void> {
+  showCustomerCreate.value = false
+  try {
+    const res = await fetchCustomer(id)
+    applyPickedCustomer(customerRowFromResource(res.data as unknown as Record<string, unknown>))
+  } catch (e) {
+    error.value = e instanceof Error ? e.message : String(e)
+  }
+}
+
+const fullCustomerCreateHref = computed(() => router.resolve({ name: 'customer-new' }).href)
+
 // ── BroadcastChannel bridge (KEEP verbatim per B3 §9) ────────────────────
 
 type CreatedKind = 'customer:created' | 'product:created'
@@ -1086,31 +1308,7 @@ if (typeof BroadcastChannel !== 'undefined') {
     if (!data?.type || !data.row) return
     const r = data.row
     if (data.type === 'customer:created') {
-      form.customerId = String(r.id ?? '')
-      customerPicked.value = {
-        id: String(r.id ?? ''),
-        customerCode: String(r.customerCode ?? ''),
-        customerType: String(r.customerType ?? ''),
-        titleTh: String(r.titleTh ?? ''),
-        firstName: String(r.firstName ?? ''),
-        lastName: String(r.lastName ?? ''),
-        nickname: String(r.nickname ?? ''),
-        juristicName: String(r.juristicName ?? ''),
-        idCard: String(r.idCard ?? ''),
-        taxId: String(r.taxId ?? ''),
-        passport: String(r.passport ?? ''),
-        phone: String(r.phone ?? ''),
-        email: String(r.email ?? ''),
-        province: String(r.province ?? ''),
-        gender: String(r.gender ?? ''),
-        assignedAgentId: null,
-        assignedAgentCode: null,
-        assignedAgentName: '',
-        activePolicyCount: 0,
-        totalPolicyCount: 0,
-        active: true,
-        registeredAt: null,
-      }
+      applyPickedCustomer(customerRowFromResource(r))
     }
     // product:created omitted from this MVP — operator can pick from the
     // dropdown after the popup closes; C-15 will restore the full bridge.
@@ -1130,6 +1328,7 @@ function scheduleAutosave(): void {
   // the settling cascade watchers (insureType → carriers → productId
   // clearing) can wipe risk data mid-load.
   if (hydrating.value) return
+  if (verifyLocked.value || holdForVerify.value) return
   window.clearTimeout(autosaveTimer)
   autosaveTimer = window.setTimeout(() => { void doAutosave() }, 800)
 }
@@ -1141,28 +1340,97 @@ async function doAutosave(): Promise<void> {
     const payload = buildDraftPayload()
     if (!draftId.value) {
       const res = await createDraftPolicy(payload)
-      const created = res.data as unknown as { id: string; applicationNo?: string; jobNo?: string; status?: string }
+      const created = res.data as unknown as { id: string; applicationNo?: string; jobNo?: string; status?: string; customerYear?: number | null }
       draftId.value = created.id
       // Reflect the auto-run numbers the backend minted at draft creation.
       if (created.applicationNo) form.applicationNo = created.applicationNo
       if (created.jobNo) form.jobNo = created.jobNo
       // Seed the status dropdown from the freshly-created draft's status.
       if (!form.status && created.status) form.status = created.status
+      applyServerState(res.data)
       flash.value = t('policyCreate.action.draftSaved')
+      void router.replace({ name: 'policy-edit-draft', params: { id: created.id } })
     } else if (isDraftMode.value) {
-      await updateDraftPolicy(draftId.value, payload)
+      const res = await updateDraftPolicy(draftId.value, payload)
+      applyServerState(res.data)
+      if (takePending(res)) flash.value = 'ส่งคำขอให้ผู้ตรวจ Verify แล้ว'
     } else {
       // Editing a non-draft policy — use the general update endpoint.
-      await updatePolicy(draftId.value, payload)
+      const res = await updatePolicy(draftId.value, payload)
+      applyServerState(res.data)
+      takePending(res)
     }
-  } catch {
-    // Silent failure — the operator sees a stale state banner via the
-    // "Not saved online" indicator (rendered from `flash` state).
+    if (error.value && renewalBlocked.value === null) error.value = null
+  } catch (e) {
     flash.value = null
+    reportSaveError(e)
   } finally {
     autosaving.value = false
     window.setTimeout(() => { flash.value = null }, 2000)
   }
+}
+
+function applyServerState(p: Policy): void {
+  if (!yearsTouched.value) {
+    if (p.policyYear && p.policyYear !== form.policyYear) form.policyYear = p.policyYear
+    if (p.customerYear != null && p.customerYear !== form.customerYear) form.customerYear = p.customerYear
+  }
+  renewedFrom.value = p.renewedFrom ?? null
+  renewedTo.value = p.renewedTo ?? null
+  periodLabel.value = p.periodLabel ?? null
+  if (p.verification) {
+    pendingChange.value = p.verification.pending
+    lastRejected.value = p.verification.lastRejected
+  }
+  if (form.delivered && form.deliveredDate && p.freelookEndDate && p.freelookEndDate !== form.freelookEndDate) {
+    form.freelookEndDate = p.freelookEndDate
+  }
+}
+
+async function saveFreelookDoc(field: 'sentAt' | 'signedAt' | 'returnedAt', e: Event): Promise<void> {
+  const input = e.target as HTMLInputElement
+  if (!draftId.value) return
+  const value = input.value || null
+  try {
+    await updateFreelookDocs(draftId.value, { [field]: value })
+    freelookDocs[field] = value ?? ''
+    flash.value = 'บันทึกวันที่เอกสาร Freelook แล้ว'
+    window.setTimeout(() => { flash.value = null }, 2000)
+  } catch (err) {
+    input.value = freelookDocs[field]
+    reportSaveError(err)
+  }
+}
+
+async function submitDeleteRequest(): Promise<void> {
+  if (!draftId.value || !deleteReason.value.trim()) return
+  saving.value = true
+  error.value = null
+  try {
+    const res = await requestPolicyDelete(draftId.value, deleteReason.value.trim())
+    takePending(res)
+    showDeleteRequest.value = false
+    deleteReason.value = ''
+    flash.value = 'ส่งคำขอลบให้ผู้ตรวจ Verify แล้ว'
+    window.setTimeout(() => { flash.value = null }, 2500)
+  } catch (e) {
+    reportSaveError(e)
+  } finally {
+    saving.value = false
+  }
+}
+
+function reportSaveError(e: unknown): void {
+  if (e instanceof ApiError) {
+    const body = (e.body ?? {}) as Partial<RenewalBlockedError> & { message?: string }
+    if (e.status === 422 && body.code && ['already_renewed', 'source_not_renewable', 'source_not_found', 'self_renewal', 'renewal_cycle'].includes(body.code)) {
+      renewalBlocked.value = body as RenewalBlockedError
+      return
+    }
+    error.value = body.message ?? e.message
+    return
+  }
+  error.value = e instanceof Error ? e.message : String(e)
 }
 
 // Deep-watch the form to trigger autosave. Vue's reactive tracks nested
@@ -1192,7 +1460,9 @@ function buildDraftPayload(): Record<string, unknown> {
     appDate: form.appDate || null,
     effectiveDate: form.effectiveDate || null,
     expiryDate: form.expiryDate || null,
-    policyYear: form.policyYear || 1,
+    ...(canEditYears.value && yearsTouched.value
+      ? { yearsOverride: true, policyYear: form.policyYear || 1, ...(form.customerYear ? { customerYear: form.customerYear } : {}) }
+      : {}),
     actYear: form.actYear || 1,
     coverage: form.coverage || 0,
     discountAmount: form.discountAmount || 0,
@@ -1222,13 +1492,22 @@ function buildDraftPayload(): Record<string, unknown> {
     notes: form.notes || null,
     // การรับกรมธรรม์ (received from carrier) — when the "done" box is off we
     // clear the date so the status is unambiguous.
+    approvedDate: form.approved ? (form.approvedDate || null) : null,
+    approvalRef: form.approved ? (form.approvalRef || null) : null,
+    approvalNote: form.approved ? (form.approvalNote || null) : null,
     receivedDate: form.received ? (form.receivedDate || null) : null,
     receivedNote: form.receivedNote || null,
     // การจัดส่ง (delivered to customer) — reuses the mailing_* columns.
-    mailingDate: form.delivered ? (form.mailingDate || null) : null,
+    shippedDate: form.delivered ? (form.shippedDate || null) : null,
     mailingNote: form.mailingNote || null,
+    deliveryMethod: form.delivered ? (form.deliveryMethod || null) : null,
+    courier: form.delivered ? (form.courier || null) : null,
+    trackingNo: form.delivered ? (form.trackingNo || null) : null,
+    deliveredDate: form.delivered ? (form.deliveredDate || null) : null,
+    deliveredTo: form.delivered ? (form.deliveredTo || null) : null,
     // Free Look date (life products). Empty until recorded.
     freelookEndDate: form.freelookEndDate || null,
+    salesChannel: form.salesChannel || 'face_to_face',
   }
 
   // Split the risk value bag into top-level columns + risk_data.<kind>.
@@ -1264,15 +1543,29 @@ function collectSubmitProblems(): string[] {
 
 // ── Action buttons ────────────────────────────────────────────────────────
 
-/** Open the payment modal — ensure a draft exists first so the payment can
- *  actually be saved (the modal needs a policy id). Auto-saves a draft when
- *  none exists yet. */
-async function openPaymentModal(): Promise<void> {
-  if (!draftId.value) {
-    if (!form.customerId) return
-    await saveDraftNow()
+async function ensureDraftForPayment(): Promise<void> {
+  if (draftId.value) return
+  if (!form.customerId) throw new Error('customer required')
+  await saveDraftNow()
+  if (!draftId.value) throw new Error('draft not created')
+}
+
+async function onPaymentsChanged(): Promise<void> {
+  if (!draftId.value) return
+  try {
+    const res = await fetchPolicy(draftId.value)
+    const status = String(res.data.status ?? '')
+    hydrating.value = true
+    if (status) {
+      form.status = status
+      loadedStatus.value = status
+    }
+    applyServerState(res.data)
+    window.setTimeout(() => { hydrating.value = false }, 100)
+  } catch {
+    flash.value = 'บันทึกการชำระเงินแล้ว แต่รีเฟรชสถานะกรมธรรม์ไม่สำเร็จ กรุณากดโหลดหน้าใหม่'
+    window.setTimeout(() => { flash.value = null }, 4000)
   }
-  showPaymentModal.value = true
 }
 
 async function saveDraftNow(): Promise<void> {
@@ -1292,7 +1585,13 @@ async function savePolicyNow(): Promise<void> {
   error.value = null
   try {
     window.clearTimeout(autosaveTimer)
-    await updatePolicy(draftId.value, buildDraftPayload())
+    const res = await updatePolicy(draftId.value, buildDraftPayload())
+    if (takePending(res)) {
+      applyServerState(res.data)
+      flash.value = 'ส่งข้อมูลสำคัญที่แก้ให้ผู้ตรวจ Verify แล้ว'
+      window.setTimeout(() => { flash.value = null }, 3000)
+      return
+    }
     await router.push({ name: 'policies' })
   } catch (e) {
     error.value = e instanceof ApiError ? (e.body as { message?: string })?.message ?? e.message : (e instanceof Error ? e.message : 'Save failed.')
@@ -1304,7 +1603,45 @@ async function savePolicyNow(): Promise<void> {
 /** ต่ออายุ — open a fresh renewal draft prefilled from THIS policy. */
 function startRenewal(): void {
   if (!draftId.value) return
+  if (renewedTo.value?.live) {
+    openPolicy(renewedTo.value.id)
+    return
+  }
   void router.push({ name: 'policy-new', query: { renewFrom: draftId.value } })
+}
+
+function openPolicy(id: string): void {
+  void router.push({ name: 'policy-edit-draft', params: { id } })
+}
+
+async function applyRenewalSource(sourceId: string): Promise<void> {
+  renewalBlocked.value = null
+  error.value = null
+  renewalLoading.value = true
+  try {
+    const res = await fetchRenewalDraft(sourceId, draftId.value)
+    renewalMeta.value = res.meta
+    renewalConfirmed.value = false
+    yearsTouched.value = false
+    await hydrateFromDraft(sourceId, true, res.data as unknown as Record<string, unknown>)
+  } catch (e) {
+    reportSaveError(e)
+  } finally {
+    renewalLoading.value = false
+  }
+}
+
+function onRenewalSourcePicked(row: PolicyListRow): void {
+  showRenewalSearch.value = false
+  void applyRenewalSource(row.id)
+}
+
+async function loadRenewalMetaForDraft(sourceId: string): Promise<void> {
+  try {
+    renewalMeta.value = (await fetchRenewalDraft(sourceId, draftId.value)).meta
+  } catch {
+    renewalMeta.value = null
+  }
 }
 
 async function saveAsQuotation(): Promise<void> {
@@ -1334,6 +1671,11 @@ async function submitToCarrier(): Promise<void> {
     window.alert(`กรอกข้อมูลไม่ครบหรือไม่ถูกต้อง:\n\n• ${problems.join('\n• ')}`)
     return
   }
+  if (isRenewalInProgress.value && !renewalConfirmed.value) {
+    error.value = t('policyCreate.renewal.confirmRequired')
+    document.getElementById('renewal-confirm')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
+    return
+  }
   saving.value = true
   error.value = null
   try {
@@ -1341,10 +1683,16 @@ async function submitToCarrier(): Promise<void> {
       await doAutosave()
     }
     if (!draftId.value) throw new Error('Draft save failed — cannot submit.')
-    await promotePolicyToSubmitted(draftId.value)
+    const res = await promotePolicyToSubmitted(draftId.value, isRenewalInProgress.value ? { renewalTermsConfirmed: renewalConfirmed.value } : {})
+    if (takePending(res)) {
+      applyServerState(res.data)
+      flash.value = 'ส่งคำขอให้ผู้ตรวจ Verify แล้ว'
+      window.setTimeout(() => { flash.value = null }, 3000)
+      return
+    }
     await router.push({ name: 'policies' })
   } catch (e) {
-    error.value = e instanceof ApiError ? (e.body as { message?: string })?.message ?? e.message : (e instanceof Error ? e.message : 'Submit failed.')
+    reportSaveError(e)
   } finally {
     saving.value = false
   }
@@ -1363,29 +1711,28 @@ async function submitToCarrier(): Promise<void> {
  *
  *  Race condition: the autosave watcher fires on every form mutation.
  *  We suppress it during hydration by holding a `hydrating` flag and
- *  short-circuiting scheduleAutosave() when it's set.
+ *  short-circuiting scheduleAutosave() when it's set. (`hydrating` itself
+ *  is declared near the top — the premium-mode watchers read it at setup.)
  */
-const hydrating = ref(false)
 
 /** @param renewMode when true, prefill a NEW renewal draft from this policy:
  *  keep the party/product/premium/risk, but drop the identifiers + dates and
  *  set the renewal context (newOrRenew='renew', refAppToId=<source>). */
-async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
+async function hydrateFromDraft(id: string, renewMode = false, preset?: Record<string, unknown>): Promise<void> {
   hydrating.value = true
   error.value = null
   try {
-    const res = await fetchPolicy(id)
-    const p = res.data as unknown as Record<string, unknown>
+    const p = preset ?? (await fetchPolicy(id)).data as unknown as Record<string, unknown>
+    const keepExistingDraft = renewMode && !!draftId.value
 
     if (renewMode) {
-      // Capture the source's year figures so the renewed badges compute from
-      // them (customer +1; policy +1 unless the product is later changed).
+      const src = renewalMeta.value?.source
       renewSource.value = {
-        policyYear: yearsSince((p.effectiveDate as string | null) ?? null),
-        customerTenure: yearsSince((p.customerFirstPolicyDate as string | null) ?? null),
-        productId: String(p.productId ?? ''),
+        policyYear: Number(src?.policyYear ?? 1) || 1,
+        customerYear: src?.customerYear ?? null,
+        productId: String(src?.productId ?? p.productId ?? ''),
       }
-      loadedStatus.value = null // a brand-new draft, not editing the source
+      if (!keepExistingDraft) loadedStatus.value = null
     } else {
       // Remember the loaded status so autosave picks the right save endpoint
       // (draft → /draft, otherwise → general PATCH /policies/{id}).
@@ -1393,7 +1740,7 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
     }
     customerFirstPolicyDate.value = (p.customerFirstPolicyDate as string | null) ?? null
     // Manual status edit value (edit mode only; renewals start as a fresh draft).
-    form.status = renewMode ? '' : String(p.status ?? '')
+    form.status = renewMode ? (keepExistingDraft ? form.status : '') : String(p.status ?? '')
 
     // Scalars — same field names as buildDraftPayload emits.
     form.customerId = String(p.customerId ?? '')
@@ -1401,19 +1748,21 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
     form.productId = String(p.productId ?? '')
     form.carrierId = String(p.carrierId ?? '')
     form.newOrRenew = renewMode ? 'renew' : ((p.newOrRenew as 'new' | 'renew' | null) ?? 'new')
-    form.refAppToId = renewMode ? id : String(p.refAppToId ?? '')
-    // Identifiers + dates: fresh for a renewal (numbers re-minted; dates rolled
-    // forward one year from the source's coverage window).
-    form.applicationNo = renewMode ? '' : String(p.applicationNo ?? '')
-    form.jobNo = renewMode ? '' : String(p.jobNo ?? '')
-    form.policyNo = renewMode ? '' : String(p.policyNo ?? '')
-    form.notionNo = renewMode ? '' : String(p.notionNo ?? '')
-    form.appDate = renewMode ? '' : String(p.appDate ?? '')
-    // Renewal coverage window = starts where the old one ended, +1 year.
-    form.effectiveDate = renewMode ? (String(p.expiryDate ?? '')) : String(p.effectiveDate ?? '')
-    form.expiryDate = renewMode ? (rollForwardYear(p.expiryDate as string | null, 1) ?? '') : String(p.expiryDate ?? '')
+    form.refAppToId = String(p.refAppToId ?? (renewMode ? id : ''))
+    form.applicationNo = keepExistingDraft ? form.applicationNo : String(p.applicationNo ?? '')
+    form.jobNo = keepExistingDraft ? form.jobNo : String(p.jobNo ?? '')
+    form.policyNo = String(p.policyNo ?? '')
+    form.notionNo = String(p.notionNo ?? '')
+    form.appDate = String(p.appDate ?? '')
+    form.effectiveDate = String(p.effectiveDate ?? '')
+    form.expiryDate = String(p.expiryDate ?? '')
     form.coverage = Number(p.coverage ?? 0)
     form.policyYear = Number(p.policyYear ?? 1)
+    form.customerYear = (p.customerYear as number | null) ?? null
+    renewedFrom.value = (p.renewedFrom as PolicyChainLink | null | undefined) ?? null
+    renewedTo.value = (p.renewedTo as typeof renewedTo.value | undefined) ?? null
+    periodLabel.value = (p.periodLabel as string | null | undefined) ?? null
+    yearsTouched.value = false
     form.actYear = Number(p.actYear ?? 1)
     form.annualPremium = Number(p.annualPremium ?? 0)
     form.premiumMode = (p.premiumMode as typeof form.premiumMode) ?? 'annual'
@@ -1421,15 +1770,32 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
 
     // การรับกรมธรรม์และจัดส่ง — cleared on renewal (fresh document lifecycle).
     // The "done" checkbox is derived from whether a date is present.
+    const approvedDate = renewMode ? '' : String(p.approvedDate ?? '')
+    form.approvedDate = approvedDate
+    form.approved = !!approvedDate
+    form.approvalRef = renewMode ? '' : String(p.approvalRef ?? '')
+    form.approvalNote = renewMode ? '' : String(p.approvalNote ?? '')
     const receivedDate = renewMode ? '' : String(p.receivedDate ?? '')
     form.receivedDate = receivedDate
     form.received = !!receivedDate
     form.receivedNote = renewMode ? '' : String(p.receivedNote ?? '')
-    const mailingDate = renewMode ? '' : String(p.mailingDate ?? '')
-    form.mailingDate = mailingDate
-    form.delivered = !!mailingDate
+    const shippedDate = renewMode ? '' : String(p.shippedDate ?? p.mailingDate ?? '')
+    form.shippedDate = shippedDate
+    form.delivered = !!shippedDate
+    form.deliveryMethod = renewMode ? '' : String(p.deliveryMethod ?? '')
+    form.courier = renewMode ? '' : String(p.courier ?? '')
+    form.trackingNo = renewMode ? '' : String(p.trackingNo ?? '')
+    form.deliveredDate = renewMode ? '' : String(p.deliveredDate ?? '')
+    form.deliveredTo = renewMode ? '' : String(p.deliveredTo ?? '')
     // Free Look date — cleared on renewal (fresh lifecycle).
     form.freelookEndDate = renewMode ? '' : String(p.freelookEndDate ?? '')
+    form.salesChannel = String(p.salesChannel ?? 'face_to_face')
+    freelookDocs.sentAt = renewMode ? '' : String(p.freelookDocSentAt ?? '')
+    freelookDocs.signedAt = renewMode ? '' : String(p.freelookDocSignedAt ?? '')
+    freelookDocs.returnedAt = renewMode ? '' : String(p.freelookDocReturnedAt ?? '')
+    const ver = p.verification as { pending: VerifyRow | null; lastRejected: VerifyRow | null } | undefined
+    pendingChange.value = renewMode || !ver ? null : ver.pending
+    lastRejected.value = renewMode || !ver ? null : ver.lastRejected
     form.mailingNote = renewMode ? '' : String(p.mailingNote ?? '')
 
     // สลักหลังเบี้ยเพิ่ม — outstanding endorsement premium (cleared on renewal,
@@ -1458,6 +1824,7 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
     form.discountAmount = Number(installment.discountAmount ?? p.discountAmount ?? 0)
 
     form.installmentTerm = String(installment.term ?? p.installmentTerm ?? '')
+    form.installmentCount = Number(form.installmentTerm) || INSTALLMENTS_BY_MODE[form.premiumMode] || 1
     form.firstDueInst = Number(installment.firstDueAmount ?? p.firstDueInst ?? 0)
     form.firstDueInstDate = String(installment.firstDueDate ?? p.firstDueInstDate ?? '')
     form.nextDueInst = Number(installment.nextDueAmount ?? p.nextDueInst ?? 0)
@@ -1465,7 +1832,7 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
 
     // C-20: frozen commission (read-only display in the premium section).
     const cs = p.commissionSnapshot as { hubToAgentRate?: number | null; scheme?: string | null; capturedAt?: string | null; frozen?: boolean } | undefined
-    snapshotCommission.value = cs?.frozen
+    snapshotCommission.value = cs?.frozen && !renewMode
       ? { rate: cs.hubToAgentRate ?? null, scheme: cs.scheme ?? null, capturedAt: cs.capturedAt ?? null }
       : null
 
@@ -1480,10 +1847,10 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
       form.commCarrierToHubAmount = comm.carrierToHub?.amount ?? null
       form.commHubToAgentRate = comm.hubToAgent?.rate ?? null
       form.commHubToAgentAmount = comm.hubToAgent?.amount ?? null
-      touched.commCarrierToHubRate = true
-      touched.commCarrierToHubAmount = true
-      touched.commHubToAgentRate = true
-      touched.commHubToAgentAmount = true
+      touched.commCarrierToHubRate = !renewMode
+      touched.commCarrierToHubAmount = !renewMode
+      touched.commHubToAgentRate = !renewMode
+      touched.commHubToAgentAmount = !renewMode
     }
 
     // C-22: hydrate the per-year override vector; mark touched so create-mode
@@ -1585,6 +1952,7 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
 
     // Load สลักหลัง history (skip on a renewal draft — it starts clean).
     if (!renewMode) void loadEndorsements()
+    if (!renewMode && isRenewalInProgress.value) void loadRenewalMetaForDraft(form.refAppToId)
   } catch (e) {
     error.value = e instanceof Error ? e.message : 'Draft resume failed.'
   } finally {
@@ -1602,6 +1970,7 @@ async function hydrateFromDraft(id: string, renewMode = false): Promise<void> {
 // present (resume path), fire hydrateFromDraft after mount.
 function initFromRoute(): void {
   void loadPolicyStatuses()
+  void loadTenantRules()
   if (props.id) {
     draftId.value = props.id
     void hydrateFromDraft(props.id)
@@ -1611,7 +1980,7 @@ function initFromRoute(): void {
   // source policy (party/product/premium/risk), fresh identifiers + dates.
   const renewFrom = route.query.renewFrom
   if (typeof renewFrom === 'string' && renewFrom.trim() !== '') {
-    void hydrateFromDraft(renewFrom.trim(), true)
+    void applyRenewalSource(renewFrom.trim())
   }
 }
 
@@ -1623,7 +1992,10 @@ onMounted(initFromRoute)
 // reloading so the previous form is fully cleared.
 watch(
   () => [props.id, route.query.renewFrom] as const,
-  () => { window.location.reload() },
+  ([id]) => {
+    if (id && id === draftId.value) return
+    window.location.reload()
+  },
 )
 
 // ── Search closures for EntityPicker ─────────────────────────────────────
@@ -1657,14 +2029,31 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <span :class="['inline-flex px-2 py-0.5 rounded', statusBadgeClass(((!isDraftMode && form.status) || loadedStatus || 'draft') as PolicyStatus)]">
             {{ t(`policies.status.${(!isDraftMode && form.status) || loadedStatus || 'draft'}`) }}
           </span>
-          <!-- ปีที่ของกรมธรรม์ (from this policy's effective_date) -->
-          <span v-if="policyYear !== null" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-100">
-            <i class="pi pi-calendar text-[10px]" /> {{ t('policyCreate.policyYearBadge', { n: policyYear }) }}
+          <!-- ปีของกรมธรรม์ / ปีของลูกค้า — stored values (task 1.4) -->
+          <span v-if="form.policyYear" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-sky-50 text-sky-700 border border-sky-100">
+            <i class="pi pi-calendar text-[10px]" /> {{ t('policyCreate.policyYearBadge', { n: form.policyYear }) }}
           </span>
-          <!-- อายุการเป็นลูกค้า InsureHub (from the customer's first policy) -->
-          <span v-if="customerTenureYears !== null" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">
-            <i class="pi pi-user text-[10px]" /> {{ t('policyCreate.customerTenureBadge', { n: customerTenureYears }) }}
+          <span v-if="customerYearDisplay !== null" class="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-violet-50 text-violet-700 border border-violet-100">
+            <i class="pi pi-user text-[10px]" /> {{ t('policyCreate.customerTenureBadge', { n: customerYearDisplay }) }}
           </span>
+          <PolicyPeriodBadge v-if="periodLabel" :label="periodLabel" size="md" />
+          <button v-if="renewedFrom" type="button" data-testid="renewed-from-link"
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded border border-slate-200 bg-white text-slate-600 hover:border-brand-300 hover:text-brand-700"
+            @click="openPolicy(renewedFrom.id)">
+            <i class="pi pi-arrow-left text-[10px]" />
+            {{ t('policyCreate.renewal.renewedFrom') }}
+            <span class="font-mono">{{ renewedFrom.policyNo || renewedFrom.applicationNo }}</span>
+            <PolicyPeriodBadge :label="renewedFrom.periodLabel" />
+          </button>
+          <button v-if="renewedTo" type="button" data-testid="renewed-to-link"
+            :class="['inline-flex items-center gap-1 px-2 py-0.5 rounded border',
+              renewedTo.live ? 'border-emerald-200 bg-emerald-50 text-emerald-700 hover:border-emerald-400' : 'border-slate-200 bg-white text-slate-400 line-through']"
+            @click="openPolicy(renewedTo.id)">
+            {{ t('policyCreate.renewal.renewedTo') }}
+            <span class="font-mono">{{ renewedTo.policyNo || renewedTo.applicationNo }}</span>
+            <span class="no-underline">({{ t(`policies.status.${renewedTo.status}`) }})</span>
+            <i class="pi pi-arrow-right text-[10px]" />
+          </button>
           <span v-if="autosaving" class="text-slate-400">
             <i class="pi pi-spin pi-spinner text-[10px] mr-1" /> {{ t('policyCreate.action.savingDraft') }}
           </span>
@@ -1688,7 +2077,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
             <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
           </button>
-          <button type="button" @click="submitToCarrier" :disabled="saving"
+          <button type="button" @click="submitToCarrier" :disabled="saving || verifyLocked"
             class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
             <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
           </button>
@@ -1697,11 +2086,16 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <template v-else>
           <button type="button" @click="startRenewal" :disabled="saving"
             class="px-3 py-1.5 rounded-lg text-sm text-brand-700 border border-brand-300 hover:bg-brand-50 disabled:opacity-50">
-            <i class="pi pi-replay text-xs mr-1" /> {{ t('policyCreate.action.renew') }}
+            <i class="pi pi-replay text-xs mr-1" />
+            {{ renewedTo?.live ? t('policyCreate.renewal.openRenewal') : t('policyCreate.action.renew') }}
           </button>
-          <button type="button" @click="savePolicyNow" :disabled="saving"
+          <button v-if="verifyOn && !pendingChange" type="button" data-testid="request-delete" @click="showDeleteRequest = true" :disabled="saving"
+            class="px-3 py-1.5 rounded-lg text-sm text-rose-600 border border-rose-200 hover:bg-rose-50 disabled:opacity-50">
+            <i class="pi pi-trash text-xs mr-1" /> ขอลบ
+          </button>
+          <button type="button" data-testid="save-policy" @click="savePolicyNow" :disabled="saving || verifyLocked"
             class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-            <i class="pi pi-check text-xs mr-1" /> {{ t('policyCreate.action.save') }}
+            <i :class="['pi text-xs mr-1', holdForVerify ? 'pi-send' : 'pi-check']" /> {{ holdForVerify ? 'บันทึก / ส่งตรวจ' : t('policyCreate.action.save') }}
           </button>
         </template>
       </div>
@@ -1711,6 +2105,76 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       {{ error }}
     </div>
 
+    <div v-if="renewalBlocked" data-testid="renewal-blocked"
+      class="card p-4 bg-amber-50 border border-amber-300 text-amber-900 text-sm flex items-start gap-3">
+      <i class="pi pi-exclamation-triangle mt-0.5 text-amber-600" />
+      <div class="flex-1 space-y-2">
+        <div class="font-medium">{{ t('policyCreate.renewal.blockedTitle') }}</div>
+        <div>{{ renewalBlocked.message }}</div>
+        <div class="flex flex-wrap gap-2">
+          <button v-if="renewalBlocked.existingRenewal" type="button"
+            class="px-3 py-1 rounded-lg bg-amber-600 text-white text-xs hover:bg-amber-700"
+            @click="openPolicy(renewalBlocked.existingRenewal.id)">
+            {{ t('policyCreate.renewal.openExisting', { no: renewalBlocked.existingRenewal.applicationNo || renewalBlocked.existingRenewal.policyNo || `#${renewalBlocked.existingRenewal.id}` }) }}
+          </button>
+          <button type="button" class="px-3 py-1 rounded-lg border border-amber-400 text-xs hover:bg-amber-100"
+            @click="renewalBlocked = null; showRenewalSearch = true">
+            {{ t('policyCreate.renewal.pickAnother') }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <RenewalSourceSearchModal :open="showRenewalSearch" @close="showRenewalSearch = false" @pick="onRenewalSourcePicked" />
+
+    <div v-if="pendingChange" data-testid="verify-pending-banner"
+      class="card p-4 bg-amber-50 border border-amber-300 text-amber-900 text-sm flex items-start gap-3">
+      <i class="pi pi-hourglass mt-0.5 text-amber-600" />
+      <div class="flex-1">
+        <div class="font-medium">{{ pendingChange.actionLabel }} · รอตรวจสอบ (Verify)</div>
+        <div class="text-xs mt-0.5">
+          ส่งโดย {{ pendingChange.makerName || '—' }} · {{ fmtDate(pendingChange.createdAt) }}
+          <template v-if="pendingChange.fieldCount"> · {{ pendingChange.fieldCount }} ช่อง</template>
+        </div>
+        <div class="text-xs mt-1">
+          {{ verifyLocked ? 'แก้ไขกรมธรรม์นี้ไม่ได้จนกว่าผู้ตรวจจะอนุมัติหรือไม่อนุมัติ' : 'ข้อมูลสำคัญยังเป็นค่าเดิมจนกว่าผู้ตรวจอนุมัติ ช่องอื่นแก้และบันทึกได้ตามปกติ' }}
+        </div>
+      </div>
+      <RouterLink :to="{ name: 'policy-verification', params: { id: pendingChange.id } }"
+        class="px-3 py-1 rounded-lg bg-amber-600 text-white text-xs hover:bg-amber-700">ดูคำขอ</RouterLink>
+    </div>
+    <div v-else-if="lastRejected" data-testid="verify-rejected-banner"
+      class="card p-4 bg-rose-50 border border-rose-200 text-rose-800 text-sm flex items-start gap-3">
+      <i class="pi pi-times-circle mt-0.5" />
+      <div class="flex-1">
+        <div class="font-medium">คำขอ{{ lastRejected.actionLabel }}ล่าสุดไม่ผ่านการตรวจสอบ</div>
+        <div class="text-xs mt-0.5">โดย {{ lastRejected.checkerName || '—' }} · {{ fmtDate(lastRejected.decidedAt) }}</div>
+        <div class="text-xs mt-1">เหตุผล: <b>{{ lastRejected.reason }}</b> · แก้ไขแล้วส่งใหม่ได้</div>
+      </div>
+      <RouterLink :to="{ name: 'policy-verification', params: { id: lastRejected.id } }"
+        class="px-3 py-1 rounded-lg border border-rose-300 text-xs hover:bg-rose-100">ดูรายละเอียด</RouterLink>
+    </div>
+    <div v-else-if="holdForVerify" data-testid="verify-hold-note" class="card p-3 bg-sky-50 border border-sky-200 text-sky-800 text-xs flex items-center gap-2">
+      <i class="pi pi-verified" />
+      หน่วยงานเปิดการตรวจสอบ 2 ชั้น: การแก้ข้อมูลสำคัญ (ลูกค้า ตัวแทน บริษัท ทุน เบี้ย ค่าคอม วันที่ สถานะ) จะส่งให้อีกคนตรวจก่อนมีผล หน้านี้ไม่บันทึกอัตโนมัติ กด "บันทึก / ส่งตรวจ"
+    </div>
+
+    <div v-if="showDeleteRequest" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="delete-request-dialog" @click.self="showDeleteRequest = false">
+      <div class="w-full max-w-md rounded-xl bg-white p-5 shadow-xl">
+        <h3 class="text-base font-semibold text-slate-900">ขอลบกรมธรรม์</h3>
+        <p class="mt-1 text-xs text-slate-500">คำขอลบจะส่งให้ผู้ตรวจ Verify ก่อน กรมธรรม์จะถูกลบเมื่ออนุมัติเท่านั้น</p>
+        <label class="mt-3 block text-xs text-slate-600">เหตุผลที่ขอลบ
+          <textarea v-model="deleteReason" rows="3" data-testid="delete-reason" class="mt-1 w-full rounded-lg border border-slate-200 px-3 py-1.5 text-sm" />
+        </label>
+        <div class="mt-4 flex justify-end gap-2">
+          <button type="button" class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100" @click="showDeleteRequest = false">ยกเลิก</button>
+          <button type="button" data-testid="delete-request-submit" :disabled="saving || !deleteReason.trim()"
+            class="px-3 py-1.5 rounded-lg text-sm bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50" @click="submitDeleteRequest">ส่งคำขอลบ</button>
+        </div>
+      </div>
+    </div>
+
+    <fieldset :disabled="verifyLocked" class="min-w-0 space-y-6" data-testid="policy-form">
     <!-- ── Section 1: Party ─────────────────────────────────────────────── -->
     <section class="card p-5">
       <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.1') }}</h2>
@@ -1728,7 +2192,46 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
               {{ t('policyCreate.renew') }}
             </button>
           </div>
+          <div v-if="isDraftMode" class="mt-2">
+            <div v-if="isRenewalInProgress && renewedFrom" data-testid="renewal-source-card"
+              class="flex items-center justify-between gap-2 rounded-lg border border-teal-200 bg-teal-50 px-3 py-2 text-xs">
+              <div class="min-w-0">
+                <div class="text-teal-800 font-medium">{{ t('policyCreate.renewal.sourceLabel') }}</div>
+                <div class="text-slate-600 truncate">
+                  <span class="font-mono">{{ renewedFrom.policyNo || renewedFrom.applicationNo }}</span>
+                  · {{ t('policyCreate.renewal.sourceExpiry', { date: renewedFrom.expiryDate || '—' }) }}
+                  <PolicyPeriodBadge :label="renewedFrom.periodLabel" />
+                </div>
+              </div>
+              <button type="button" class="shrink-0 text-teal-700 hover:underline" @click="showRenewalSearch = true">
+                {{ t('policyCreate.renewal.change') }}
+              </button>
+            </div>
+            <button v-else type="button" data-testid="renewal-search-button" :disabled="renewalLoading"
+              class="w-full inline-flex items-center justify-center gap-2 px-3 py-1.5 rounded-lg text-sm border border-dashed border-teal-400 text-teal-700 bg-white hover:bg-teal-50 disabled:opacity-50"
+              @click="showRenewalSearch = true">
+              <i :class="renewalLoading ? 'pi pi-spin pi-spinner' : 'pi pi-search'" class="text-xs" />
+              {{ t('policyCreate.renewal.searchButton') }}
+            </button>
+          </div>
         </FormField>
+
+        <!-- ปีของกรมธรรม์ / ปีของลูกค้า (task 1.4) — suggested on renewal,
+             editable while draft/quotation; afterwards admin-only + audited. -->
+        <div class="grid grid-cols-2 gap-4">
+          <FormField :label="t('policyCreate.policyYearField')"
+            :hint="canEditYears ? (yearsTouched ? t('policyCreate.renewal.yearsOverriding') : t('policyCreate.renewal.yearsAdminCanOverride')) : t('policyCreate.renewal.yearsServerComputed')">
+            <input v-model.number="form.policyYear" type="number" min="1" max="99" step="1"
+              :disabled="!canEditYears" @input="yearsTouched = true"
+              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 disabled:bg-slate-50 disabled:text-slate-500" />
+          </FormField>
+          <FormField :label="t('policyCreate.customerYearField')">
+            <input v-model.number="form.customerYear" type="number" min="1" max="99" step="1"
+              :placeholder="customerYearDisplay != null ? String(customerYearDisplay) : ''"
+              :disabled="!canEditYears" @input="yearsTouched = true"
+              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 disabled:bg-slate-50 disabled:text-slate-500" />
+          </FormField>
+        </div>
 
         <!-- เลขที่ใบสมัคร (application_no) — auto-run by the backend at draft
              creation. Read-only; shows a hint until the first save mints it. -->
@@ -1771,7 +2274,24 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             :placeholder="t('policyCreate.customerPlaceholder')"
             icon-class="pi-user"
             :initial-label="customerPicked ? (`${customerPicked.firstName} ${customerPicked.lastName}`.trim() || customerPicked.juristicName || customerPicked.customerCode) : ''"
-            @picked="(r) => customerPicked = r as CustomerListRow | null"
+            :new-label="t('customers.ui.newCustomer')"
+            @picked="(r) => { customerPicked = r as CustomerListRow | null; defaultAgentFromCustomer(r as CustomerListRow | null) }"
+            @new-click="openCustomerCreate"
+          />
+          <div class="mt-1 flex items-center gap-3 text-[11px]">
+            <button type="button" class="text-brand-600 hover:underline" data-testid="wizard-new-customer" @click="openCustomerCreate('')">
+              <i class="pi pi-user-plus text-[10px]" /> {{ t('customers.ui.newCustomer') }}
+            </button>
+            <a :href="fullCustomerCreateHref" target="_blank" rel="noopener" class="text-slate-400 hover:text-slate-600 hover:underline">
+              {{ t('customers.ui.openFullCreate') }} <i class="pi pi-external-link text-[9px]" />
+            </a>
+          </div>
+          <CustomerCreateModal
+            :open="showCustomerCreate"
+            :initial="customerCreateInitial"
+            @close="showCustomerCreate = false"
+            @created="onCustomerCreated"
+            @open-existing="onCustomerOpenExisting"
           />
         </FormField>
 
@@ -1848,17 +2368,17 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <FormField :label="t('policyCreate.appDate')">
           <DateInput v-model="form.appDate" />
         </FormField>
-        <FormField :label="t('policyCreate.effectiveDate')" required>
+        <FormField :label="t('policyCreate.effectiveDate')" required :class="needsConfirm('effectiveDate') ? confirmRing : ''">
           <DateInput v-model="form.effectiveDate" />
         </FormField>
-        <FormField :label="t('policyCreate.expiryDate')" required>
+        <FormField :label="t('policyCreate.expiryDate')" required :class="needsConfirm('expiryDate') ? confirmRing : ''">
           <DateInput
             v-model="form.expiryDate"
             @update:model-value="() => { touched.expiryDate = true }"
             :min="form.effectiveDate || null"
           />
         </FormField>
-        <FormField :label="t('policyCreate.coverage')">
+        <FormField :label="t('policyCreate.coverage')" :class="needsConfirm('coverage') ? confirmRing : ''">
           <MoneyInput v-model="form.coverage"
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
@@ -1868,7 +2388,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
            สูตรภาษีใช้ back-solve; สำหรับประกันชีวิตสูตรจะบวกเบี้ย Rider เพิ่ม.
            ส่วนลดย้ายไปอยู่ Section เบี้ย + การชำระ. -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
-        <FormField :label="t('policyCreate.totalPremium')">
+        <FormField :label="t('policyCreate.totalPremium')" :class="needsConfirm('grossPremiumInput') ? confirmRing : ''">
           <MoneyInput v-model="form.grossPremiumInput"
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
           <p class="text-[10px] text-slate-500 mt-1">
@@ -1989,6 +2509,10 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           </div>
         </div>
 
+        <div v-if="needsConfirm('risk.license_no') && kind === 'motor'"
+          class="mb-3 rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900">
+          <i class="pi pi-car mr-1" />{{ t('policyCreate.renewal.checkVehicle') }}
+        </div>
         <RiskFieldRenderer
           :schema="(productDetail.productType?.riskSchema as unknown as RiskSchema | null)"
           v-model="form.risk"
@@ -2001,6 +2525,22 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
     <!-- ── Section 4: Premium ───────────────────────────────────────────── -->
     <section class="card p-5">
       <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.4') }}</h2>
+
+      <div v-if="isRenewalInProgress" id="renewal-confirm" data-testid="renewal-confirm"
+        :class="['mb-4 rounded-lg border p-3 text-sm', renewalConfirmed ? 'border-emerald-200 bg-emerald-50' : 'border-amber-300 bg-amber-50']">
+        <div v-if="renewalMeta?.quoteUsed && renewalMeta.quote" class="mb-2 text-amber-900">
+          <i class="pi pi-file-check mr-1" />
+          {{ t('policyCreate.renewal.quoteUsed', { amount: renewalMeta.quote.annualPremium.toLocaleString() }) }}
+          <span v-if="renewalMeta.needsPremiumFormula" class="block text-xs text-amber-700 mt-0.5">{{ t('policyCreate.renewal.runFormula') }}</span>
+        </div>
+        <div v-else class="mb-2 text-amber-900 text-xs">
+          <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.renewal.copiedFromSource') }}
+        </div>
+        <label class="flex items-start gap-2 cursor-pointer select-none">
+          <input v-model="renewalConfirmed" type="checkbox" class="mt-0.5" data-testid="renewal-confirm-checkbox" />
+          <span :class="renewalConfirmed ? 'text-emerald-800' : 'text-amber-900 font-medium'">{{ t('policyCreate.renewal.confirmLabel') }}</span>
+        </label>
+      </div>
 
       <!-- ── Group A: เบี้ยประกัน (formulas on top) ─────────────────────── -->
       <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">{{ t('policyCreate.premiumGroup') }}</h3>
@@ -2021,19 +2561,19 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </div>
 
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
-        <FormField :label="t('policyCreate.netPremium')" required>
+        <FormField :label="t('policyCreate.netPremium')" required :class="needsConfirm('netPremium') ? confirmRing : ''">
           <MoneyInput v-model="form.netPremium"
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
-        <FormField :label="t('policyCreate.dutyStamp')">
+        <FormField :label="t('policyCreate.dutyStamp')" :class="needsConfirm('dutyStamp') ? confirmRing : ''">
           <MoneyInput v-model="form.dutyStamp" @update:model-value="touched.dutyStamp = true"
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
-        <FormField :label="t('policyCreate.vat')">
+        <FormField :label="t('policyCreate.vat')" :class="needsConfirm('vat') ? confirmRing : ''">
           <MoneyInput v-model="form.vat" @update:model-value="touched.vat = true"
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
-        <FormField :label="t('policyCreate.totalPremiumPaid')">
+        <FormField :label="t('policyCreate.totalPremiumPaid')" :class="needsConfirm('totalPremiumPaid') ? confirmRing : ''">
           <MoneyInput v-model="form.totalPremiumPaid" @update:model-value="touched.totalPremiumPaid = true"
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
@@ -2046,7 +2586,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       <!-- ── Group B: ส่วนลดและหัก ณ ที่จ่าย ───────────────────────────── -->
       <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-5 mb-2 pt-4 border-t border-slate-100">{{ t('policyCreate.discountWhtGroup') }}</h3>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <FormField :label="t('policyCreate.discountAmount')">
+        <FormField :label="t('policyCreate.discountAmount')" :class="needsConfirm('discountAmount') ? confirmRing : ''">
           <MoneyInput v-model="form.discountAmount"
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
@@ -2077,7 +2617,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <FormField :label="t('policyCreate.premiumMode')">
           <select v-model="form.premiumMode"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-            <option v-for="m in premiumModeOptions" :key="m" :value="m">
+            <option v-for="m in premiumModeChoices" :key="m" :value="m">
               {{ t(`policyCreate.premiumModes.${m}`) }}
             </option>
           </select>
@@ -2290,76 +2830,110 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </p>
     </section>
 
-    <!-- ── Section: การชำระเงิน (payment tracking, C-24 FE-only) ─────────── -->
-    <section class="card p-5">
-      <div class="flex items-center justify-between">
-        <div>
-          <h2 class="font-semibold text-slate-900">การชำระเงิน</h2>
-          <p class="text-xs text-slate-500 mt-0.5">บันทึกการชำระเงินจากลูกค้า — จ่ายเต็ม / หักคอมมิสชั่น / มีส่วนลด / ผ่อน</p>
-        </div>
-        <button type="button" @click="openPaymentModal" :disabled="!form.customerId"
-          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50 flex items-center gap-1.5">
-          <i class="pi pi-wallet text-xs" /> บันทึกการชำระเงิน
-        </button>
-      </div>
-    </section>
+    <PolicyPaymentPanel
+      :policy-id="draftId"
+      :disabled="!form.customerId"
+      :expected="expectedPremium"
+      :carrier-label="carrierLabel"
+      :installment-count="Number(form.installmentCount) || 1"
+      :frequency-label="t(`policyCreate.premiumModes.${form.premiumMode}`)"
+      :main-premium="Number(form.mainPremium) || 0"
+      :compulsory-premium="Number(form.compulsoryPremium) || 0"
+      :installment-mode="form.installmentMode"
+      :ensure-draft="ensureDraftForPayment"
+      @changed="onPaymentsChanged"
+    />
 
-    <!-- ── Section: สลักหลัง (endorsement, v1 premium-increase) ──────────── -->
-    <section v-if="canEndorse" class="card p-5">
+    <section v-if="canEndorse" class="card p-5" data-testid="endorsement-section">
       <div class="flex items-center justify-between">
         <div>
           <h2 class="font-semibold text-slate-900">{{ t('endorsement.sectionTitle') }}</h2>
           <p class="text-xs text-slate-500 mt-0.5">{{ t('endorsement.sectionSubtitle') }}</p>
         </div>
-        <button type="button" @click="openNewEndorsement"
+        <button type="button" @click="openNewEndorsement" data-testid="endorsement-new"
           class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5">
           <i class="pi pi-file-edit text-xs" /> {{ t('endorsement.newButton') }}
+          <span v-if="endorsementNextSeq" class="ml-1 px-1.5 rounded bg-white/20 text-[11px] font-semibold">${{ endorsementNextSeq }}</span>
         </button>
       </div>
 
-      <!-- History (before → after diff rows) -->
-      <div v-if="premiumEndorsements.length" class="mt-4 overflow-x-auto">
-        <table class="w-full text-sm">
+      <div v-if="endorsements.length" class="mt-4 overflow-x-auto">
+        <table class="w-full text-sm" data-testid="endorsement-table">
           <thead>
             <tr class="text-left text-xs text-slate-500 border-b border-slate-100">
+              <th class="py-2 pr-3 w-16">{{ t('endorsement.col.seq') }}</th>
               <th class="py-2 pr-3">{{ t('endorsement.col.date') }}</th>
+              <th class="py-2 pr-3">{{ t('endorsement.col.type') }}</th>
               <th class="py-2 pr-3">{{ t('endorsement.col.reason') }}</th>
               <th class="py-2 pr-3 text-right">{{ t('endorsement.col.premiumChange') }}</th>
               <th class="py-2 pr-3 text-right">{{ t('endorsement.col.coverageChange') }}</th>
               <th class="py-2 px-3 text-right">{{ t('endorsement.col.additional') }}</th>
+              <th class="py-2 px-3">{{ t('endorsement.col.recordedBy') }}</th>
               <th class="py-2 pl-3 text-right w-20"></th>
             </tr>
           </thead>
           <tbody>
-            <tr v-for="ev in premiumEndorsements" :key="ev.id" class="border-b border-slate-50">
-              <template v-if="endorsementSummary(ev)">
-                <td class="py-2 pr-3 whitespace-nowrap text-slate-600">{{ endorsementSummary(ev)!.effectiveDate }}</td>
-                <td class="py-2 pr-3 text-slate-700">{{ endorsementSummary(ev)!.reason }}</td>
-                <td class="py-2 pr-3 text-right whitespace-nowrap">
+            <tr v-for="ev in endorsements" :key="ev.id" :data-testid="`endorsement-row-${ev.seq}`"
+              :class="['border-b border-slate-50 align-top', ev.voidedAt ? 'bg-slate-50/70 text-slate-400' : '']">
+              <td class="py-2 pr-3 whitespace-nowrap">
+                <span :class="['inline-flex px-1.5 py-0.5 rounded font-semibold text-xs', ev.voidedAt ? 'bg-slate-100 text-slate-400 line-through' : 'bg-amber-50 text-amber-700 ring-1 ring-amber-200']">
+                  ${{ ev.seq ?? '?' }}
+                </span>
+              </td>
+              <td :class="['py-2 pr-3 whitespace-nowrap', ev.voidedAt ? 'line-through' : 'text-slate-600']">
+                {{ fmtDate(endorsementField(ev, 'effectiveDate')) || fmtDate(ev.occurredAt) || '—' }}
+              </td>
+              <td :class="['py-2 pr-3 whitespace-nowrap', ev.voidedAt ? 'line-through' : 'text-slate-700']">
+                {{ endorsementTypeLabel(ev.type) }}
+                <div v-if="ev.voidedAt" class="no-underline">
+                  <span class="inline-flex mt-0.5 px-1.5 py-0.5 rounded text-[10px] font-medium bg-rose-50 text-rose-600 ring-1 ring-rose-200"
+                    :title="t('endorsement.voidedBy', { name: ev.voidedByName ?? '—', reason: ev.voidReason ?? '' })">
+                    {{ t('endorsement.voidedBadge') }}
+                  </span>
+                </div>
+              </td>
+              <td class="py-2 pr-3">
+                <div :class="ev.voidedAt ? 'line-through' : 'text-slate-700'">{{ endorsementField(ev, 'reason') || endorsementField(ev, 'note') || '—' }}</div>
+                <div v-if="endorsementField(ev, 'detail')" :class="['text-xs mt-0.5 whitespace-pre-line', ev.voidedAt ? 'line-through' : 'text-slate-500']">{{ endorsementField(ev, 'detail') }}</div>
+                <div v-if="ev.voidedAt" class="text-[11px] text-rose-500 mt-0.5">{{ t('endorsement.voidedBy', { name: ev.voidedByName ?? '—', reason: ev.voidReason ?? '' }) }}</div>
+              </td>
+              <template v-if="ev.type === 'endorsement.premium_change' && endorsementSummary(ev)?.before">
+                <td :class="['py-2 pr-3 text-right whitespace-nowrap', ev.voidedAt ? 'line-through' : '']">
                   <span class="text-slate-400">{{ fmtMoney(endorsementSummary(ev)!.before.annualPremium) }}</span>
                   <span class="text-slate-400 mx-1">→</span>
-                  <span class="text-slate-800 font-medium">{{ fmtMoney(endorsementSummary(ev)!.after.annualPremium) }}</span>
+                  <span :class="ev.voidedAt ? '' : 'text-slate-800 font-medium'">{{ fmtMoney(endorsementSummary(ev)!.after.annualPremium) }}</span>
                 </td>
-                <td class="py-2 pr-3 text-right whitespace-nowrap text-slate-500">
+                <td :class="['py-2 pr-3 text-right whitespace-nowrap', ev.voidedAt ? 'line-through' : 'text-slate-500']">
                   <template v-if="endorsementSummary(ev)!.after.coverage !== endorsementSummary(ev)!.before.coverage">
                     {{ fmtMoney(endorsementSummary(ev)!.before.coverage) }} → {{ fmtMoney(endorsementSummary(ev)!.after.coverage) }}
                   </template>
                   <template v-else>—</template>
                 </td>
-                <td class="py-2 px-3 text-right whitespace-nowrap text-brand-700 font-medium">
+                <td :class="['py-2 px-3 text-right whitespace-nowrap font-medium', ev.voidedAt ? 'line-through' : 'text-brand-700']">
                   {{ fmtMoney(endorsementSummary(ev)!.additionalTotal) }}
                 </td>
-                <td class="py-2 pl-3 text-right whitespace-nowrap">
-                  <button type="button" @click="openEditEndorsement(ev)"
+              </template>
+              <template v-else>
+                <td class="py-2 pr-3 text-right text-slate-300">—</td>
+                <td class="py-2 pr-3 text-right text-slate-300">—</td>
+                <td class="py-2 px-3 text-right text-slate-300">—</td>
+              </template>
+              <td class="py-2 px-3 whitespace-nowrap text-xs">
+                <div :class="ev.voidedAt ? '' : 'text-slate-700'">{{ ev.byUserName || '—' }}</div>
+                <div class="text-slate-400">{{ fmtDate(ev.occurredAt) }}</div>
+              </td>
+              <td class="py-2 pl-3 text-right whitespace-nowrap">
+                <template v-if="!ev.voidedAt && canManageEndorsements">
+                  <button type="button" @click="openEditEndorsement(ev)" :data-testid="`endorsement-edit-${ev.seq}`"
                     class="text-slate-400 hover:text-brand-600 px-1" :title="t('endorsement.edit')">
                     <i class="pi pi-pencil text-xs" />
                   </button>
-                  <button type="button" @click="deleteEndorsement(ev)"
-                    class="text-slate-400 hover:text-rose-600 px-1" :title="t('endorsement.delete')">
-                    <i class="pi pi-trash text-xs" />
+                  <button type="button" @click="openVoidEndorsement(ev)" :data-testid="`endorsement-void-${ev.seq}`"
+                    class="text-slate-400 hover:text-rose-600 px-1" :title="t('endorsement.void')">
+                    <i class="pi pi-ban text-xs" />
                   </button>
-                </td>
-              </template>
+                </template>
+              </td>
             </tr>
           </tbody>
         </table>
@@ -2373,6 +2947,32 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       <p class="text-xs text-slate-500 mt-0.5 mb-4">{{ t('policyCreate.fulfilment.subtitle') }}</p>
 
       <div class="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div class="rounded-lg border border-slate-200 p-4">
+          <label class="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" v-model="form.approved"
+              class="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            <span class="font-medium text-sm text-slate-800">{{ t('policyCreate.fulfilment.approvedDone') }}</span>
+          </label>
+          <div v-if="form.approved" class="mt-3 space-y-3">
+            <div class="grid grid-cols-2 gap-3">
+              <FormField :label="t('policyCreate.fulfilment.approvedDate')">
+                <input type="date" v-model="form.approvedDate"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField :label="t('policyCreate.fulfilment.approvalRef')">
+                <input v-model.trim="form.approvalRef" type="text" maxlength="64"
+                  :placeholder="t('policyCreate.fulfilment.approvalRefPlaceholder')"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+            <FormField :label="t('policyCreate.fulfilment.note')">
+              <textarea v-model="form.approvalNote" rows="2"
+                :placeholder="t('policyCreate.fulfilment.approvalNotePlaceholder')"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+          </div>
+        </div>
+
         <!-- การได้รับกรมธรรม์ — received from carrier -->
         <div class="rounded-lg border border-slate-200 p-4">
           <label class="flex items-center gap-2 cursor-pointer">
@@ -2401,8 +3001,36 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             <span class="font-medium text-sm text-slate-800">{{ t('policyCreate.fulfilment.deliveredDone') }}</span>
           </label>
           <div v-if="form.delivered" class="mt-3 space-y-3">
-            <FormField :label="t('policyCreate.fulfilment.deliveredDate')">
-              <input type="date" v-model="form.mailingDate"
+            <div class="grid grid-cols-2 gap-3">
+              <FormField :label="t('policyCreate.fulfilment.deliveryMethod')">
+                <select v-model="form.deliveryMethod"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+                  <option value="">—</option>
+                  <option v-for="m in DELIVERY_METHODS" :key="m" :value="m">{{ t(`policyCreate.fulfilment.methods.${m}`) }}</option>
+                </select>
+              </FormField>
+              <FormField v-if="needsCourier" :label="t('policyCreate.fulfilment.courier')">
+                <input v-model.trim="form.courier" type="text" maxlength="64"
+                  :placeholder="t('policyCreate.fulfilment.courierPlaceholder')"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+            <FormField v-if="needsTracking" :label="t('policyCreate.fulfilment.trackingNo')">
+              <input v-model.trim="form.trackingNo" type="text" maxlength="64"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand-400" />
+            </FormField>
+            <div class="grid grid-cols-2 gap-3">
+              <FormField :label="t('policyCreate.fulfilment.deliveredDate')">
+                <input type="date" v-model="form.shippedDate"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+              <FormField :label="t('policyCreate.fulfilment.customerReceivedDate')">
+                <input type="date" v-model="form.deliveredDate" :min="form.shippedDate || undefined"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              </FormField>
+            </div>
+            <FormField :label="t('policyCreate.fulfilment.deliveredTo')">
+              <input v-model.trim="form.deliveredTo" type="text" maxlength="255"
                 class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
             </FormField>
             <FormField :label="t('policyCreate.fulfilment.note')">
@@ -2414,13 +3042,45 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         </div>
 
         <!-- Free Look date — life products only -->
-        <div v-if="kind === 'life'" class="rounded-lg border border-slate-200 p-4">
+        <div v-if="kind === 'life'" class="rounded-lg border border-slate-200 p-4" data-testid="freelook-box">
           <span class="font-medium text-sm text-slate-800">{{ t('policyCreate.fulfilment.freelook') }}</span>
-          <p class="text-xs text-slate-500 mt-0.5 mb-3">{{ t('policyCreate.fulfilment.freelookHint') }}</p>
-          <FormField :label="t('policyCreate.fulfilment.freelookDate')">
-            <input type="date" v-model="form.freelookEndDate"
-              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-          </FormField>
+          <p class="text-xs text-slate-500 mt-0.5 mb-3">
+            วันสิ้นสุด Freelook = วันที่ลูกค้าได้รับกรมธรรม์ + {{ freelookDays.standard }} วัน (ขายทางโทรศัพท์/ออนไลน์ + {{ freelookDays.remote }} วัน)
+          </p>
+          <div class="grid grid-cols-2 gap-3">
+            <FormField label="ช่องทางการขาย">
+              <select v-model="form.salesChannel" data-testid="sales-channel"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+                <option v-for="c in SALES_CHANNELS" :key="c.value" :value="c.value">{{ c.label }}</option>
+              </select>
+            </FormField>
+            <FormField :label="t('policyCreate.fulfilment.freelookDate')">
+              <div v-if="freelookComputed" data-testid="freelook-computed"
+                class="rounded-lg border border-violet-200 bg-violet-50 px-3 py-1.5 text-sm text-violet-800">
+                {{ fmtDate(freelookComputed.date) }}
+                <span class="text-xs text-violet-500">(ได้รับ + {{ freelookComputed.days }} วัน · คำนวณอัตโนมัติ)</span>
+              </div>
+              <template v-else>
+                <input type="date" v-model="form.freelookEndDate"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+                <span class="mt-0.5 block text-[11px] text-slate-400">กรอกวันที่ลูกค้าได้รับในส่วนการจัดส่ง ระบบจะคำนวณให้</span>
+              </template>
+            </FormField>
+          </div>
+          <div v-if="draftId && !isDraftMode" class="mt-3 grid grid-cols-3 gap-3" data-testid="freelook-docs">
+            <FormField label="ส่งเอกสาร Freelook">
+              <input type="date" :value="freelookDocs.sentAt" @change="saveFreelookDoc('sentAt', $event)"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+            <FormField label="ลูกค้าเซ็นรับ">
+              <input type="date" :value="freelookDocs.signedAt" :min="freelookDocs.sentAt || undefined" @change="saveFreelookDoc('signedAt', $event)"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+            <FormField label="ส่งคืนบริษัทประกัน">
+              <input type="date" :value="freelookDocs.returnedAt" :min="freelookDocs.signedAt || undefined" @change="saveFreelookDoc('returnedAt', $event)"
+                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            </FormField>
+          </div>
         </div>
       </div>
     </section>
@@ -2433,6 +3093,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
       </FormField>
     </section>
+    </fieldset>
 
     <!-- #44 — Bottom action bar: duplicates the header actions so the operator
          can save right where they finish typing instead of scrolling back up. -->
@@ -2463,21 +3124,6 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </template>
     </div>
 
-    <!-- Payment modal (frontend-only skeleton). installmentCount prefills the
-         ผ่อน rows; premiumMode label shown as the plan. -->
-    <PolicyPaymentModal
-      :open="showPaymentModal"
-      :policy-id="draftId"
-      :expected="expectedPremium"
-      :carrier-label="carrierLabel"
-      :installment-count="Number(form.installmentCount) || 1"
-      :frequency-label="t(`policyCreate.premiumModes.${form.premiumMode}`)"
-      :main-premium="Number(form.mainPremium) || 0"
-      :compulsory-premium="Number(form.compulsoryPremium) || 0"
-      :installment-mode="form.installmentMode"
-      @close="showPaymentModal = false"
-    />
-
     <!-- สลักหลังเบี้ยเพิ่ม (v1) modal. Submits to the endorsement API, which
          updates the policy premium and records the before→after delta. -->
     <PolicyEndorsementModal
@@ -2487,10 +3133,41 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       :effective-date="form.effectiveDate || null"
       :expiry-date="form.expiryDate || null"
       :initial="endorsementInitial"
+      :next-seq="endorsementNextSeq"
       :saving="endorsementSaving"
       :errors="endorsementErrors"
       @close="showEndorsementModal = false"
       @submit="submitEndorsement"
     />
+
+    <div v-if="voidTarget" class="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4" data-testid="endorsement-void-dialog"
+      @click.self="!voidSaving && (voidTarget = null)">
+      <div class="bg-white rounded-xl shadow-xl w-full max-w-md">
+        <div class="px-5 py-4 border-b border-slate-100">
+          <h3 class="font-semibold text-slate-900">{{ t('endorsement.voidTitle', { n: voidTarget.seq ?? '?' }) }}</h3>
+          <p class="text-xs text-slate-500 mt-1">{{ endorsementTypeLabel(voidTarget.type) }} · {{ endorsementField(voidTarget, 'reason') }}</p>
+        </div>
+        <div class="p-5 space-y-3 text-sm">
+          <p class="text-xs text-amber-800 bg-amber-50 border border-amber-200 rounded-lg p-2.5">
+            {{ t('endorsement.voidHint', { n: voidTarget.seq ?? '?' }) }}<template v-if="voidTarget.type === 'endorsement.premium_change'"> · {{ t('endorsement.voidPremiumHint') }}</template>
+          </p>
+          <div>
+            <label class="text-xs font-medium text-slate-600 mb-1 block">{{ t('endorsement.voidReason') }} <span class="text-rose-500">*</span></label>
+            <input v-model="voidReason" maxlength="500" :placeholder="t('endorsement.voidReasonPlaceholder')" data-testid="endorsement-void-reason"
+              class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          </div>
+          <p v-if="voidError" class="text-xs text-rose-600">{{ voidError }}</p>
+        </div>
+        <div class="flex items-center justify-end gap-2 px-5 py-4 border-t border-slate-100">
+          <button type="button" class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100"
+            :disabled="voidSaving" @click="voidTarget = null">{{ t('endorsement.cancel') }}</button>
+          <button type="button" data-testid="endorsement-void-confirm"
+            class="px-4 py-1.5 rounded-lg text-sm bg-rose-600 text-white hover:bg-rose-700 disabled:opacity-50"
+            :disabled="voidSaving || !voidReason.trim()" @click="confirmVoidEndorsement">
+            {{ voidSaving ? t('endorsement.saving') : t('endorsement.voidConfirm') }}
+          </button>
+        </div>
+      </div>
+    </div>
   </div>
 </template>

@@ -17,8 +17,7 @@ use Illuminate\Support\Facades\Log;
  *   1. VolumeAccumulator (PR-B) writes the seller's + uplines' rows for
  *      the payment's month.
  *   2. RankPromotionService (PR-C) walks the same chain and evaluates
- *      each agent against the fresh volumes. Any qualifying promotion
- *      is instant.
+ *      each agent against the fresh volumes.
  *   3. MgmCommissionEngine (this PR) reads the (possibly just-promoted)
  *      rank_id to compute mgmt fees, then writes commission_ledgers
  *      rows for DIRECT_COMMISSION (PR-D), REFERRAL_FEE (PR-E),
@@ -75,6 +74,41 @@ class PolicyPaymentObserver
             $this->engine->accrueForPayment($payment);
         } catch (\Throwable $e) {
             Log::error('MGM commission accrual failed on payment.created', [
+                'payment_id' => $payment->id,
+                'policy_id' => $payment->policy_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public function updated(PolicyPayment $payment): void
+    {
+        if (! $payment->wasChanged(['amount', 'payment_date', 'policy_id', 'voided_at', 'adjustment_amount'])) {
+            return;
+        }
+
+        try {
+            $this->accumulator->forgetPayment((int) $payment->getOriginal('policy_id'), $payment->getOriginal('payment_date'));
+            $this->accumulator->accumulateForPayment($payment);
+            $policy = $payment->policy()->first();
+            if ($policy?->writing_agent_id !== null) {
+                $this->promotion->evaluateForChain((int) $policy->writing_agent_id);
+            }
+        } catch (\Throwable $e) {
+            Log::error('MGM volume recompute failed on payment.updated', [
+                'payment_id' => $payment->id,
+                'policy_id' => $payment->policy_id,
+                'error' => $e->getMessage(),
+            ]);
+        }
+    }
+
+    public function deleted(PolicyPayment $payment): void
+    {
+        try {
+            $this->accumulator->forgetPayment((int) $payment->policy_id, $payment->payment_date);
+        } catch (\Throwable $e) {
+            Log::error('MGM volume recompute failed on payment.deleted', [
                 'payment_id' => $payment->id,
                 'policy_id' => $payment->policy_id,
                 'error' => $e->getMessage(),

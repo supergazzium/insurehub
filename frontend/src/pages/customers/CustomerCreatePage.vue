@@ -16,12 +16,15 @@ import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
 import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 import { toIsoDate } from '../../util/dateFormat'
-import { api } from '../../api/client'
+import { api, ApiError } from '../../api/client'
 import { fetchCustomerList, type CustomerListRow } from '../../api/customers'
 import { fetchProvinces, fetchDistricts, fetchSubDistricts, fetchNamePrefixes, fetchNationalities, type NamePrefixRow, type NationalityRow } from '../../api/portal'
+import { genderFromTitle } from '../../utils/genderFromTitle'
+import { useI18n } from 'vue-i18n'
 import { isThaiName, isThaiJuristicName, isThaiId13, isThaiMobile, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
 
 const router = useRouter()
+const { t } = useI18n()
 
 // Submit state (replaces CreateModal's internal saving/error handling).
 const saving = ref(false)
@@ -98,22 +101,6 @@ const mailingSubDistrictOptions = computed<SearchOption[]>(() =>
   mailingSubDistricts.value.map((s) => ({ value: s.name, label: s.name, sublabel: s.postcode })),
 )
 
-// Switching customer type resets every field whose meaning changes across
-// types: title (Individual bucket vs Corporate), Thai ID vs passport, and
-// the corporate-only juristicName/taxId. Prevents stale data from leaking
-// through the payload after the operator flips between types.
-watch(() => form.customerType, () => {
-  form.titleTh = ''
-  form.idCard = ''
-  form.passport = ''
-  form.nationality = ''
-  form.race = ''
-  form.juristicName = ''
-  form.taxId = ''
-  // Re-seed ไทย for Thai individuals after the reset above.
-  applyPersonDefaults()
-})
-
 // ─── Form state ───────────────────────────────────────────────────────────
 const form = reactive({
   customerCode: '',
@@ -168,6 +155,29 @@ const form = reactive({
 // The optional second email row only shows once the operator asks for it
 // (or when editing a customer that already has an email2).
 const showSecondEmail = ref(false)
+
+// Switching customer type resets every field whose meaning changes across
+// types: title (Individual bucket vs Corporate), Thai ID vs passport, and
+// the corporate-only juristicName/taxId. Prevents stale data from leaking
+// through the payload after the operator flips between types.
+watch(() => form.customerType, () => {
+  form.titleTh = ''
+  form.idCard = ''
+  form.passport = ''
+  form.nationality = ''
+  form.race = ''
+  form.juristicName = ''
+  form.taxId = ''
+  // Re-seed ไทย for Thai individuals after the reset above.
+  applyPersonDefaults()
+})
+
+watch(() => form.titleTh, (title) => {
+  if (form.customerType === 'corporate' || form.gender) return
+  const g = genderFromTitle(title)
+  if (g) form.gender = g
+})
+
 
 /** ไทย is the sensible default nationality + race for Thai individuals.
  *  Foreign individuals must pick explicitly (no default); corporate has
@@ -344,7 +354,7 @@ function validateMobile(v: string): string | null {
   }
   return null
 }
-// Backup phone ("เบอร์สำรอง") — optional and format-free: it may hold a
+// Backup phone ("เบอร์สำรอง") — optional and format-free (#31): it may hold a
 // mobile, landline, or any reachable number, so we accept anything.
 function validateLandline(_v: string): string | null {
   return null
@@ -549,7 +559,7 @@ function collectValidationProblems(): string[] {
   push('เลขหนังสือเดินทาง', errPassport.value)
   push('สัญชาติ', errNationality.value)
   push('โทรศัพท์มือถือ', errPhone.value)
-  push('เบอร์สำรอง', errTelPhone.value)
+  push(t('customers.fields.telPhone'), errTelPhone.value)
   push('อีเมล', errEmail.value)
   push('อีเมล (สำรอง)', errEmail2.value)
   push('อีเมลผู้ติดต่อแทน', errContactEmail.value)
@@ -672,9 +682,9 @@ async function submit(): Promise<void> {
     else router.push({ name: 'customers' })
   } catch (e: unknown) {
     // Surface Laravel 422 field errors inline; otherwise a generic message.
-    const err = e as { response?: { data?: { errors?: Record<string, string[]>; message?: string } } }
-    if (err.response?.data?.errors) fieldErrors.value = err.response.data.errors
-    submitError.value = err.response?.data?.message ?? 'บันทึกไม่สำเร็จ กรุณาลองใหม่'
+    const body = (e instanceof ApiError ? e.body : null) as { errors?: Record<string, string[]>; message?: string } | null
+    if (body?.errors) fieldErrors.value = body.errors
+    submitError.value = body?.message ?? 'บันทึกไม่สำเร็จ กรุณาลองใหม่'
   } finally {
     saving.value = false
   }
@@ -927,9 +937,10 @@ function cancel(): void {
           </div>
           <p v-if="showPhone" class="text-xs text-rose-600 mt-0.5">{{ showPhone }}</p>
         </FormField>
-        <FormField label="เบอร์สำรอง" error-key="telPhone" :errors="fieldErrors">
+        <FormField :label="t('customers.fields.telPhone')" error-key="telPhone" :errors="fieldErrors">
           <div class="relative">
-            <input v-model.trim="form.telPhone" inputmode="tel" placeholder="เบอร์โทรสำรอง"
+            <input v-model.trim="form.telPhone" inputmode="tel" placeholder="เบอร์โทรสำรอง (ใส่ได้ทุกแบบ)"
+
               :class="inputClass(showTelPhone, telPhoneValid)"
               @blur="markTouched('telPhone')" />
             <i v-if="telPhoneValid" class="pi pi-check text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2 text-xs" />

@@ -78,11 +78,11 @@ function clear(): void {
 
 function onKeydown(e: KeyboardEvent): void {
   if (props.disabled) return
-  if (!open.value && (e.key === 'ArrowDown' || e.key === 'Enter')) { focusOpen(); return }
+  if (!open.value && (e.key === 'ArrowDown' || e.key === 'Enter')) { e.preventDefault(); focusOpen(); return }
   if (e.key === 'ArrowDown') { e.preventDefault(); highlight.value = Math.min(highlight.value + 1, filtered.value.length - 1) }
   else if (e.key === 'ArrowUp') { e.preventDefault(); highlight.value = Math.max(highlight.value - 1, 0) }
   else if (e.key === 'Enter') { e.preventDefault(); const opt = filtered.value[highlight.value]; if (opt) choose(opt) }
-  else if (e.key === 'Escape') { open.value = false }
+  else if (e.key === 'Escape' && open.value) { e.preventDefault(); open.value = false }
 }
 
 // Reset the highlight to the top whenever the visible list changes.

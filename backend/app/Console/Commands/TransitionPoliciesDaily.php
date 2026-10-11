@@ -134,6 +134,10 @@ class TransitionPoliciesDaily extends Command
         $q = Policy::query()
             ->where('status', 'draft')
             ->where('created_at', '<', $cutoff)
+            ->whereNotExists(fn ($w) => $w->select(DB::raw(1))->from('pending_changes')
+                ->where('pending_changes.entity_type', 'policy')
+                ->whereColumn('pending_changes.entity_id', 'policies.id')
+                ->where('pending_changes.status', 'pending'))
             ->when($tenantId !== null, fn ($qq) => $qq->where('tenant_id', $tenantId));
 
         $count = 0;

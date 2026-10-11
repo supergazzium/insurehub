@@ -6,7 +6,6 @@ import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
 import AddressPicker from '../../components/AddressPicker.vue'
 import AgentPicker from '../../components/AgentPicker.vue'
-import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 import AgentsSubnav from './AgentsSubnav.vue'
 import AgentDocUpload from '../../components/AgentDocUpload.vue'
 import {
@@ -16,12 +15,14 @@ import {
   type RankRow, type LevelProgress, type RankPromotionRow, type AgentNoteRow, type AgentRelations,
 } from '../../api/agents'
 import { fetchAgentCommissionDetail, type AgentCommissionResponse } from '../../api/mgm'
+import { fetchAgentOutstandingDetail } from '../../api/commissionPayouts'
+import { levelBadgeClass } from '../../utils/agentLevel'
 import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
 
 const route = useRoute()
 const router = useRouter()
-const editId = computed(() => (route.name === 'agent-detail' || route.name === 'agent-edit-info' ? String(route.params.id) : null))
+const editId = computed(() => (route.name === 'agent-edit' ? String(route.params.id) : null))
 const isEdit = computed(() => editId.value !== null)
 
 // AddressPicker (edit mode) emits (fieldKey, value) after it PATCHes agents/{id};
@@ -44,7 +45,6 @@ const ranks = ref<RankRow[]>([])
 const progress = ref<LevelProgress | null>(null)
 const relations = ref<AgentRelations | null>(null)
 const commission = ref<AgentCommissionResponse | null>(null)
-const money2 = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 const PAYOUT_LABEL: Record<string, string> = { DIRECT_COMMISSION: 'ค่าคอมผู้ขาย', REFERRAL_FEE: 'ค่าแนะนำ', MANAGEMENT_DIFFERENTIAL: 'ส่วนต่างบริหาร' }
 const PAYOUT_BADGE: Record<string, string> = { DIRECT_COMMISSION: 'bg-sky-50 text-sky-700', REFERRAL_FEE: 'bg-violet-50 text-violet-700', MANAGEMENT_DIFFERENTIAL: 'bg-amber-50 text-amber-700' }
 const REL_LEVEL_DOT: Record<string, string> = {
@@ -62,7 +62,11 @@ const approvalStatus = ref<string>('approved')
 const photos = reactive({ licenseLife: false, licenseNonLife: false, idCard: false, bankBook: false })
 const busy = ref(false)
 const money = (n: number) => n.toLocaleString('th-TH', { maximumFractionDigits: 0 })
-const agentNameOrCode = computed(() => `${form.firstName} ${form.lastName}`.trim() || form.agentCode)
+// Corporate / VAT support + validation state (from main).
+const fieldErrors = ref<Record<string, string>>({})
+const currentLevel = ref<number | null>(null)
+const originalType = ref<'AG' | 'IN'>('IN')
+const original = reactive({ kind: 'individual', hasVat: false, vatMode: '' as string, taxId: '', juristicName: '' })
 
 const form = reactive({
   agentCode: '',
@@ -74,35 +78,34 @@ const form = reactive({
   idCard: '', birthDate: '',
   juristicName: '', taxId: '',
   hasVat: false, vatMode: 'include' as 'include' | 'exclude',
+  whtRate: '' as string | number,
   address: '', province: '', district: '', subDistrict: '', postcode: '',
   bankNameText: '', bankAccountNo: '', bankAccountName: '',
   licenseLifeNo: '', licenseLifeExpiry: '',
   licenseNonLifeNo: '', licenseNonLifeExpiry: '',
-  parentAgentId: '', level: '',
+  parentAgentId: '',
   joinedAt: '',
   notes: '',
   active: true,
 })
 
-const levelOptions = computed<SearchOption[]>(() => [
-  { value: '', label: '— ไม่กำหนด —' },
-  ...ranks.value.map((r) => ({ value: r.levelKey, label: `${r.nameTh} (${r.code})` })),
-])
+const taxIdRequired = computed(() => form.kind === 'corporate' || form.hasVat)
+const agentNameOrCode = computed(() => (form.kind === 'corporate' && form.juristicName) || `${form.firstName} ${form.lastName}`.trim() || form.agentCode)
 
 function s(k: string, v: unknown): void { (form as Record<string, unknown>)[k] = v == null ? '' : v }
 
 async function load(): Promise<void> {
   loading.value = true
   error.value = null
+  fieldErrors.value = {}
   try {
-    const r = await fetchRanks()
-    ranks.value = r.data
     if (isEdit.value) {
       const res = await fetchAgent(editId.value!)
       const d = res.data as Record<string, unknown>
       const bank = (d.bank ?? {}) as Record<string, unknown>
       form.agentCode = String(d.agentCode ?? '')
-      form.agentType = (d.agentType as 'AG' | 'IN') || 'AG'
+      form.agentType = (d.agentType as 'AG' | 'IN') || 'IN'
+      originalType.value = form.agentType
       form.kind = (d.kind as 'individual' | 'corporate') || 'individual'
       s('firstName', d.firstName); s('lastName', d.lastName)
       s('firstNameEn', d.firstNameEn); s('lastNameEn', d.lastNameEn)
@@ -122,23 +125,17 @@ async function load(): Promise<void> {
       photos.licenseNonLife = !!ph.licenseNonLife
       photos.idCard = !!ph.idCard
       photos.bankBook = !!ph.bankBook
-      s('parentAgentId', d.parentAgentId); s('level', d.level)
+      s('parentAgentId', d.parentAgentId)
+      currentLevel.value = typeof d.rankLevel === 'number' ? d.rankLevel : null
       s('joinedAt', d.joinedAt); s('notes', d.notes)
       form.active = d.active !== false
       approvalStatus.value = (d.approvalStatus as string) ?? 'approved'
       form.hasVat = d.hasVat === true
       form.vatMode = (d.vatMode as 'include' | 'exclude') || 'include'
-      // Detail extras — progress + promotion history (best-effort).
-      const [prog, promo] = await Promise.all([
-        fetchLevelProgress(editId.value!).catch(() => ({ data: null as LevelProgress | null })),
-        fetchRankPromotions('all').catch(() => ({ data: [] as RankPromotionRow[], meta: { pendingCount: 0 } })),
-      ])
-      progress.value = prog.data
-      promotions.value = promo.data.filter((x) => x.agentId === editId.value)
-      relations.value = (await fetchAgentRelations(editId.value!).catch(() => null))
-      commission.value = (form.agentCode ? await fetchAgentCommissionDetail(form.agentCode).catch(() => null) : null)
-      const nt = await fetchAgentNotes(editId.value!).catch(() => ({ data: [] as AgentNoteRow[] }))
-      notes.value = nt.data
+      form.whtRate = d.whtRate === null || d.whtRate === undefined ? '' : Number(d.whtRate)
+      Object.assign(original, {
+        kind: form.kind, hasVat: form.hasVat, vatMode: form.hasVat ? form.vatMode : '', taxId: form.taxId, juristicName: form.juristicName,
+      })
     }
   } catch (e: unknown) {
     error.value = e instanceof ApiError ? e.message : 'โหลดข้อมูลไม่สำเร็จ'
@@ -148,7 +145,7 @@ async function load(): Promise<void> {
 const payload = computed<Record<string, unknown>>(() => {
   const p: Record<string, unknown> = {
     agentCode: form.agentCode.trim(),
-    agentType: form.agentType,
+    agentType: isEdit.value ? form.agentType : 'IN',
     kind: form.kind,
     firstName: form.firstName || null,
     lastName: form.lastName || null,
@@ -165,6 +162,7 @@ const payload = computed<Record<string, unknown>>(() => {
     taxId: form.taxId || null,
     hasVat: form.hasVat,
     vatMode: form.hasVat ? form.vatMode : null,
+    whtRate: form.whtRate === '' || form.whtRate === null ? null : Number(form.whtRate),
     address: form.address || null,
     province: form.province || null,
     district: form.district || null,
@@ -175,7 +173,6 @@ const payload = computed<Record<string, unknown>>(() => {
     licenseNonLifeNo: form.licenseNonLifeNo || null,
     licenseNonLifeExpiry: form.licenseNonLifeExpiry || null,
     parentAgentId: form.parentAgentId || null,
-    level: form.level || null,
     joinedAt: form.joinedAt || null,
     notes: form.notes || null,
     active: form.active,
@@ -184,26 +181,74 @@ const payload = computed<Record<string, unknown>>(() => {
   return p
 })
 
+const kindLabel = (k: string) => (k === 'corporate' ? 'นิติบุคคล' : 'บุคคลธรรมดา')
+const vatText = (has: boolean, mode: string) => (!has ? 'ไม่มี VAT' : mode === 'include' ? 'มี VAT — รวม VAT' : 'มี VAT — ไม่รวม VAT')
+const taxChanges = computed(() => {
+  if (!isEdit.value) return []
+  const out: { label: string; before: string; after: string }[] = []
+  if (original.kind !== form.kind) out.push({ label: 'ชนิด', before: kindLabel(original.kind), after: kindLabel(form.kind) })
+  const beforeVat = vatText(original.hasVat, original.vatMode)
+  const afterVat = vatText(form.hasVat, form.hasVat ? form.vatMode : '')
+  if (beforeVat !== afterVat) out.push({ label: 'VAT', before: beforeVat, after: afterVat })
+  if ((original.taxId || '') !== (form.taxId || '')) out.push({ label: 'เลขผู้เสียภาษี', before: original.taxId || '—', after: form.taxId || '—' })
+  if (form.kind === 'corporate' && (original.juristicName || '') !== (form.juristicName || '')) {
+    out.push({ label: 'ชื่อนิติบุคคล', before: original.juristicName || '—', after: form.juristicName || '—' })
+  }
+  return out
+})
+const confirmOpen = ref(false)
+const outstanding = ref<{ itemCount: number; totalAmount: number } | null>(null)
+const money2 = (n: number) => n.toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+
+function validateLocal(): boolean {
+  const errs: Record<string, string> = {}
+  if (!form.agentCode.trim()) errs.agentCode = 'กรุณากรอกรหัสตัวแทน'
+  if (form.kind === 'corporate' && !form.juristicName.trim()) errs.juristicName = 'กรุณากรอกชื่อนิติบุคคล'
+  if (taxIdRequired.value && !form.taxId.trim()) errs.taxId = 'ต้องกรอกเลขประจำตัวผู้เสียภาษีเมื่อเป็นนิติบุคคลหรือมี VAT'
+  fieldErrors.value = errs
+  return Object.keys(errs).length === 0
+}
+
 async function submit(): Promise<void> {
-  if (!form.agentCode.trim()) { error.value = 'กรุณากรอกรหัสตัวแทน'; return }
+  error.value = null
+  if (!validateLocal()) { error.value = Object.values(fieldErrors.value)[0]; return }
+  if (isEdit.value && taxChanges.value.length > 0 && !confirmOpen.value) {
+    outstanding.value = null
+    confirmOpen.value = true
+    fetchAgentOutstandingDetail(editId.value!).then((r) => { outstanding.value = r.totals }).catch(() => { outstanding.value = null })
+    return
+  }
+  await save()
+}
+
+async function save(): Promise<void> {
   saving.value = true
   error.value = null
   try {
     if (isEdit.value) {
       await updateAgentFull(editId.value!, payload.value)
-      // team + level go through the hierarchy endpoint separately (kept in sync).
-      router.push({ name: 'agents' })
+      confirmOpen.value = false
+      router.push({ name: 'agent-detail', params: { id: editId.value! } })
     } else {
       const res = await createAgentFull(payload.value)
       const id = (res.data as Record<string, unknown>).id
-      // Apply team/level via the hierarchy endpoint after creation if set.
       router.push(id ? { name: 'agent-detail', params: { id: String(id) } } : { name: 'agents' })
     }
   } catch (e: unknown) {
-    error.value = e instanceof ApiError ? e.message : 'บันทึกไม่สำเร็จ'
+    confirmOpen.value = false
+    if (e instanceof ApiError) {
+      const errs = (e.body?.errors ?? {}) as Record<string, string[]>
+      fieldErrors.value = Object.fromEntries(Object.entries(errs).map(([k, v]) => [k, v[0]]))
+      error.value = Object.values(errs)[0]?.[0] ?? e.message
+    } else {
+      error.value = 'บันทึกไม่สำเร็จ'
+    }
   } finally { saving.value = false }
 }
-function cancel(): void { router.push({ name: 'agents' }) }
+function cancel(): void {
+  if (isEdit.value) router.push({ name: 'agent-detail', params: { id: editId.value! } })
+  else router.push({ name: 'agents' })
+}
 // Leave edit mode and discard unsaved changes by re-loading the saved values.
 function cancelEdit(): void { editing.value = false; error.value = null; void load() }
 function goAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
@@ -258,9 +303,31 @@ function noteKindLabel(k: string): string {
   return { general: 'ทั่วไป', call: 'โทรติดตาม', followup: 'ติดตาม', document: 'เอกสาร' }[k] ?? k
 }
 
-onMounted(load)
-// Re-load when navigating between agent detail pages (same component instance).
-watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() })
+// Load the read-only detail panels (ranks, level progress, promotions,
+// upline/downline relations, commission ledger, notes). Kept separate from
+// load() so the form hydration and the detail fetches stay independent.
+async function loadDetail(): Promise<void> {
+  try {
+    const r = await fetchRanks()
+    ranks.value = r.data
+  } catch { /* ranks dropdown just empty */ }
+  if (!isEdit.value || !editId.value) return
+  try {
+    const [prog, promo] = await Promise.all([
+      fetchLevelProgress(editId.value).catch(() => ({ data: null as LevelProgress | null })),
+      fetchRankPromotions('all').catch(() => ({ data: [] as RankPromotionRow[], meta: { pendingCount: 0 } })),
+    ])
+    progress.value = prog.data
+    promotions.value = promo.data.filter((x) => x.agentId === editId.value)
+    relations.value = await fetchAgentRelations(editId.value).catch(() => null)
+    commission.value = form.agentCode ? await fetchAgentCommissionDetail(form.agentCode).catch(() => null) : null
+    const nt = await fetchAgentNotes(editId.value).catch(() => ({ data: [] as AgentNoteRow[] }))
+    notes.value = nt.data
+  } catch { /* detail panels just stay empty */ }
+}
+
+onMounted(async () => { await load(); void loadDetail() })
+watch(() => route.params.id, () => { if (route.name === 'agent-edit') { void load().then(() => loadDetail()) } })
 </script>
 
 <template>
@@ -268,7 +335,7 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
     <AgentsSubnav />
     <div class="mx-auto max-w-4xl px-4 py-5">
       <button type="button" class="mb-2 text-xs text-slate-500 hover:text-slate-700" @click="cancel">
-        <i class="pi pi-arrow-left text-[10px]" /> กลับไปรายชื่อตัวแทน
+        <i class="pi pi-arrow-left text-[10px]" /> {{ isEdit ? 'กลับไปหน้าข้อมูลตัวแทน' : 'กลับไปรายชื่อตัวแทน' }}
       </button>
       <div class="mb-4 flex flex-wrap items-start justify-between gap-3">
         <div>
@@ -296,7 +363,7 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
 
       <div v-if="loading" class="py-16 text-center text-sm text-slate-400"><i class="pi pi-spin pi-spinner" /> กำลังโหลด…</div>
       <div v-else class="space-y-4">
-        <div v-if="error" class="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700">{{ error }}</div>
+        <div v-if="error" class="rounded border border-rose-200 bg-rose-50 px-3 py-2 text-sm text-rose-700" data-testid="agent-form-error">{{ error }}</div>
 
         <!-- Editable data sections — locked in view mode (#21). The display-only
              relations/commission sections below stay outside so their navigation
@@ -309,12 +376,16 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
             <FormField label="รหัสตัวแทน *"><input v-model.trim="form.agentCode" :disabled="isEdit" class="ipt" /></FormField>
             <FormField label="ประเภท">
-              <!-- New agents are always IN now (#27). "AG" kept only in the
-                   type for displaying pre-existing AG agents, not as an option. -->
-              <select v-model="form.agentType" class="ipt"><option v-if="form.agentType === 'AG'" value="AG">AG (ตัวแทน)</option><option value="IN">IN (นายหน้า)</option></select>
+              <!-- New agents are always IN now (#27). AG kept only to display
+                   pre-existing AG agents in edit mode, never as a new-agent option. -->
+              <select v-if="isEdit && originalType === 'AG'" v-model="form.agentType" class="ipt" data-testid="agent-type">
+                <option value="AG">AG (ตัวแทน)</option><option value="IN">IN (นายหน้า)</option>
+              </select>
+              <div v-else class="ipt bg-slate-50 text-slate-600" data-testid="agent-type">IN (นายหน้า)</div>
+              <p v-if="!isEdit" class="mt-1 text-[11px] text-slate-400">ตัวแทนใหม่ทุกคนเป็นประเภท IN</p>
             </FormField>
             <FormField label="ชนิด">
-              <select v-model="form.kind" class="ipt"><option value="individual">บุคคลธรรมดา</option><option value="corporate">นิติบุคคล</option></select>
+              <select v-model="form.kind" class="ipt" data-testid="agent-kind"><option value="individual">บุคคลธรรมดา</option><option value="corporate">นิติบุคคล</option></select>
             </FormField>
             <template v-if="form.kind === 'individual'">
               <FormField label="ชื่อ"><input v-model.trim="form.firstName" class="ipt" /></FormField>
@@ -329,26 +400,38 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
               <FormField label="วันเกิด"><DateInput v-model="form.birthDate" /></FormField>
             </template>
             <template v-else>
-              <FormField label="ชื่อนิติบุคคล" class="col-span-2"><input v-model.trim="form.juristicName" class="ipt" /></FormField>
-              <FormField label="เลขประจำตัวผู้เสียภาษี"><input v-model.trim="form.taxId" class="ipt" /></FormField>
+              <FormField label="ชื่อนิติบุคคล *" class="col-span-2">
+                <input v-model.trim="form.juristicName" :class="['ipt', fieldErrors.juristicName ? 'border-rose-400' : '']" data-testid="agent-juristic-name" />
+                <p v-if="fieldErrors.juristicName" class="mt-1 text-[11px] text-rose-600">{{ fieldErrors.juristicName }}</p>
+              </FormField>
             </template>
+            <FormField :label="taxIdRequired ? 'เลขประจำตัวผู้เสียภาษี *' : 'เลขประจำตัวผู้เสียภาษี'">
+              <input v-model.trim="form.taxId" maxlength="13" inputmode="numeric" :class="['ipt font-mono', fieldErrors.taxId ? 'border-rose-400' : '']" data-testid="agent-tax-id" />
+              <p v-if="fieldErrors.taxId" class="mt-1 text-[11px] text-rose-600">{{ fieldErrors.taxId }}</p>
+              <p v-else-if="taxIdRequired" class="mt-1 text-[11px] text-slate-400">13 หลัก · จำเป็นเมื่อเป็นนิติบุคคลหรือมี VAT</p>
+            </FormField>
           </div>
-          <!-- VAT -->
           <div class="mt-3 border-t border-slate-100 pt-3">
             <label class="flex items-center gap-2 text-sm text-slate-700">
-              <input type="checkbox" v-model="form.hasVat" class="h-4 w-4" /> ตัวแทนมี VAT
+              <input type="checkbox" v-model="form.hasVat" class="h-4 w-4" data-testid="agent-has-vat" /> ตัวแทนจดทะเบียน VAT
             </label>
             <div v-if="form.hasVat" class="mt-2">
-              <label class="text-[11px] text-slate-500">รูปแบบ VAT</label>
-              <div class="inline-flex overflow-hidden rounded-lg border border-slate-200 ml-2">
-                <button type="button" :class="['px-3 py-1 text-xs', form.vatMode === 'include' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50']" @click="form.vatMode = 'include'">รวม VAT (Include)</button>
-                <button type="button" :class="['px-3 py-1 text-xs', form.vatMode === 'exclude' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50']" @click="form.vatMode = 'exclude'">ไม่รวม VAT (Exclude)</button>
+              <label class="text-[11px] text-slate-500">จ่ายค่าคอมแบบ</label>
+              <div class="ml-2 inline-flex overflow-hidden rounded-lg border border-slate-200">
+                <button type="button" data-testid="vat-include" :class="['px-3 py-1 text-xs', form.vatMode === 'include' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50']" @click="form.vatMode = 'include'">รวม VAT (Include)</button>
+                <button type="button" data-testid="vat-exclude" :class="['px-3 py-1 text-xs', form.vatMode === 'exclude' ? 'bg-brand-600 text-white' : 'bg-white text-slate-600 hover:bg-slate-50']" @click="form.vatMode = 'exclude'">ไม่รวม VAT (Exclude)</button>
               </div>
             </div>
+            <div class="mt-3 flex flex-wrap items-center gap-2 text-sm text-slate-700">
+              <label for="agent-wht-rate">อัตราหัก ณ ที่จ่าย</label>
+              <input id="agent-wht-rate" v-model="form.whtRate" type="number" min="0" max="15" step="0.01" placeholder="3.00" data-testid="agent-wht-rate"
+                class="w-24 rounded-lg border border-slate-200 px-2 py-1 text-right text-sm" />
+              <span class="text-xs text-slate-500">% · เว้นว่าง = ค่าเริ่มต้นของหน่วยงาน ({{ form.kind === 'corporate' ? 'นิติบุคคล ยื่น ภ.ง.ด.53' : 'บุคคลธรรมดา ยื่น ภ.ง.ด.3' }})</span>
+            </div>
+            <p v-if="isEdit" class="mt-2 text-[11px] text-amber-700"><i class="pi pi-info-circle text-[10px]" /> เปลี่ยนชนิด/VAT/เลขผู้เสียภาษี/อัตราหัก ณ ที่จ่าย มีผลกับรอบจ่ายค่าคอมที่สร้างหลังบันทึกเท่านั้น และถูกบันทึกประวัติ</p>
           </div>
         </section>
 
-        <!-- ติดต่อ -->
         <section class="rounded-lg border border-slate-200 bg-white p-4">
           <h2 class="mb-3 text-sm font-semibold text-slate-700">ข้อมูลติดต่อ</h2>
           <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -359,9 +442,6 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           <div class="mt-3">
             <FormField label="ที่อยู่"><input v-model.trim="form.address" class="ipt" /></FormField>
             <div class="mt-2">
-              <!-- Edit mode: AddressPicker auto-PATCHes agents/{id} and emits the
-                   change back into the form. Create mode has no id yet, so plain
-                   inputs collect the fields and they save with the rest on submit. -->
               <AddressPicker
                 v-if="isEdit && editId"
                 entity="agents" :id="editId"
@@ -378,7 +458,6 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           </div>
         </section>
 
-        <!-- ธนาคาร -->
         <section class="rounded-lg border border-slate-200 bg-white p-4">
           <h2 class="mb-3 text-sm font-semibold text-slate-700">บัญชีธนาคาร</h2>
           <div class="grid grid-cols-2 gap-3 sm:grid-cols-3">
@@ -388,14 +467,23 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           </div>
         </section>
 
-        <!-- ใบอนุญาต -->
         <section class="rounded-lg border border-slate-200 bg-white p-4">
           <h2 class="mb-3 text-sm font-semibold text-slate-700">ใบอนุญาต</h2>
-          <div class="grid grid-cols-2 gap-3 sm:grid-cols-4">
-            <FormField label="เลขใบอนุญาตชีวิต"><input v-model.trim="form.licenseLifeNo" class="ipt" /></FormField>
-            <FormField label="วันหมดอายุ (ชีวิต)"><DateInput v-model="form.licenseLifeExpiry" /></FormField>
-            <FormField label="เลขใบอนุญาตวินาศภัย"><input v-model.trim="form.licenseNonLifeNo" class="ipt" /></FormField>
-            <FormField label="วันหมดอายุ (วินาศภัย)"><DateInput v-model="form.licenseNonLifeExpiry" /></FormField>
+          <div class="grid grid-cols-1 gap-3 md:grid-cols-2">
+            <div class="rounded-lg border-2 border-sky-100 p-3" data-testid="form-license-life">
+              <div class="mb-2 text-xs font-semibold text-sky-800"><i class="pi pi-heart text-[10px]" /> ประกันชีวิต</div>
+              <div class="grid grid-cols-2 gap-2">
+                <FormField label="เลขใบอนุญาต"><input v-model.trim="form.licenseLifeNo" class="ipt" /></FormField>
+                <FormField label="วันหมดอายุ"><DateInput v-model="form.licenseLifeExpiry" /></FormField>
+              </div>
+            </div>
+            <div class="rounded-lg border-2 border-amber-100 p-3" data-testid="form-license-non-life">
+              <div class="mb-2 text-xs font-semibold text-amber-800"><i class="pi pi-car text-[10px]" /> ประกันวินาศภัย</div>
+              <div class="grid grid-cols-2 gap-2">
+                <FormField label="เลขใบอนุญาต"><input v-model.trim="form.licenseNonLifeNo" class="ipt" /></FormField>
+                <FormField label="วันหมดอายุ"><DateInput v-model="form.licenseNonLifeExpiry" /></FormField>
+              </div>
+            </div>
           </div>
           <!-- รูปใบอนุญาต (#22) — ชีวิต / วินาศภัย แยกกันชัดเจน -->
           <div class="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
@@ -418,11 +506,15 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
           </div>
         </section>
 
-        <!-- สายงาน & ระดับ -->
         <section class="rounded-lg border border-slate-200 bg-white p-4">
           <h2 class="mb-3 text-sm font-semibold text-slate-700">ต้นสาย &amp; ระดับ</h2>
           <div class="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <FormField label="ระดับ"><SearchSelect v-model="form.level" :options="levelOptions" placeholder="เลือกระดับ" /></FormField>
+            <FormField label="ระดับ">
+              <span :class="['inline-block rounded px-2 py-1 text-sm font-semibold', levelBadgeClass(isEdit ? currentLevel : 1)]" data-testid="agent-level">
+                {{ isEdit ? (currentLevel ? `ระดับ ${currentLevel}` : '—') : 'ระดับ 1' }}
+              </span>
+              <p class="mt-1 text-[11px] text-slate-400">{{ isEdit ? 'ขอปรับระดับได้ที่หน้าข้อมูลตัวแทน' : 'ตัวแทนใหม่เริ่มที่ระดับ 1' }}</p>
+            </FormField>
             <FormField label="วันที่เข้าร่วม"><DateInput v-model="form.joinedAt" /></FormField>
             <FormField label="ต้นสาย (Upline)" class="col-span-2 sm:col-span-3">
               <AgentPicker v-model="form.parentAgentId" placeholder="ค้นหาตัวแทนต้นสาย" />
@@ -539,9 +631,7 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
         <fieldset :disabled="locked" :class="['m-0 min-w-0 border-0 p-0', locked && 'opacity-70']">
         <section class="rounded-lg border border-slate-200 bg-white p-4">
           <FormField label="หมายเหตุ"><textarea v-model="form.notes" rows="2" class="ipt"></textarea></FormField>
-          <label class="mt-2 flex items-center gap-2 text-xs text-slate-600">
-            <input type="checkbox" v-model="form.active" class="h-4 w-4" /> เปิดใช้งาน (active)
-          </label>
+          <p v-if="isEdit" class="mt-2 text-[11px] text-slate-400">ปิด/เปิดใช้งานตัวแทนได้ที่หน้าข้อมูลตัวแทน</p>
         </section>
         </fieldset>
 
@@ -613,10 +703,35 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') load() }
         <div v-if="!locked" class="flex justify-end gap-2">
           <button type="button" class="rounded border border-slate-300 px-4 py-1.5 text-sm text-slate-600 hover:bg-slate-50"
             @click="isEdit ? cancelEdit() : cancel()">ยกเลิก</button>
-          <button type="button" class="rounded bg-brand-600 px-4 py-1.5 text-sm text-white hover:bg-brand-700 disabled:opacity-50"
+          <button type="button" data-testid="agent-save" class="rounded bg-brand-600 px-4 py-1.5 text-sm text-white hover:bg-brand-700 disabled:opacity-50"
             :disabled="saving" @click="submit">
             <i :class="saving ? 'pi pi-spin pi-spinner' : 'pi pi-check'" class="mr-1 text-xs" />{{ isEdit ? 'บันทึก' : 'สร้างตัวแทน' }}
           </button>
+        </div>
+      </div>
+    </div>
+
+    <div v-if="confirmOpen" class="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/40 p-4" data-testid="tax-change-dialog" @click.self="confirmOpen = false">
+      <div class="w-full max-w-lg rounded-xl bg-white p-5 shadow-xl">
+        <h3 class="text-base font-semibold text-slate-800">ยืนยันเปลี่ยนข้อมูลภาษี/VAT ของ {{ agentNameOrCode }}</h3>
+        <table class="mt-3 w-full text-sm">
+          <thead class="text-left text-xs text-slate-500"><tr><th class="py-1">รายการ</th><th class="py-1">เดิม</th><th class="py-1">ใหม่</th></tr></thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr v-for="c in taxChanges" :key="c.label">
+              <td class="py-1.5 text-slate-500">{{ c.label }}</td>
+              <td class="py-1.5 text-slate-500 line-through">{{ c.before }}</td>
+              <td class="py-1.5 font-medium text-slate-800">{{ c.after }}</td>
+            </tr>
+          </tbody>
+        </table>
+        <ul class="mt-3 list-disc space-y-1 pl-5 text-sm text-slate-600">
+          <li>มีผลกับ<b>รอบจ่ายค่าคอมที่สร้างหลังจากนี้</b> — รอบที่สร้างแล้วไม่เปลี่ยน</li>
+          <li v-if="outstanding">ค่าคอมที่ยังไม่เข้ารอบจ่าย <b>{{ outstanding.itemCount }} รายการ ฿{{ money2(outstanding.totalAmount) }}</b> จะถูกจ่ายตามข้อมูลใหม่</li>
+          <li>ระบบบันทึกค่าเดิม/ใหม่ และผู้แก้ไขไว้ในประวัติ</li>
+        </ul>
+        <div class="mt-5 flex justify-end gap-2">
+          <button type="button" class="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-50" @click="confirmOpen = false">กลับไปแก้ไข</button>
+          <button type="button" data-testid="tax-change-confirm" class="rounded bg-brand-600 px-3 py-1.5 text-sm text-white hover:bg-brand-700 disabled:opacity-50" :disabled="saving" @click="save">ยืนยันและบันทึก</button>
         </div>
       </div>
     </div>

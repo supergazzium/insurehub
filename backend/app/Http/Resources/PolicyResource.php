@@ -8,6 +8,9 @@ use App\Models\Policy;
 use App\Models\PolicyEvent;
 use App\Models\ProductCommissionRate;
 use App\Services\Commission\CommissionSnapshot;
+use App\Services\Policy\PolicyVerification;
+use App\Services\Policy\RenewalService;
+use App\Support\PolicyPeriodLabel;
 use App\Support\PolicyRiskShim;
 use App\Support\ProductKind;
 use Illuminate\Http\Request;
@@ -33,7 +36,13 @@ class PolicyResource extends JsonResource
             'customerId' => (string) $this->customer_id,
             'productId' => (string) $this->product_id,
             'productType' => $this->product?->type,
+            'productCode' => $this->product?->code,
+            'productName' => $this->product?->name,
+            'productCategory' => $this->product?->category,
+            'productSubCategory' => $this->product?->sub_category,
             'carrierId' => (string) $this->carrier_id,
+            'carrierCode' => $this->carrier?->code,
+            'carrierName' => $this->carrier?->name,
             'writingAgentId' => (string) $this->writing_agent_id,
             'coverage' => (float) $this->coverage,
             'annualPremium' => (float) $this->annual_premium,
@@ -74,16 +83,36 @@ class PolicyResource extends JsonResource
             'receivedNote' => $this->received_note ?? '',
             'mailingDate' => $this->mailing_date?->toDateString(),
             'mailingNote' => $this->mailing_note ?? '',
+            'approvedDate' => $this->approved_date?->toDateString(),
+            'approvalRef' => $this->approval_ref ?? '',
+            'approvalNote' => $this->approval_note ?? '',
+            'deliveryMethod' => $this->delivery_method,
+            'courier' => $this->courier ?? '',
+            'trackingNo' => $this->tracking_no ?? '',
+            'shippedDate' => $this->shipped_date?->toDateString(),
+            'deliveredDate' => $this->delivered_date?->toDateString(),
+            'deliveredTo' => $this->delivered_to ?? '',
             'nextPremiumDue' => $this->next_premium_due?->toDateString(),
             'cancelDate' => $this->cancel_date?->toDateString(),
             'lapseDate' => $this->lapse_date?->toDateString(),
             'periodPaidEnd' => $this->period_paid_end?->toDateString(),
             'policyEnd' => $this->policy_end?->toDateString(),
             'policyYear' => (int) $this->policy_year,
+            'customerYear' => $this->customer_year !== null ? (int) $this->customer_year : null,
             'actYear' => (int) $this->act_year,
             'newOrRenew' => $this->new_or_renew,
+            'yearsOverridden' => (bool) $this->years_overridden,
+            'refAppToId' => $this->ref_app_to_id !== null ? (string) $this->ref_app_to_id : null,
+            'renewedFrom' => $this->renewedFrom(),
+            'renewedTo' => $this->renewedTo(),
+            'periodLabel' => PolicyPeriodLabel::forPolicy($this->resource),
             'freelookActive' => (bool) $this->freelook_active,
             'freelookEndDate' => $this->freelook_end_date?->format('Y-m-d') ?? $this->freelook_end_date,
+            'salesChannel' => $this->sales_channel ?? 'face_to_face',
+            'freelookDocSentAt' => $this->freelook_doc_sent_at?->toDateString(),
+            'freelookDocSignedAt' => $this->freelook_doc_signed_at?->toDateString(),
+            'freelookDocReturnedAt' => $this->freelook_doc_returned_at?->toDateString(),
+            'verification' => $this->verificationPayload(),
             'status' => $this->status,
             // Original Thai label from insurehub_legacy.lu_policy_status.
             'statusLabel' => $this->legacyStatus?->name_th ?? $this->status,
@@ -161,6 +190,18 @@ class PolicyResource extends JsonResource
                 'netRefundAmount' => $this->net_refund_amount !== null ? (float) $this->net_refund_amount : null,
                 'refundRebateAmt' => $this->refund_rebate_amt !== null ? (float) $this->refund_rebate_amt : null,
                 'refundRebateOv' => $this->refund_rebate_ov !== null ? (float) $this->refund_rebate_ov : null,
+            ] : null,
+            'cancellationReview' => $this->status === 'cancelled' ? [
+                'reviewedAt' => $this->cancellation_reviewed_at?->toIso8601String(),
+                'reviewedByUserId' => $this->cancellation_reviewed_by_user_id !== null ? (string) $this->cancellation_reviewed_by_user_id : null,
+                'refundAmount' => $this->refund_amount !== null ? (float) $this->refund_amount : null,
+                'clawbackAmount' => $this->commission_clawback_amount !== null ? (float) $this->commission_clawback_amount : null,
+                'checks' => [
+                    'refund' => $this->cancel_check_refund ?? 'pending',
+                    'clawback' => $this->cancel_check_clawback ?? 'pending',
+                    'carrierDeduct' => $this->cancel_check_carrier_deduct ?? 'pending',
+                ],
+                'note' => $this->cancel_review_note,
             ] : null,
             // Mailing block.
             'mailing' => [
@@ -251,7 +292,10 @@ class PolicyResource extends JsonResource
             'healthBeneficiaryName' => $this->health_beneficiary_name,
             'healthBeneficiaryRelation' => $this->health_beneficiary_relation,
             'events' => PolicyEventResource::collection($this->whenLoaded('events')),
-            'payments' => PolicyPaymentResource::collection($this->whenLoaded('payments')),
+            'payments' => PolicyPaymentResource::collection($this->whenLoaded(
+                'payments',
+                fn () => $this->payments->each(fn ($p) => $p->setRelation('policy', $this->resource)),
+            )),
             'documents' => PolicyDocumentResource::collection($this->whenLoaded('documents')),
             'rebate' => $this->whenLoaded(
                 'rebate',
@@ -300,12 +344,41 @@ class PolicyResource extends JsonResource
         $events = PolicyEvent::query()
             ->where('policy_id', $this->id)
             ->where('type', 'endorsement.premium_change')
+            ->whereNull('voided_at')
             ->get(['payload']);
         foreach ($events as $e) {
             $sum += (float) ($e->payload['additionalTotal'] ?? 0);
         }
 
         return round($sum, 2);
+    }
+
+    private function renewedFrom(): ?array
+    {
+        if ($this->ref_app_to_id === null) {
+            return null;
+        }
+        $source = Policy::withTrashed()->where('tenant_id', $this->tenant_id)->find($this->ref_app_to_id);
+
+        return $source === null ? null : RenewalService::summary($source) + [
+            'customerYear' => $source->customer_year !== null ? (int) $source->customer_year : null,
+            'periodLabel' => PolicyPeriodLabel::forPolicy($source),
+        ];
+    }
+
+    private function renewedTo(): ?array
+    {
+        if (! $this->resource->exists) {
+            return null;
+        }
+        $count = $this->resource->renewals()->count();
+        if ($count === 0) {
+            return null;
+        }
+        $live = RenewalService::liveRenewalOf($this->resource);
+        $shown = $live ?? $this->resource->renewals()->first();
+
+        return RenewalService::summary($shown) + ['live' => $live !== null, 'count' => $count];
     }
 
     private function buildRiskBlock(): ?array
@@ -362,6 +435,17 @@ class PolicyResource extends JsonResource
      *
      * @return array<string,mixed>
      */
+    private function verificationPayload(): array
+    {
+        $open = PolicyVerification::open($this->resource);
+        $rejected = $open === null ? PolicyVerification::lastRejected($this->resource) : null;
+
+        return [
+            'pending' => $open !== null ? PolicyVerification::row($open) : null,
+            'lastRejected' => $rejected !== null ? PolicyVerification::row($rejected) : null,
+        ];
+    }
+
     private function commissionSnapshotPayload(): array
     {
         $snap = CommissionSnapshot::fromPolicy($this->resource);

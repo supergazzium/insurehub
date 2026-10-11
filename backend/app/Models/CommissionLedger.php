@@ -17,6 +17,8 @@ class CommissionLedger extends Model
         'amount' => 'decimal:2',
         'standard_rate' => 'decimal:5',
         'mgmt_fee_rate' => 'decimal:5',
+        'mgmt_fee_amount' => 'decimal:2',
+        'paid_at' => 'datetime',
     ];
 
     /** MGM payout type values. String constants rather than an enum so the DB
@@ -33,11 +35,17 @@ class CommissionLedger extends Model
      *  stored as a NEGATIVE amount so settlement nets it against payouts. */
     public const TYPE_INSTALLMENT_AGENT_COST = 'INSTALLMENT_AGENT_COST';
 
+    public const TYPE_COMMISSION_PAID_AT_SOURCE = 'COMMISSION_PAID_AT_SOURCE';
+
+    public const DEDUCTION_TYPES = [self::TYPE_INSTALLMENT_AGENT_COST, self::TYPE_COMMISSION_PAID_AT_SOURCE];
+
     public const STATUS_UNSETTLED = 'unsettled';
 
     public const STATUS_SETTLED = 'settled';
 
     public const STATUS_REVERSED = 'reversed';
+
+    public const PAYABLE_TYPES = [self::TYPE_DIRECT_COMMISSION, self::TYPE_REFERRAL_FEE, self::TYPE_MANAGEMENT_DIFFERENTIAL];
 
     public const PAYER_INSURER = 'INSURER';
 
