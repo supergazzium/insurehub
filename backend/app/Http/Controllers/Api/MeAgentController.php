@@ -400,21 +400,27 @@ class MeAgentController extends ApiController
             ])->values();
         $year = now('Asia/Bangkok')->format('Y');
 
+        // The 3-stage agentDetail() returns a lean totals shape
+        // ({itemCount, totalAmount}); the richer v2 keys (netAmount, waiting*,
+        // pendingDeduction) may be absent, so default them to keep this
+        // endpoint resilient regardless of which payout engine produced $detail.
+        $totals = $detail['totals'] ?? [];
+
         return response()->json([
             'summary' => [
-                'readyAmount' => $detail['totals']['totalAmount'],
-                'readyNet' => $detail['totals']['netAmount'],
-                'waitingAmount' => $detail['totals']['waitingAmount'],
-                'pendingDeduction' => $detail['totals']['pendingDeduction'],
+                'readyAmount' => $totals['totalAmount'] ?? 0,
+                'readyNet' => $totals['netAmount'] ?? ($totals['totalAmount'] ?? 0),
+                'waitingAmount' => $totals['waitingAmount'] ?? 0,
+                'pendingDeduction' => $totals['pendingDeduction'] ?? 0,
                 'paidThisYear' => round($history->filter(fn ($h) => str_starts_with((string) $h['paymentDate'], $year))->sum('net'), 2),
                 'whtThisYear' => round($history->filter(fn ($h) => str_starts_with((string) $h['paymentDate'], $year))->sum('wht'), 2),
                 'paidTotal' => round($history->sum('net'), 2),
             ],
-            'agent' => $detail['agent'],
-            'ready' => $detail['items'],
-            'waiting' => $detail['waiting'],
-            'deductions' => $detail['pendingDeductions'],
-            'totals' => $detail['totals'],
+            'agent' => $detail['agent'] ?? null,
+            'ready' => $detail['items'] ?? [],
+            'waiting' => $detail['waiting'] ?? [],
+            'deductions' => $detail['pendingDeductions'] ?? [],
+            'totals' => $totals,
             'history' => $history->all(),
             'byMonth' => $byMonth->all(),
         ]);

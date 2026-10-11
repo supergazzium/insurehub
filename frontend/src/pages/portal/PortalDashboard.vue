@@ -3,7 +3,7 @@
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
-import { fetchMyAgent, fetchMyRelations, type MyAgent, type AgentRelations } from '../../api/portal'
+import { fetchMyAgent, fetchMyRelations, fetchEarnings, type MyAgent, type AgentRelations, type EarningsResponse } from '../../api/portal'
 
 const { t } = useI18n()
 const me = ref<MyAgent | null>(null)
@@ -11,6 +11,12 @@ const loading = ref(false)
 
 // สายงาน — ต้นสาย (upline) + ลูกทีม (downline) of the signed-in agent.
 const relations = ref<AgentRelations | null>(null)
+
+// Commission earnings summary (ready / waiting / paid-this-year).
+const earnings = ref<EarningsResponse | null>(null)
+function fmtBaht(n: number | null | undefined): string {
+  return `฿${Math.round(Number(n) || 0).toLocaleString('th-TH')}`
+}
 
 // Level-dot colour by rank, mirroring the back-office agent view.
 const REL_LEVEL_DOT: Record<string, string> = {
@@ -26,10 +32,14 @@ onMounted(async () => {
   } finally {
     loading.value = false
   }
-  // Relations load independently so a failure here doesn't blank the page.
+  // Relations + earnings load independently so a failure in one doesn't blank
+  // the page or block the other.
   try {
     relations.value = (await fetchMyRelations())
   } catch { /* leave null — section shows an empty state */ }
+  try {
+    earnings.value = await fetchEarnings()
+  } catch { /* leave null — widget shows an empty state */ }
 })
 
 const quickLinks = [
@@ -56,6 +66,39 @@ const quickLinks = [
       <div v-if="me?.approvalStatus === 'pending'"
         class="mt-4 inline-block px-3 py-1.5 rounded-md bg-amber-100 text-amber-900 text-xs">
         <i class="pi pi-clock mr-1" /> {{ t('portal.dashboard.pendingApproval') }}
+      </div>
+    </section>
+
+    <!-- Commission earnings — ready / waiting / paid-this-year at a glance -->
+    <section class="card p-5">
+      <div class="flex items-center justify-between mb-3">
+        <h2 class="text-sm font-semibold text-slate-600">ค่าคอมมิชชั่นของฉัน</h2>
+        <RouterLink :to="{ name: 'portal-earnings' }" class="text-xs text-brand-600 hover:text-brand-700">
+          ดูรายละเอียด <i class="pi pi-arrow-right text-[9px]" />
+        </RouterLink>
+      </div>
+      <div v-if="earnings" class="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        <div class="rounded-lg border border-emerald-100 bg-emerald-50/40 p-3">
+          <div class="text-[11px] text-slate-500">พร้อมจ่าย (รอรอบ)</div>
+          <div class="mt-1 text-xl font-semibold text-emerald-700">{{ fmtBaht(earnings.summary.readyNet) }}</div>
+          <div class="text-[10px] text-slate-400">ก่อนภาษี {{ fmtBaht(earnings.summary.readyAmount) }}</div>
+        </div>
+        <div class="rounded-lg border border-amber-100 bg-amber-50/40 p-3">
+          <div class="text-[11px] text-slate-500">รอเงื่อนไข</div>
+          <div class="mt-1 text-xl font-semibold text-amber-700">{{ fmtBaht(earnings.summary.waitingAmount) }}</div>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-3">
+          <div class="text-[11px] text-slate-500">จ่ายแล้วปีนี้</div>
+          <div class="mt-1 text-xl font-semibold text-slate-900">{{ fmtBaht(earnings.summary.paidThisYear) }}</div>
+          <div class="text-[10px] text-slate-400">หัก ณ ที่จ่ายปีนี้ {{ fmtBaht(earnings.summary.whtThisYear) }}</div>
+        </div>
+        <div class="rounded-lg border border-slate-200 p-3">
+          <div class="text-[11px] text-slate-500">จ่ายสะสมทั้งหมด</div>
+          <div class="mt-1 text-xl font-semibold text-slate-900">{{ fmtBaht(earnings.summary.paidTotal) }}</div>
+        </div>
+      </div>
+      <div v-else class="text-xs text-slate-400 py-3 text-center">
+        ยังไม่มีข้อมูลค่าคอมมิชชั่น
       </div>
     </section>
 
