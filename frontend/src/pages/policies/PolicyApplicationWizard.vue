@@ -203,6 +203,14 @@ const canEditYears = computed(() => auth.user?.role === 'super_admin' || auth.us
 const canSavePolicy = computed(() =>
   auth.hasPermission(draftId.value ? 'policies.update' : 'policies.create'),
 )
+// #13 — view-mode by default when opening an EXISTING policy; a brand-new
+// policy (/policies/new, no props.id) is editable immediately. The operator
+// clicks "แก้ไข" to unlock the form; users without save permission can never
+// unlock. `locked` disables the whole form fieldset.
+const editing = ref(!props.id)
+const locked = computed(() => !editing.value)
+function beginEditPolicy(): void { if (canSavePolicy.value) editing.value = true }
+function endEditPolicy(): void { editing.value = false }
 
 const renewalMeta = ref<RenewalDraftMeta | null>(null)
 const renewalBlocked = ref<RenewalBlockedError | null>(null)
@@ -2074,21 +2082,34 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
           {{ t('policyCreate.cancel') }}
         </button>
-        <!-- #13 — no save permission: view-only badge, no action buttons. -->
-        <span v-if="!canSavePolicy" class="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+        <!-- #13 — view-before-edit: an existing policy opens locked. "แก้ไข"
+             unlocks (only with save permission); "เสร็จสิ้น" re-locks. No
+             permission → view-only badge, no edit entry. -->
+        <button v-if="props.id && !editing && canSavePolicy" type="button"
+          class="rounded-lg bg-brand-600 px-3 py-1.5 text-sm text-white hover:bg-brand-700 flex items-center gap-1.5"
+          @click="beginEditPolicy">
+          <i class="pi pi-pencil text-xs" /> แก้ไข
+        </button>
+        <button v-else-if="props.id && editing" type="button"
+          class="rounded-lg border border-emerald-300 px-3 py-1.5 text-sm text-emerald-700 hover:bg-emerald-50 flex items-center gap-1.5"
+          @click="endEditPolicy">
+          <i class="pi pi-eye text-xs" /> ดูอย่างเดียว
+        </button>
+        <span v-else-if="props.id && !canSavePolicy" class="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
           <i class="pi pi-eye mr-1" />ดูข้อมูลเท่านั้น
         </span>
+        <!-- Save/submit actions below are additionally shown only in edit mode. -->
         <!-- Draft / create mode: the three draft → quotation → submit actions. -->
         <template v-if="isDraftMode">
-          <button v-if="canSavePolicy" type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
+          <button v-if="canSavePolicy && editing" type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
             class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
             <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
           </button>
-          <button v-if="canSavePolicy" type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
+          <button v-if="canSavePolicy && editing" type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
             class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
             <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
           </button>
-          <button v-if="canSavePolicy" type="button" @click="submitToCarrier" :disabled="saving || verifyLocked"
+          <button v-if="canSavePolicy && editing" type="button" @click="submitToCarrier" :disabled="saving || verifyLocked"
             class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
             <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
           </button>
@@ -2104,7 +2125,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             class="px-3 py-1.5 rounded-lg text-sm text-rose-600 border border-rose-200 hover:bg-rose-50 disabled:opacity-50">
             <i class="pi pi-trash text-xs mr-1" /> ขอลบ
           </button>
-          <button v-if="canSavePolicy" type="button" data-testid="save-policy" @click="savePolicyNow" :disabled="saving || verifyLocked"
+          <button v-if="canSavePolicy && editing" type="button" data-testid="save-policy" @click="savePolicyNow" :disabled="saving || verifyLocked"
             class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
             <i :class="['pi text-xs mr-1', holdForVerify ? 'pi-send' : 'pi-check']" /> {{ holdForVerify ? 'บันทึก / ส่งตรวจ' : t('policyCreate.action.save') }}
           </button>
@@ -2185,7 +2206,9 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       </div>
     </div>
 
-    <fieldset :disabled="verifyLocked" class="min-w-0 space-y-6" data-testid="policy-form">
+    <!-- #13 — the form is disabled in view-mode (locked) as well as when the
+         verify workflow locks it. "แก้ไข" in the header unlocks view-mode. -->
+    <fieldset :disabled="verifyLocked || locked" :class="['min-w-0 space-y-6', locked && 'opacity-80']" data-testid="policy-form">
     <!-- ── Section 1: Party ─────────────────────────────────────────────── -->
     <section class="card p-5">
       <h2 class="font-semibold text-slate-900 mb-3">{{ t('policyCreate.step.1') }}</h2>
@@ -3110,15 +3133,15 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
          can save right where they finish typing instead of scrolling back up. -->
     <div class="flex items-center justify-end gap-2 pb-4">
       <template v-if="isDraftMode">
-        <button v-if="canSavePolicy" type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
+        <button v-if="canSavePolicy && editing" type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
           class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
           <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
         </button>
-        <button v-if="canSavePolicy" type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
+        <button v-if="canSavePolicy && editing" type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
           class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
           <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
         </button>
-        <button v-if="canSavePolicy" type="button" @click="submitToCarrier" :disabled="saving"
+        <button v-if="canSavePolicy && editing" type="button" @click="submitToCarrier" :disabled="saving"
           class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
           <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
         </button>
@@ -3128,7 +3151,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           class="px-3 py-1.5 rounded-lg text-sm text-brand-700 border border-brand-300 hover:bg-brand-50 disabled:opacity-50">
           <i class="pi pi-replay text-xs mr-1" /> {{ t('policyCreate.action.renew') }}
         </button>
-        <button v-if="canSavePolicy" type="button" @click="savePolicyNow" :disabled="saving"
+        <button v-if="canSavePolicy && editing" type="button" @click="savePolicyNow" :disabled="saving"
           class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
           <i class="pi pi-check text-xs mr-1" /> {{ t('policyCreate.action.save') }}
         </button>
