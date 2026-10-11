@@ -102,6 +102,14 @@ final class PermissionCatalog
             // ── Agent portal (used only by role=agent) ───────────────────
             ['key' => 'portal.view',           'module' => 'portal', 'name_th' => 'เข้าใช้งาน Portal',       'name_en' => 'Access portal',        'description' => null],
             ['key' => 'portal.update_profile', 'module' => 'portal', 'name_th' => 'แก้ไขโปรไฟล์ตัวเอง',     'name_en' => 'Update own profile',   'description' => null],
+
+            // ── IT / systems (role=it dashboard + ops) ───────────────────
+            ['key' => 'it.system_status',  'module' => 'it', 'name_th' => 'ดูสถานะระบบ',            'name_en' => 'View system status',    'description' => 'สถานะ IHOS ความพร้อมใช้งาน ข้อผิดพลาด เหตุขัดข้อง'],
+            ['key' => 'it.tickets',        'module' => 'it', 'name_th' => 'จัดการ Ticket/Bug',       'name_en' => 'Manage tickets & bugs', 'description' => 'งานที่ผู้ใช้แจ้ง + bug + คำขอปรับปรุง'],
+            ['key' => 'it.integrations',   'module' => 'it', 'name_th' => 'ดูสถานะ Integration',     'name_en' => 'View integrations',     'description' => 'API บริษัทประกัน การส่งข้อมูล งานอัตโนมัติที่ล้มเหลว'],
+            ['key' => 'it.deploys',        'module' => 'it', 'name_th' => 'ดูประวัติ Deploy',        'name_en' => 'View deploy history',   'description' => 'เวอร์ชัน รายการเปลี่ยนแปลง ผลหลังขึ้นระบบ'],
+            ['key' => 'it.security',       'module' => 'it', 'name_th' => 'ดูความปลอดภัย/สิทธิ์',      'name_en' => 'View security & access','description' => 'login ผิดปกติ บัญชีถูกล็อก คำขอสิทธิ์'],
+            ['key' => 'it.data_quality',   'module' => 'it', 'name_th' => 'ดูคุณภาพข้อมูล',          'name_en' => 'View data quality',     'description' => 'รายการซ้ำ ข้อมูลขาด รายการประมวลผลไม่สำเร็จ'],
         ];
     }
 }
