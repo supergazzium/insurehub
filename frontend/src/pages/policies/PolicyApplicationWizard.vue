@@ -196,6 +196,13 @@ const suggestedPolicyYear = computed<number | null>(() => {
 const auth = useAuthStore()
 const yearsTouched = ref(false)
 const canEditYears = computed(() => auth.user?.role === 'super_admin' || auth.user?.role === 'admin')
+// #13 — gate the save/submit actions: creating a NEW policy needs
+// policies.create; editing an existing one needs policies.update. Users
+// without the right permission can open and view the wizard but see no
+// save buttons (the server also enforces this).
+const canSavePolicy = computed(() =>
+  auth.hasPermission(draftId.value ? 'policies.update' : 'policies.create'),
+)
 
 const renewalMeta = ref<RenewalDraftMeta | null>(null)
 const renewalBlocked = ref<RenewalBlockedError | null>(null)
@@ -2067,17 +2074,21 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
           {{ t('policyCreate.cancel') }}
         </button>
+        <!-- #13 — no save permission: view-only badge, no action buttons. -->
+        <span v-if="!canSavePolicy" class="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
+          <i class="pi pi-eye mr-1" />ดูข้อมูลเท่านั้น
+        </span>
         <!-- Draft / create mode: the three draft → quotation → submit actions. -->
         <template v-if="isDraftMode">
-          <button type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
+          <button v-if="canSavePolicy" type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
             class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
             <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
           </button>
-          <button type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
+          <button v-if="canSavePolicy" type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
             class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
             <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
           </button>
-          <button type="button" @click="submitToCarrier" :disabled="saving || verifyLocked"
+          <button v-if="canSavePolicy" type="button" @click="submitToCarrier" :disabled="saving || verifyLocked"
             class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
             <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
           </button>
@@ -2093,7 +2104,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             class="px-3 py-1.5 rounded-lg text-sm text-rose-600 border border-rose-200 hover:bg-rose-50 disabled:opacity-50">
             <i class="pi pi-trash text-xs mr-1" /> ขอลบ
           </button>
-          <button type="button" data-testid="save-policy" @click="savePolicyNow" :disabled="saving || verifyLocked"
+          <button v-if="canSavePolicy" type="button" data-testid="save-policy" @click="savePolicyNow" :disabled="saving || verifyLocked"
             class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
             <i :class="['pi text-xs mr-1', holdForVerify ? 'pi-send' : 'pi-check']" /> {{ holdForVerify ? 'บันทึก / ส่งตรวจ' : t('policyCreate.action.save') }}
           </button>
@@ -3099,15 +3110,15 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
          can save right where they finish typing instead of scrolling back up. -->
     <div class="flex items-center justify-end gap-2 pb-4">
       <template v-if="isDraftMode">
-        <button type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
+        <button v-if="canSavePolicy" type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
           class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
           <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
         </button>
-        <button type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
+        <button v-if="canSavePolicy" type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
           class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
           <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
         </button>
-        <button type="button" @click="submitToCarrier" :disabled="saving"
+        <button v-if="canSavePolicy" type="button" @click="submitToCarrier" :disabled="saving"
           class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
           <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
         </button>
@@ -3117,7 +3128,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           class="px-3 py-1.5 rounded-lg text-sm text-brand-700 border border-brand-300 hover:bg-brand-50 disabled:opacity-50">
           <i class="pi pi-replay text-xs mr-1" /> {{ t('policyCreate.action.renew') }}
         </button>
-        <button type="button" @click="savePolicyNow" :disabled="saving"
+        <button v-if="canSavePolicy" type="button" @click="savePolicyNow" :disabled="saving"
           class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
           <i class="pi pi-check text-xs mr-1" /> {{ t('policyCreate.action.save') }}
         </button>
