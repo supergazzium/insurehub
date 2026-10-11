@@ -113,6 +113,7 @@ const routes: RouteRecordRaw[] = [
     component: AuthLayout,
     children: [
       { path: 'login', name: 'login', component: Login },
+      { path: 'agent/login', name: 'agent-login', component: () => import('../pages/auth/AgentLogin.vue') },
       { path: 'forgot-password', name: 'forgot-password', component: ForgotPassword },
       { path: 'reset-password', name: 'reset-password', component: ResetPassword },
       { path: 'invite/:token?', name: 'accept-invitation', component: AcceptInvitation },
@@ -236,6 +237,7 @@ const PUBLIC_ROUTE_NAMES = new Set([
   'register-agent',
   'recruit-link',
   'login',
+  'agent-login',
   'forgot-password',
   'reset-password',
   'accept-invitation',
@@ -250,7 +252,10 @@ router.beforeEach(async (to) => {
   const isAgent = auth.isAuthenticated && auth.user?.role === 'agent'
 
   if (!auth.isAuthenticated && !isPublic) {
-    return { name: 'login', query: { redirect: to.fullPath } }
+    // #2 — send unauthenticated users to the login page that matches where
+    // they were headed: a /portal/* route → agent login, else staff login.
+    const wantsPortal = typeof to.name === 'string' && to.name.startsWith('portal-')
+    return { name: wantsPortal ? 'agent-login' : 'login', query: { redirect: to.fullPath } }
   }
   if (auth.isAuthenticated && isPublic) {
     return { name: isAgent ? 'portal-dashboard' : 'dashboard' }
