@@ -11,10 +11,19 @@ import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import MoneyInput from '../../components/MoneyInput.vue'
 import { api, ApiError } from '../../api/client'
 import { useProductStore } from '../../stores/products'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const id = route.params.id as string
+
+// View-mode by default; click "แก้ไข" to unlock the fields. Only users with
+// the products.manage permission can enter edit mode.
+const auth = useAuthStore()
+const canEdit = computed(() => auth.hasPermission('products.manage'))
+const editing = ref(false)
+function beginEdit(): void { if (canEdit.value) editing.value = true }
+function endEdit(): void { editing.value = false }
 
 const taxonomy = ref<ProductTaxonomyRow[]>([])
 const commissionTiers = ref<CommissionTier[]>([])
@@ -344,12 +353,33 @@ onMounted(async () => {
         <div v-if="product.nameEn" class="text-xs text-slate-500 mt-0.5">{{ product.nameEn }}</div>
       </div>
       <div v-else class="text-slate-500 text-sm">กำลังโหลด…</div>
-      <button type="button"
-        class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 flex items-center gap-1.5"
-        @click="goBack">
-        <i class="pi pi-arrow-left text-xs" /> กลับ
-      </button>
+      <div class="flex items-center gap-2">
+        <!-- #13 — view-mode by default; edit only for products.manage. -->
+        <button v-if="product && canEdit && !editing" type="button"
+          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5"
+          @click="beginEdit">
+          <i class="pi pi-pencil text-xs" /> แก้ไข
+        </button>
+        <button v-else-if="editing" type="button"
+          class="px-3 py-1.5 rounded-lg text-sm border border-emerald-300 text-emerald-700 hover:bg-emerald-50 flex items-center gap-1.5"
+          @click="endEdit">
+          <i class="pi pi-check text-xs" /> เสร็จสิ้น
+        </button>
+        <button type="button"
+          class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 flex items-center gap-1.5"
+          @click="goBack">
+          <i class="pi pi-arrow-left text-xs" /> กลับ
+        </button>
+      </div>
     </header>
+
+    <!-- View-mode hint -->
+    <div v-if="product && !editing"
+      class="text-xs rounded-lg px-3 py-2"
+      :class="canEdit ? 'bg-slate-50 text-slate-500' : 'bg-amber-50 text-amber-700'">
+      <i class="pi pi-eye mr-1" />
+      {{ canEdit ? 'โหมดดูข้อมูล — กด "แก้ไข" เพื่อปรับข้อมูล' : 'คุณมีสิทธิ์ดูข้อมูลเท่านั้น' }}
+    </div>
 
     <div v-if="errorMsg" class="p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
       {{ errorMsg }}
@@ -394,11 +424,11 @@ onMounted(async () => {
 
           <div>
             <div class="text-xs text-slate-400">Code</div>
-            <EditableField entity="products" :id="product.id" field="code" :value="product.code" @update="v => apply('code', v)" />
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="code" :value="product.code" @update="v => apply('code', v)" />
           </div>
           <div>
             <div class="text-xs text-slate-400">Main / Rider</div>
-            <EditableField
+            <EditableField :readonly="!editing"
               v-if="needsMainRiderChoice(product.carrierInsureType)"
               entity="products" :id="product.id" field="mainRider" type="select"
               :options="[{ value: 'Main', label: 'Main' }, { value: 'Rider', label: 'Rider' }]"
@@ -409,7 +439,7 @@ onMounted(async () => {
 
           <div>
             <div class="text-xs text-slate-400">Product Group</div>
-            <EditableField
+            <EditableField :readonly="!editing"
               v-if="productGroupOptionsFor(product.carrierInsureType, product.mainRider).length > 0"
               entity="products" :id="product.id" field="type" type="select"
               :options="productGroupOptionsFor(product.carrierInsureType, product.mainRider)"
@@ -419,7 +449,7 @@ onMounted(async () => {
           </div>
           <div class="md:col-span-3">
             <div class="text-xs text-slate-400">Category</div>
-            <EditableField
+            <EditableField :readonly="!editing"
               v-if="categoriesForGroup(product.type).length > 0"
               entity="products" :id="product.id" field="category" type="select"
               :options="categoriesForGroup(product.type)"
@@ -430,7 +460,7 @@ onMounted(async () => {
 
           <div class="md:col-span-4">
             <div class="text-xs text-slate-400">Sub-category</div>
-            <EditableField
+            <EditableField :readonly="!editing"
               v-if="subcategoriesFor(product.type, product.category).length > 0"
               entity="products" :id="product.id" field="subCategory" type="select"
               :options="subcategoriesFor(product.type, product.category)"
@@ -441,7 +471,7 @@ onMounted(async () => {
 
           <div class="md:col-span-4">
             <div class="text-xs text-slate-400">ระดับค่าคอม (Commission tier)</div>
-            <EditableField
+            <EditableField :readonly="!editing"
               v-if="commissionTierOptions.length > 0"
               entity="products" :id="product.id" field="commissionTierId" type="select"
               :options="commissionTierOptions"
@@ -452,12 +482,12 @@ onMounted(async () => {
 
           <div class="md:col-span-4">
             <div class="text-xs text-slate-400">Name (Thai)</div>
-            <EditableField entity="products" :id="product.id" field="name" :value="product.name" @update="v => apply('name', v)" />
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="name" :value="product.name" @update="v => apply('name', v)" />
           </div>
           <!-- Product-knowledge note (#20). -->
           <div class="md:col-span-4">
             <div class="text-xs text-slate-400">หมายเหตุ / ความรู้ผลิตภัณฑ์</div>
-            <EditableField entity="products" :id="product.id" field="notes" type="textarea" :value="product.notes" @update="v => apply('notes', v)" />
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="notes" type="textarea" :value="product.notes" @update="v => apply('notes', v)" />
           </div>
         </div>
       </section>
@@ -473,11 +503,11 @@ onMounted(async () => {
         <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
           <div>
             <div class="text-xs text-slate-400">Min age (0–99)</div>
-            <EditableField entity="products" :id="product.id" field="minAge" type="number" :value="product.minAge" @update="v => apply('minAge', v)" />
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="minAge" type="number" :value="product.minAge" @update="v => apply('minAge', v)" />
           </div>
           <div>
             <div class="text-xs text-slate-400">Max age (0–99)</div>
-            <EditableField entity="products" :id="product.id" field="maxAge" type="number" :value="product.maxAge" @update="v => apply('maxAge', v)" />
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="maxAge" type="number" :value="product.maxAge" @update="v => apply('maxAge', v)" />
           </div>
         </div>
       </section>
@@ -487,7 +517,7 @@ onMounted(async () => {
       <section class="card p-4">
         <div class="flex items-start justify-between gap-3 mb-2">
           <h3 class="text-xs uppercase tracking-wider text-slate-400">Commission rates</h3>
-          <button type="button" :disabled="!canPullAgent" @click="pullAgentFromCarrier"
+          <button v-if="editing" type="button" :disabled="!canPullAgent" @click="pullAgentFromCarrier"
             title="คัดลอกค่าคอมบริษัท → InsureHub มาเป็นค่าคอม Agent (ปีแรก 80%, ปีถัดไป 70%)"
             class="shrink-0 px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 text-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
             <i class="pi pi-arrow-down text-[10px]" />
@@ -558,7 +588,7 @@ onMounted(async () => {
                         class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs text-right" />
                     </td>
                     <td class="px-1 py-1">
-                      <button type="button" @click="removeBand('carrierToHub', i)" class="text-rose-500 hover:text-rose-700 text-xs">
+                      <button v-if="editing" type="button" @click="removeBand('carrierToHub', i)" class="text-rose-500 hover:text-rose-700 text-xs">
                         <i class="pi pi-trash" />
                       </button>
                     </td>
@@ -566,7 +596,7 @@ onMounted(async () => {
                 </tbody>
               </table>
             </div>
-            <button type="button" @click="addBand('carrierToHub')" class="mt-2 px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50 text-xs">+ เพิ่มช่วง</button>
+            <button v-if="editing" type="button" @click="addBand('carrierToHub')" class="mt-2 px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50 text-xs">+ เพิ่มช่วง</button>
           </div>
           <div class="rounded-lg p-3 border border-brand-200 bg-brand-50/40">
             <div class="text-sm font-medium mb-2 text-brand-800">InsureHub → Agent (MGM)</div>
@@ -604,7 +634,7 @@ onMounted(async () => {
                         class="w-14 border border-brand-200 rounded px-1 py-0.5 text-xs text-right" />
                     </td>
                     <td class="px-1 py-1">
-                      <button type="button" @click="removeBand('hubToAgent', i)" class="text-rose-500 hover:text-rose-700 text-xs">
+                      <button v-if="editing" type="button" @click="removeBand('hubToAgent', i)" class="text-rose-500 hover:text-rose-700 text-xs">
                         <i class="pi pi-trash" />
                       </button>
                     </td>
@@ -612,7 +642,7 @@ onMounted(async () => {
                 </tbody>
               </table>
             </div>
-            <button type="button" @click="addBand('hubToAgent')" class="mt-2 px-2 py-1 rounded border border-brand-200 text-brand-700 hover:bg-brand-50 text-xs">+ เพิ่มช่วง</button>
+            <button v-if="editing" type="button" @click="addBand('hubToAgent')" class="mt-2 px-2 py-1 rounded border border-brand-200 text-brand-700 hover:bg-brand-50 text-xs">+ เพิ่มช่วง</button>
           </div>
         </div>
 
@@ -631,7 +661,8 @@ onMounted(async () => {
         </div>
 
         <div class="mt-3 flex items-center gap-3">
-          <button type="button"
+          <!-- #13 — saving commission rates only in edit mode. -->
+          <button v-if="editing" type="button"
             class="px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5"
             :disabled="savingRates" @click="saveCommissionRates">
             <i class="pi pi-check text-xs" v-if="!savingRates" />
@@ -646,12 +677,13 @@ onMounted(async () => {
       <!-- Footer actions -->
       <footer class="flex items-center justify-between border-t border-slate-200 pt-4">
         <div class="text-xs text-slate-400">
-          Click any field to edit · Enter saves, Esc cancels
+          {{ editing ? 'คลิกช่องเพื่อแก้ไข · Enter บันทึก, Esc ยกเลิก' : 'โหมดดูข้อมูล' }}
         </div>
-        <button type="button"
+        <!-- #13 — delete only for users who can manage products, in edit mode. -->
+        <button v-if="canEdit && editing" type="button"
           class="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 text-sm flex items-center gap-1.5"
           @click="showDelete = true">
-          <i class="pi pi-trash text-xs" /> Delete
+          <i class="pi pi-trash text-xs" /> ลบผลิตภัณฑ์
         </button>
       </footer>
 
