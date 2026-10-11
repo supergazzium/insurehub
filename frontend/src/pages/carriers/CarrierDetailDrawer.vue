@@ -792,7 +792,6 @@ function typeBadge(insureType: string): string {
             <div class="md:col-span-2"><div class="text-xs text-slate-400">Website</div>
               <EditableField entity="carriers" :id="carrier.id" field="website" :value="carrier.website" @update="v => apply('website', v)" /></div>
             <div><div class="text-xs text-slate-400">Products</div><div class="font-medium text-slate-900">{{ carrier.productCount.toLocaleString() }}</div></div>
-            <div><div class="text-xs text-slate-400">Contracts</div><div class="font-medium text-slate-900">{{ carrier.contractCount.toLocaleString() }}</div></div>
             <div><div class="text-xs text-slate-400">Status</div>
               <div class="flex items-center gap-2">
                 <select
