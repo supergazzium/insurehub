@@ -121,6 +121,7 @@ class CustomerController extends ApiController
             'customerCode' => 'c.customer_code',
             'firstName' => 'c.first_name',
             'lastName' => 'c.last_name',
+            'province' => 'c.province',
             'gender' => 'c.gender',
             'totalPremium' => 'total_premium',
             'registeredAt' => 'c.registered_at',

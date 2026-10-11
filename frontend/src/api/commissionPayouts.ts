@@ -1,7 +1,8 @@
 // ทำจ่ายค่าคอมประจำเดือน (ตัวแทน) — agent commission payout batch API client.
 import { api, buildQuery, getToken, API_BASE_URL } from './client'
 
-export type BatchStatus = 'DRAFT' | 'GENERATED' | 'APPROVED' | 'PAID' | 'CANCELLED'
+export type BatchStatus = 'DRAFT' | 'GENERATED' | 'APPROVED' | 'PAID' | 'CANCELLED' | 'REVERSED'
+export type AdjustmentType = 'special_deduct' | 'bonus' | 'correction'
 
 export interface PreviewAgentRow {
   agentId: string | null
@@ -21,6 +22,7 @@ export interface BatchRow {
   id: string
   fromDate: string | null
   toDate: string | null
+  periodLabel: string | null
   status: BatchStatus
   totalAgents: number
   totalItems: number
@@ -28,44 +30,22 @@ export interface BatchRow {
   paymentDate: string | null
   paymentReference: string | null
   approvedAt?: string | null
-  calcVersion?: number
-  netTotal?: number | null
-  whtTotal?: number | null
   note: string | null
   paidAt: string | null
+  reversedAt?: string | null
+  reversalReason?: string | null
+  reissuedFromBatchId?: string | null
   createdAt: string | null
 }
 
-export type LineType = 'base' | 'self_mgmt' | 'referral' | 'override'
-
 export interface BatchItemRow {
+  id?: string
   policyId: string
   policyNo: string | null
   applicationNo: string | null
-  lineType?: LineType
-  lineLabel?: string
-  sourceAgent?: string | null
-  ratioLabel?: string | null
-  override?: boolean
   amount: number
   source: string | null
   status: string
-}
-export interface PayeeTax {
-  base: number
-  selfMgmt: number
-  referral: number
-  override: number
-  taxable: number
-  vat: number
-  total: number
-  whtRate: number
-  whtForm: string | null
-  wht: number
-  net: number
-  certificate: string | null
-  bankName: string | null
-  hasBankAccount: boolean
 }
 export interface BatchAgentRow {
   agentId: string | null
@@ -76,18 +56,23 @@ export interface BatchAgentRow {
   commission: number
   deduct: number
   net: number
-  payeeId?: string | null
-  payeeKind?: string | null
-  tax?: PayeeTax
+  // Per-agent payment tracking (bulk run — each agent is a separate transfer).
+  bankAccountNo?: string | null
+  bankAccountName?: string | null
+  whtAmount?: number
+  netTransfer?: number
+  paid?: boolean
+  paidAt?: string | null
+  paymentReference?: string | null
+  reversed?: boolean
+  pdfGeneratedAt?: string | null
   items: BatchItemRow[]
 }
 export interface BatchAdjustment {
   id: string
   agentId: string | null
   agentCode: string | null
-  type: string
-  typeLabel?: string
-  policyNo?: string | null
+  type: AdjustmentType | string
   amount: number
   reason: string
   createdAt: string | null
@@ -95,10 +80,6 @@ export interface BatchAdjustment {
 export interface BatchDetail extends BatchRow {
   agents: BatchAgentRow[]
   adjustments: BatchAdjustment[]
-}
-export interface BatchMeta {
-  canApprove: boolean
-  canPay: boolean
 }
 
 export function previewPayout(fromDate: string, toDate: string) {
@@ -113,93 +94,26 @@ export interface AgentOutstandingRow {
   vatType: string | null
   itemCount: number
   amount: number
-  whtRate?: number
-  byType?: Record<LineType, number>
-  waitingCount?: number
-  waitingAmount?: number
-  netAmount?: number
-  pendingDeduction?: number
 }
 export interface AgentOutstandingResult {
   agents: AgentOutstandingRow[]
-  totals: { totalAgents: number; totalItems: number; totalAmount: number; totalWaiting?: number; totalNet?: number }
-  warnings?: string[]
-}
-export interface LineReason {
-  code: string
-  label: string
-}
-export interface LineOverride {
-  id: string
-  reason: string
-  by: string | null
-  at: string | null
-  bypassed: LineReason[]
+  totals: { totalAgents: number; totalItems: number; totalAmount: number }
 }
 export interface AgentDetailItem {
-  key: string
-  lineType: LineType
-  lineLabel: string
   policyId: number
   policyNo: string | null
   applicationNo: string | null
-  customerName: string | null
-  policyDate: string | null
-  sourceAgent: string | null
   basePremium: number
   agentCommission: number
   riderCommission: number
   amount: number
-  entitlement: number
-  ratioLabel: string | null
   amountSource: string
-  override: LineOverride | null
-  reasons: LineReason[]
-}
-export interface PendingDeduction {
-  id: string
-  type: string
-  typeLabel?: string
-  amount: number
-  reason: string | null
-  policyId: string | null
-  policyNo: string | null
-  createdAt: string | null
-}
-export interface AgentDetailTotals {
-  itemCount: number
-  totalAmount: number
-  byType: Record<LineType, number>
-  pendingDeduction: number
-  appliedDeduction: number
-  carryForward: number
-  taxableAmount: number
-  vatAmount: number
-  grossWithVat: number
-  whtAmount: number
-  netAmount: number
-  waitingCount: number
-  waitingAmount: number
+  policyDate: string | null
 }
 export interface AgentDetailResult {
-  agent: {
-    agentId: string
-    agentCode: string | null
-    agentName: string
-    vatType: string | null
-    kind?: string
-    whtRate?: number
-    whtForm?: string
-    whtFormLabel?: string | null
-    bankName?: string | null
-    hasBankAccount?: boolean
-  } | null
+  agent: { agentId: string; agentCode: string | null; agentName: string; vatType: string | null } | null
   items: AgentDetailItem[]
-  waiting: AgentDetailItem[]
-  pendingDeductions?: PendingDeduction[]
-  warnings?: string[]
-  totals: AgentDetailTotals
-  meta?: { canPay: boolean; canOverride: boolean }
+  totals: { itemCount: number; totalAmount: number }
 }
 
 /** Agent-first outstanding list — every agent with unpaid commission. */
@@ -224,66 +138,120 @@ export function payAgent(
 export function fetchPayoutBatches(status?: BatchStatus | 'all') {
   return api.get<{ data: BatchRow[] }>(`commission-payout-batches${buildQuery({ status })}`)
 }
-export function createPayoutBatch(fromDate: string, toDate: string, note?: string) {
-  return api.post<{ data: BatchRow }>('commission-payout-batches', { fromDate, toDate, note })
+
+// ── History / management ────────────────────────────────────────────────────
+export interface HistoryFilters {
+  fromDate?: string
+  toDate?: string
+  status?: BatchStatus | 'all'
+  period?: string
+  q?: string
+  page?: number
+  perPage?: number
+}
+export interface HistoryMeta { total: number; page: number; perPage: number }
+export interface PayoutSummary {
+  batchCount: number
+  paidBatchCount: number
+  pendingBatchCount: number
+  reversedBatchCount: number
+  paidAmount: number
+  pendingAmount: number
+  reversedAmount: number
+  totalAgentsPaid: number
+}
+export interface AuditEntryRow {
+  action: string
+  at: string | null
+  actor: string
+  metadata: Record<string, unknown> | null
+}
+export interface ReferenceHit {
+  batchId: string
+  periodLabel: string | null
+  status: BatchStatus
+  paymentDate: string | null
+  agentCode: string | null
+  agentName: string | null
+  reference: string | null
+  amount: number
+  level: 'agent' | 'batch'
+}
+
+/** Paginated batch history for the history page. */
+export function fetchPayoutHistory(filters: HistoryFilters) {
+  return api.get<{ data: BatchRow[]; meta: HistoryMeta }>(
+    `commission-payout-batches/history${buildQuery(filters as Record<string, unknown>)}`,
+  )
+}
+/** Reconciliation KPI summary. */
+export function fetchPayoutSummary(fromDate?: string, toDate?: string) {
+  return api.get<{ data: PayoutSummary }>(
+    `commission-payout-batches/summary${buildQuery({ fromDate, toDate })}`,
+  )
+}
+/** Per-batch audit timeline. */
+export function fetchPayoutAuditLog(batchId: string) {
+  return api.get<{ data: AuditEntryRow[] }>(`commission-payout-batches/${batchId}/audit-log`)
+}
+/** Resolve a bank-transfer reference to its batch/agent(s). */
+export function findPayoutByReference(ref: string) {
+  return api.get<{ data: ReferenceHit[] }>(
+    `commission-payout-batches/find-by-reference${buildQuery({ ref })}`,
+  )
+}
+/**
+ * Create a DRAFT batch. Pass `agentIds` for a hand-picked selection (the
+ * monthly bulk run pays 30–50 at once); omit it to include every eligible
+ * agent (select-all). Dates optional (omit = all unpaid eligible).
+ */
+export function createPayoutBatch(payload: {
+  fromDate?: string
+  toDate?: string
+  agentIds?: number[]
+  periodLabel?: string
+  note?: string
+}) {
+  return api.post<{ data: BatchRow }>('commission-payout-batches', payload)
 }
 export function fetchPayoutBatch(id: string) {
-  return api.get<{ data: BatchDetail; meta?: BatchMeta }>(`commission-payout-batches/${id}`)
-}
-export function overridePolicyConditions(policyId: number | string, reason: string) {
-  return api.post<{ data: { id: string } }>(`policies/${policyId}/payout-override`, { reason })
-}
-export function revokePolicyOverride(policyId: number | string) {
-  return api.delete<{ data: { revoked: number } }>(`policies/${policyId}/payout-override`)
-}
-export function agentStatementPath(batchId: string, agentCode: string): string {
-  return `commission-payout-batches/${batchId}/agents/${encodeURIComponent(agentCode)}/pdf`
-}
-export function certificatePath(batchId: string, payeeId: string): string {
-  return `commission-payout-batches/${batchId}/payees/${payeeId}/certificate`
-}
-export function bankCsvPath(batchId: string): string {
-  return `commission-payout-batches/${batchId}/bank.csv`
-}
-export interface WhtReportRow {
-  seq: number
-  payeeId: string
-  batchId: string
-  taxId: string | null
-  name: string | null
-  agentCode: string | null
-  address: string | null
-  date: string | null
-  incomeType: string
-  rate: number
-  amount: number
-  wht: number
-  condition: number
-  certificate: string | null
-}
-export interface WhtReport {
-  month: string
-  form: 'pnd3' | 'pnd53'
-  formLabel: string
-  rows: WhtReportRow[]
-  totals: { count: number; amount: number; wht: number }
-}
-export function fetchWhtReport(month: string, form: 'pnd3' | 'pnd53') {
-  return api.get<{ data: WhtReport }>(`commission-payout-batches/wht-report${buildQuery({ month, form })}`)
-}
-export function whtReportCsvPath(month: string, form: 'pnd3' | 'pnd53'): string {
-  return `commission-payout-batches/wht-report${buildQuery({ month, form, format: 'csv' })}`
+  return api.get<{ data: BatchDetail }>(`commission-payout-batches/${id}`)
 }
 export function addPayoutAdjustment(
-  id: string, payload: { agentId?: string | null; agentCode?: string | null; amount: number; reason: string },
+  id: string,
+  payload: { agentId?: string | null; agentCode?: string | null; amount: number; reason: string; type?: AdjustmentType },
 ) {
   return api.post<{ data: { id: string } }>(`commission-payout-batches/${id}/adjustments`, payload)
 }
 export function markPayoutBatchPaid(id: string, paymentDate: string, reference?: string) {
   return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/mark-paid`, { paymentDate, reference })
 }
+/** Pay ONE agent in the batch with that agent's own transfer reference. */
+export function markAgentPaid(id: string, agentId: string, paymentDate: string, reference?: string) {
+  return api.post<{ data: BatchRow }>(
+    `commission-payout-batches/${id}/agents/${agentId}/mark-paid`, { paymentDate, reference },
+  )
+}
 export function cancelPayoutBatch(id: string) {
   return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/cancel`, {})
+}
+/** Reverse (void) a PAID batch — wrong-payment handling. */
+export function reversePayoutBatch(id: string, reason: string) {
+  return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/reverse`, { reason })
+}
+/** Reverse one paid agent within a batch. */
+export function reversePayoutAgent(id: string, agentId: string, reason: string) {
+  return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/agents/${agentId}/reverse`, { reason })
+}
+/** Re-issue a corrected DRAFT batch after a reversal. Returns the new batch. */
+export function reissuePayoutBatch(id: string) {
+  return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/reissue`, {})
+}
+/** Exclude / re-include one line item before pay. */
+export function setItemExcluded(id: string, itemId: string, excluded: boolean) {
+  return api.post<{ data: BatchRow }>(
+    `commission-payout-batches/${id}/items/${itemId}/${excluded ? 'exclude' : 'include'}`, {},
+  )
 }
 export function approvePayoutBatch(id: string) {
   return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/approve`, {})
@@ -292,9 +260,25 @@ export function unapprovePayoutBatch(id: string) {
   return api.post<{ data: BatchRow }>(`commission-payout-batches/${id}/unapprove`, {})
 }
 
-/** Single-agent PDF download URL (opens/downloads directly). */
+/** Single-agent PDF download URL (raw; needs a Bearer token — not usable via window.open). */
 export function agentPdfUrl(batchId: string, agentCode: string): string {
   return `${API_BASE_URL}/commission-payout-batches/${batchId}/agents/${encodeURIComponent(agentCode)}/pdf`
+}
+
+/**
+ * Fetch one agent's PDF as a Blob WITH the auth header. The API routes require
+ * a Bearer token, so a plain window.open navigation (which can't attach the
+ * header) 500s. Callers save the returned blob.
+ */
+export async function downloadAgentPdf(batchId: string, agentCode: string): Promise<Blob> {
+  const res = await fetch(agentPdfUrl(batchId, agentCode), {
+    headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'application/pdf' },
+  })
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}))
+    throw new Error(body.message ?? `HTTP ${res.status}`)
+  }
+  return res.blob()
 }
 
 /** Generate a ZIP of all (or selected) agent PDFs — returns a Blob to save. */

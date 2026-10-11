@@ -30,7 +30,9 @@ class AgentRegisterRequest extends FormRequest
             'email' => ['required', 'email', 'max:255', 'unique:users,email'],
             'password' => ['required', 'string', 'min:8', 'confirmed'],
             'idCard' => ['required', 'string', 'size:13', 'regex:/^\d{13}$/'],
-            'birthDate' => ['required', 'date', 'before:today'],
+            // Corporate accounts have no birth date (task 10) — required for
+            // individuals only. Minimum-age 18 is enforced in withValidator().
+            'birthDate' => ['required_unless:signupType,corporate', 'nullable', 'date', 'before:today'],
             // Thai mobile: 10 digits, "0" + mobile prefix (6/8/9) + 8 digits.
             // Separators (space, dash, parens) are stripped in prepareForValidation().
             'phone' => ['required', 'string', 'regex:/^0[689]\d{8}$/'],
@@ -93,6 +95,18 @@ class AgentRegisterRequest extends FormRequest
                         ? 'Business registration number is not a valid 13-digit Thai ID.'
                         : 'National ID is not a valid 13-digit Thai ID.'
                 );
+            }
+
+            // Minimum age 18 for individuals (task 5). Corporate has no birth
+            // date so it is skipped. Only runs when the date itself is valid.
+            if ($this->input('signupType') !== 'corporate') {
+                $birth = (string) ($this->input('birthDate') ?? '');
+                if ($birth !== '' && strtotime($birth) !== false) {
+                    $cutoff = (new \DateTimeImmutable('today'))->modify('-18 years');
+                    if (new \DateTimeImmutable($birth) > $cutoff) {
+                        $v->errors()->add('birthDate', 'Applicant must be at least 18 years old.');
+                    }
+                }
             }
 
             // Verify the OTP token: must exist, unconsumed, unexpired, and

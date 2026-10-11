@@ -1,23 +1,30 @@
 <script setup lang="ts">
-// New Product modal — simple, single-screen form. Field visibility follows
-// the carrier's insureType: Life carriers force a Main/Rider choice; that
-// choice + carrier type drives the product-group options; product group
-// drives the category list; category drives the subcategory list.
+// New Product — full-page form (mirrors CustomerCreatePage / the policy
+// create-edit page style instead of a cramped modal).
+//
+// Field visibility follows the carrier's insureType: Life carriers force a
+// Main/Rider choice; that choice + carrier type drives the product-group
+// options; product group drives the category list; category drives the
+// subcategory list. All of the reactive/cascade logic below is ported
+// verbatim from the former ProductCreateModal.vue — only the CreateModal
+// wrapper (submit / saving / error handling) is replaced with page-local
+// state, and the layout is a full page instead of a modal.
 import { computed, onMounted, reactive, ref, watch } from 'vue'
-import CreateModal from '../../components/CreateModal.vue'
+import { useRouter } from 'vue-router'
 import FormField from '../../components/FormField.vue'
+import MoneyInput from '../../components/MoneyInput.vue'
+import { api, ApiError } from '../../api/client'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchNextProductCode, fetchProductTaxonomy, type ProductTaxonomyRow } from '../../api/products'
-import { fetchCommissionTiers, type CommissionTier } from '../../api/mgm'
+import { fetchCommissionTiers, commissionTierLabel, type CommissionTier } from '../../api/mgm'
 import { lookupTemplate, fillCarrier } from './productNamePresets'
 
-const props = defineProps<{ open: boolean }>()
-const emit = defineEmits<{
-  (e: 'close'): void
-  /** Forward the created product row so callers can act on which row was
-   *  created (e.g. broadcast it to another tab for auto-populate). */
-  (e: 'created', row: Record<string, unknown>): void
-}>()
+const router = useRouter()
+
+// Submit state (replaces CreateModal's internal saving/error handling).
+const saving = ref(false)
+const submitError = ref<string | null>(null)
+const fieldErrors = ref<Record<string, string[]>>({})
 
 const carriers = ref<CarrierListRow[]>([])
 const carriersLoading = ref(false)
@@ -124,11 +131,16 @@ const form = reactive({
   // Non-life uses the flat panels (one rate per direction).
   carrierToHub: blankPanel(),
   hubToAgent: blankPanel(),
+  // OV (Override) — a single flat rate the carrier pays InsureHub on top of
+  // MAIN, carrier → hub only. Entered as PERCENT; applies to any scheme.
+  carrierToHubOv: null as number | null,
   // Life uses banded tables — multiple bands per direction, each with
   // SA/age ranges + yr1..yr5 + yr6+ columns. Empty until operator adds
   // a row.
   carrierToHubBands: [] as CommissionBandRow[],
   hubToAgentBands: [] as CommissionBandRow[],
+  // Free-text product-knowledge note (#20) — e.g. "PA ผู้สูงอายุ ซื้อได้ถึง 75".
+  notes: '',
 })
 
 /**
@@ -290,7 +302,7 @@ watch(() => form.category, () => {
 // swapped for the carrier's short name (nickname preferred, code fallback).
 //
 // Only fills while `nameTouched` is false — once the operator types in
-// the Name field, we stop overwriting. Cleared on modal open.
+// the Name field, we stop overwriting. Cleared on page mount (initial state).
 const nameTouched = ref(false)
 const selectedCarrier = computed(() => carriers.value.find((c) => c.id === form.carrierId) ?? null)
 watch(
@@ -356,6 +368,51 @@ function addBand(direction: 'carrierToHubBands' | 'hubToAgentBands'): void {
 function removeBand(direction: 'carrierToHubBands' | 'hubToAgentBands', index: number): void {
   form[direction] = form[direction].filter((_, i) => i !== index)
 }
+
+/**
+ * #17 — "ดูดค่าคอมจากด้านบน": fill the InsureHub → Agent rates from the
+ * Carrier → InsureHub rates using the default agent split: year 1 = 80%
+ * of the carrier rate, year 2 onward = 70%. The operator can then tweak
+ * individual cells. Overwrites the whole agent panel/table.
+ */
+const AGENT_YR1_FACTOR = 0.8
+const AGENT_YR2UP_FACTOR = 0.7
+/** carrier % → agent % for a given year index; round to 2dp to avoid float noise. */
+function agentPct(carrier: number | null, firstYear: boolean): number | null {
+  if (carrier === null || Number.isNaN(carrier)) return null
+  const factor = firstYear ? AGENT_YR1_FACTOR : AGENT_YR2UP_FACTOR
+  return Math.round(carrier * factor * 100) / 100
+}
+function pullAgentFromCarrier(): void {
+  if (commissionScheme.value === 'flat') {
+    // Flat = single rate; treat as the standard (year-1) rate → ×80%.
+    form.hubToAgent = {
+      flatRate: agentPct(form.carrierToHub.flatRate, true),
+      yr1: null, yr2: null, yr3: null, yr4: null, yr5: null, yr6_10: null, yr11Up: null,
+    }
+  } else {
+    // Life banded — copy each carrier band's ranges, split the per-year rates.
+    form.hubToAgentBands = form.carrierToHubBands.map((b) => ({
+      sumAssuredMin: b.sumAssuredMin,
+      sumAssuredMax: b.sumAssuredMax,
+      entryAgeMin: b.entryAgeMin,
+      entryAgeMax: b.entryAgeMax,
+      yr1: agentPct(b.yr1, true),
+      yr2: agentPct(b.yr2, false),
+      yr3: agentPct(b.yr3, false),
+      yr4: agentPct(b.yr4, false),
+      yr5: agentPct(b.yr5, false),
+      yr6Up: agentPct(b.yr6Up, false),
+    }))
+  }
+}
+/** Whether the carrier side has any rate worth pulling (enables the button). */
+const canPullAgent = computed<boolean>(() => {
+  if (commissionScheme.value === 'flat') {
+    return form.carrierToHub.flatRate !== null && !Number.isNaN(form.carrierToHub.flatRate)
+  }
+  return form.carrierToHubBands.length > 0
+})
 
 const ageError = computed<string | null>(() => {
   const min = form.minAge
@@ -427,6 +484,7 @@ const payload = computed(() => {
     category: form.category.trim() || null,
     subCategory: form.subCategory.trim() || null,
     commissionTierId: form.commissionTierId ? Number(form.commissionTierId) : null,
+    notes: form.notes.trim() || null,
     active: true,
   }
   // Age band is Life-only — omit for non-life so we don't persist stale
@@ -451,64 +509,87 @@ const payload = computed(() => {
       hubToAgent: form.hubToAgentBands.map(bandToPayload),
     }
   }
+  // OV is a single flat rate independent of the MAIN scheme (flat or life),
+  // so send it whenever a scheme is known. Merge onto any existing
+  // commissionRates (flat) or create the key (life uses bands for MAIN).
+  if (commissionScheme.value) {
+    base.commissionRates = {
+      ...(base.commissionRates as Record<string, unknown> ?? {}),
+      carrierToHubOv: { flatRate: percentToFraction(form.carrierToHubOv) },
+    }
+  }
   return base
 })
 
-watch(
-  () => props.open,
-  (v) => {
-    if (v) {
-      Object.assign(form, {
-        insureType: '', code: '', name: '', carrierId: '',
-        type: '', mainRider: '', category: '', subCategory: '',
-        commissionTierId: '',
-        minAge: 0, maxAge: 99,
-        carrierToHub: blankPanel(),
-        hubToAgent: blankPanel(),
-        carrierToHubBands: [],
-        hubToAgentBands: [],
-      })
-      codeAutoFilled.value = false
-      nameTouched.value = false
-      void loadCarriers()
-      void loadCommissionTiers()
+// ─── Submit ────────────────────────────────────────────────────────────────
+// Mirrors CreateModal's submit flow: POST the payload; on success navigate
+// back to the product list. Laravel 422 field errors surface inline.
+async function submit(): Promise<void> {
+  if (saving.value || !canSubmit.value) return
+  saving.value = true
+  submitError.value = null
+  fieldErrors.value = {}
+  try {
+    const res = await api.post<{ data: Record<string, unknown> }>('products', payload.value)
+    const row = (res.data ?? res) as Record<string, unknown>
+    // Notify any listening tab (e.g. the policy wizard) that a product was
+    // created — same BroadcastChannel contract the list handler used.
+    try {
+      const bc = new BroadcastChannel('insurehub')
+      bc.postMessage({ type: 'product:created', row })
+      bc.close()
+    } catch { /* BroadcastChannel unavailable — ignore */ }
+    router.push({ name: 'products' })
+  } catch (e: unknown) {
+    if (e instanceof ApiError) {
+      if (e.body?.errors) fieldErrors.value = e.body.errors
+      submitError.value = e.body?.message ?? 'บันทึกไม่สำเร็จ กรุณาลองใหม่'
+    } else {
+      submitError.value = 'บันทึกไม่สำเร็จ กรุณาลองใหม่'
     }
-  },
-)
+  } finally {
+    saving.value = false
+  }
+}
 
-/**
- * After "Save & add another" fires, forward the created row to the parent
- * list and reset just the product-specific fields — keep the insureType,
- * carrier, and main/rider so the operator can batch products under one
- * carrier without re-picking anything. Fetch the next auto-code too.
- */
-function onCreated(row: Record<string, unknown>): void {
-  emit('created', row)
-  form.name = ''
-  form.type = ''
-  form.category = ''
-  form.subCategory = ''
-  form.commissionTierId = ''
-  form.minAge = 0
-  form.maxAge = 99
-  form.carrierToHub = blankPanel()
-  form.hubToAgent = blankPanel()
-  form.carrierToHubBands = []
-  form.hubToAgentBands = []
-  form.code = ''
-  codeAutoFilled.value = false
-  nameTouched.value = false
-  if (form.carrierId) void suggestCode(form.carrierId)
+function cancel(): void {
+  router.push({ name: 'products' })
 }
 </script>
 
 <template>
-  <CreateModal
-    :open="open" entity="products" title="New Product"
-    :payload="payload" :can-submit="canSubmit"
-    @close="emit('close')" @created="onCreated"
-  >
-    <template #default="{ fieldErrors }">
+  <div class="space-y-6 max-w-5xl">
+    <!-- Header — mirrors the customer create / policy create-edit page -->
+    <header class="flex items-center justify-between flex-wrap gap-3">
+      <div>
+        <div class="text-xs text-slate-400">
+          <RouterLink :to="{ name: 'products' }" class="hover:text-brand-600">ผลิตภัณฑ์</RouterLink>
+          <span class="mx-1">/</span>
+          <span>เพิ่มผลิตภัณฑ์ใหม่</span>
+        </div>
+        <h1 class="text-2xl font-semibold text-slate-900">เพิ่มผลิตภัณฑ์ใหม่</h1>
+      </div>
+      <div class="flex items-center gap-2">
+        <button type="button" @click="cancel"
+          class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
+          ยกเลิก
+        </button>
+        <button type="button" @click="submit" :disabled="saving || !canSubmit"
+          class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5">
+          <i class="pi pi-check text-xs" v-if="!saving" />
+          <i class="pi pi-spin pi-spinner text-xs" v-else />
+          {{ saving ? 'กำลังบันทึก…' : 'บันทึกผลิตภัณฑ์' }}
+        </button>
+      </div>
+    </header>
+
+    <p v-if="submitError" class="rounded-lg bg-rose-50 border border-rose-200 px-3 py-2 text-sm text-rose-700">
+      <i class="pi pi-exclamation-circle mr-1" />{{ submitError }}
+    </p>
+
+    <!-- Section 1: ประเภท + carrier + taxonomy + ชื่อ -->
+    <section class="card p-5">
+      <h2 class="font-semibold text-slate-900 mb-3">ข้อมูลผลิตภัณฑ์</h2>
       <div class="grid grid-cols-2 gap-4">
         <FormField label="ประเภทประกัน" required class="col-span-2" error-key="insureType" :errors="fieldErrors">
           <div class="flex gap-2">
@@ -603,7 +684,7 @@ function onCreated(row: Record<string, unknown>): void {
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
             <option value="">— select —</option>
             <option v-for="t in commissionTiers" :key="t.id" :value="t.id">
-              {{ t.nameTh }} ({{ t.code }})
+              {{ commissionTierLabel(t) }}
             </option>
           </select>
         </FormField>
@@ -611,6 +692,13 @@ function onCreated(row: Record<string, unknown>): void {
           hint="ระบบเติมชื่อให้อัตโนมัติจากประเภทที่เลือก — แก้ [???] เป็นชื่อจริงได้เลย">
           <input v-model.trim="form.name" placeholder="ประกันสุขภาพ ..."
             @input="nameTouched = true"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <!-- Product-knowledge note (#20) — free text for selling notes,
+             age limits, package quirks, etc. -->
+        <FormField label="หมายเหตุ / ความรู้ผลิตภัณฑ์" class="col-span-2" error-key="notes" :errors="fieldErrors"
+          hint="เช่น PA ผู้สูงอายุ ซื้อได้ถึงอายุ 75 · ประกันกลุ่ม IPD/OPD — จดบันทึกความรู้ไว้ได้">
+          <textarea v-model.trim="form.notes" rows="3" placeholder="บันทึกความรู้/เงื่อนไขของผลิตภัณฑ์นี้ ..."
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
         <!-- Age band is a Life-only concept — motor / tax / non-motor
@@ -631,103 +719,145 @@ function onCreated(row: Record<string, unknown>): void {
           </FormField>
           <p v-if="ageError" class="col-span-2 -mt-2 text-xs text-rose-600">{{ ageError }}</p>
         </template>
-        <!--
-          Commission rates. Shown once the product group has been chosen so
-          the scheme (flat vs per-year) is known. Two side-by-side panels:
-             Carrier → InsureHub   |   InsureHub → Agent
-          The right panel (hub→agent) is the number the MGM engine uses for
-          DIRECT accrual. Left panel is for reporting / reconciliation.
-        -->
-        <div v-if="commissionScheme !== ''" class="col-span-2 mt-2 border-t border-slate-200 pt-4">
-          <div class="text-sm font-semibold text-slate-700 mb-1">ค่าคอมมิชชั่นมาตรฐาน</div>
-          <div class="text-xs text-slate-500 mb-3">
-            เว้นว่างได้ — ค่าที่บันทึกจะถูกใช้ในระบบ MGM แทนตารางบริษัท×ประเภทสินค้า
+      </div>
+    </section>
+
+    <!--
+      Section 2: Commission rates. Shown once the product group has been
+      chosen so the scheme (flat vs per-year) is known. Two panels:
+         Carrier → InsureHub   |   InsureHub → Agent
+      The right panel (hub→agent) is the number the MGM engine uses for
+      DIRECT accrual. Left panel is for reporting / reconciliation.
+    -->
+    <section v-if="commissionScheme !== ''" class="card p-5">
+      <div class="flex items-start justify-between gap-3 mb-1">
+        <h2 class="font-semibold text-slate-900">ค่าคอมมิชชั่นมาตรฐาน</h2>
+        <button type="button" :disabled="!canPullAgent" @click="pullAgentFromCarrier"
+          title="คัดลอกค่าคอมบริษัท → InsureHub มาเป็นค่าคอม Agent (ปีแรก 80%, ปีถัดไป 70%)"
+          class="shrink-0 px-2.5 py-1 rounded-lg border border-brand-300 text-brand-700 hover:bg-brand-50 text-xs flex items-center gap-1.5 disabled:opacity-40 disabled:cursor-not-allowed">
+          <i class="pi pi-arrow-down text-[10px]" />
+          ดูดค่าคอมมาใส่ Agent
+        </button>
+      </div>
+      <div class="text-xs text-slate-500 mb-3">
+        เว้นว่างได้ — ค่าที่บันทึกจะถูกใช้ในระบบ MGM แทนตารางบริษัท×ประเภทสินค้า ·
+        ปุ่ม "ดูดค่าคอม" ตั้งค่า Agent = ปีแรก 80% / ปีถัดไป 70% ของค่าคอมบริษัท (แก้ไขต่อได้)
+      </div>
+      <!-- Flat scheme (Non-Life, PA, Group, Tax): one % per direction. -->
+      <div v-if="commissionScheme === 'flat'" class="grid grid-cols-2 gap-4">
+        <div class="border border-slate-200 rounded-lg p-3">
+          <div class="text-sm font-medium text-slate-800 mb-2">บริษัท → InsureHub</div>
+          <div class="relative w-32">
+            <input v-model.number="form.carrierToHub.flatRate" type="number" min="0" max="100" step="0.01"
+              placeholder="เช่น 15"
+              class="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
           </div>
-          <!-- Flat scheme (Non-Life, PA, Group, Tax): one % per direction. -->
-          <div v-if="commissionScheme === 'flat'" class="grid grid-cols-2 gap-4">
-            <div class="border border-slate-200 rounded-lg p-3">
-              <div class="text-sm font-medium text-slate-800 mb-2">บริษัท → InsureHub</div>
-              <div class="relative w-32">
-                <input v-model.number="form.carrierToHub.flatRate" type="number" min="0" max="100" step="0.01"
-                  placeholder="เช่น 15"
-                  class="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
-              </div>
-            </div>
-            <div class="border border-brand-200 bg-brand-50/40 rounded-lg p-3">
-              <div class="text-sm font-medium text-brand-800 mb-2">InsureHub → Agent (MGM)</div>
-              <div class="relative w-32">
-                <input v-model.number="form.hubToAgent.flatRate" type="number" min="0" max="100" step="0.01"
-                  placeholder="เช่น 10"
-                  class="w-full border border-brand-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
-                <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
-              </div>
-            </div>
-          </div>
-          <!-- Life scheme: two banded tables. Each band is (SA range, age
-               range) + yr1..yr5 + yr6+ commission. Add as many bands as
-               the product's tariff sheet lists. -->
-          <div v-else class="space-y-4">
-            <div v-for="direction in [
-              { key: 'carrierToHubBands' as const, label: 'บริษัท → InsureHub', tone: 'slate' },
-              { key: 'hubToAgentBands' as const, label: 'InsureHub → Agent (MGM)', tone: 'brand' },
-            ]" :key="direction.key" :class="['rounded-lg p-3 border',
-              direction.tone === 'brand' ? 'border-brand-200 bg-brand-50/40' : 'border-slate-200']">
-              <div :class="['text-sm font-medium mb-2',
-                direction.tone === 'brand' ? 'text-brand-800' : 'text-slate-800']">
-                {{ direction.label }}
-              </div>
-              <div class="overflow-x-auto">
-                <table class="min-w-full text-xs">
-                  <thead class="text-[10px] uppercase text-slate-500">
-                    <tr>
-                      <th class="px-1 py-1 text-left">SA ต่ำสุด (฿)</th>
-                      <th class="px-1 py-1 text-left">SA สูงสุด (฿)</th>
-                      <th class="px-1 py-1 text-left">อายุ ต่ำสุด</th>
-                      <th class="px-1 py-1 text-left">อายุ สูงสุด</th>
-                      <th class="px-1 py-1 text-right">ปี 1</th>
-                      <th class="px-1 py-1 text-right">ปี 2</th>
-                      <th class="px-1 py-1 text-right">ปี 3</th>
-                      <th class="px-1 py-1 text-right">ปี 4</th>
-                      <th class="px-1 py-1 text-right">ปี 5</th>
-                      <th class="px-1 py-1 text-right">ปี 6+</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr v-if="form[direction.key].length === 0">
-                      <td colspan="11" class="px-1 py-3 text-center text-slate-400 italic">
-                        ยังไม่มีช่วงราคา / อายุ — กด "+ เพิ่มช่วง"
-                      </td>
-                    </tr>
-                    <tr v-for="(band, i) in form[direction.key]" :key="i" class="border-t border-slate-100">
-                      <td class="px-1 py-1"><input v-model.number="band.sumAssuredMin" type="number" min="0" step="1000" placeholder="ไม่จำกัด" class="w-24 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
-                      <td class="px-1 py-1"><input v-model.number="band.sumAssuredMax" type="number" min="0" step="1000" placeholder="ไม่จำกัด" class="w-24 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
-                      <td class="px-1 py-1"><input v-model.number="band.entryAgeMin" type="number" min="0" max="120" step="1" placeholder="0" class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
-                      <td class="px-1 py-1"><input v-model.number="band.entryAgeMax" type="number" min="0" max="120" step="1" placeholder="120" class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
-                      <td v-for="y in ['yr1','yr2','yr3','yr4','yr5','yr6Up']" :key="y" class="px-1 py-1">
-                        <input :value="(band as any)[y]" type="number" min="0" max="100" step="0.01"
-                          @input="(band as any)[y] = ($event.target as HTMLInputElement).valueAsNumber || null"
-                          class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs text-right" />
-                      </td>
-                      <td class="px-1 py-1">
-                        <button type="button" @click="removeBand(direction.key, i)"
-                          class="text-rose-500 hover:text-rose-700 text-xs">
-                          <i class="pi pi-trash" />
-                        </button>
-                      </td>
-                    </tr>
-                  </tbody>
-                </table>
-              </div>
-              <button type="button" @click="addBand(direction.key)"
-                class="mt-2 px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50 text-xs">
-                + เพิ่มช่วง
-              </button>
-            </div>
+        </div>
+        <div class="border border-brand-200 bg-brand-50/40 rounded-lg p-3">
+          <div class="text-sm font-medium text-brand-800 mb-2">InsureHub → Agent (MGM)</div>
+          <div class="relative w-32">
+            <input v-model.number="form.hubToAgent.flatRate" type="number" min="0" max="100" step="0.01"
+              placeholder="เช่น 10"
+              class="w-full border border-brand-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
           </div>
         </div>
       </div>
-    </template>
-  </CreateModal>
+      <!-- Life scheme: two banded tables. Each band is (SA range, age
+           range) + yr1..yr5 + yr6+ commission. Add as many bands as
+           the product's tariff sheet lists. -->
+      <div v-else class="space-y-4">
+        <div v-for="direction in [
+          { key: 'carrierToHubBands' as const, label: 'บริษัท → InsureHub', tone: 'slate' },
+          { key: 'hubToAgentBands' as const, label: 'InsureHub → Agent (MGM)', tone: 'brand' },
+        ]" :key="direction.key" :class="['rounded-lg p-3 border',
+          direction.tone === 'brand' ? 'border-brand-200 bg-brand-50/40' : 'border-slate-200']">
+          <div :class="['text-sm font-medium mb-2',
+            direction.tone === 'brand' ? 'text-brand-800' : 'text-slate-800']">
+            {{ direction.label }}
+          </div>
+          <div class="overflow-x-auto">
+            <table class="min-w-full text-xs">
+              <thead class="text-[10px] uppercase text-slate-500">
+                <tr>
+                  <th class="px-1 py-1 text-left">SA ต่ำสุด (฿)</th>
+                  <th class="px-1 py-1 text-left">SA สูงสุด (฿)</th>
+                  <th class="px-1 py-1 text-left">อายุ ต่ำสุด</th>
+                  <th class="px-1 py-1 text-left">อายุ สูงสุด</th>
+                  <th class="px-1 py-1 text-right">ปี 1</th>
+                  <th class="px-1 py-1 text-right">ปี 2</th>
+                  <th class="px-1 py-1 text-right">ปี 3</th>
+                  <th class="px-1 py-1 text-right">ปี 4</th>
+                  <th class="px-1 py-1 text-right">ปี 5</th>
+                  <th class="px-1 py-1 text-right">ปี 6+</th>
+                  <th></th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr v-if="form[direction.key].length === 0">
+                  <td colspan="11" class="px-1 py-3 text-center text-slate-400 italic">
+                    ยังไม่มีช่วงราคา / อายุ — กด "+ เพิ่มช่วง"
+                  </td>
+                </tr>
+                <tr v-for="(band, i) in form[direction.key]" :key="i" class="border-t border-slate-100">
+                  <td class="px-1 py-1"><MoneyInput v-model="band.sumAssuredMin" placeholder="ไม่จำกัด" :input-class="'w-24 border border-slate-200 rounded px-1 py-0.5 text-xs'" /></td>
+                  <td class="px-1 py-1"><MoneyInput v-model="band.sumAssuredMax" placeholder="ไม่จำกัด" :input-class="'w-24 border border-slate-200 rounded px-1 py-0.5 text-xs'" /></td>
+                  <td class="px-1 py-1"><input v-model.number="band.entryAgeMin" type="number" min="0" max="120" step="1" placeholder="0" class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
+                  <td class="px-1 py-1"><input v-model.number="band.entryAgeMax" type="number" min="0" max="120" step="1" placeholder="120" class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs" /></td>
+                  <td v-for="y in ['yr1','yr2','yr3','yr4','yr5','yr6Up']" :key="y" class="px-1 py-1">
+                    <input :value="(band as any)[y]" type="number" min="0" max="100" step="0.01"
+                      @input="(band as any)[y] = ($event.target as HTMLInputElement).valueAsNumber || null"
+                      class="w-14 border border-slate-200 rounded px-1 py-0.5 text-xs text-right" />
+                  </td>
+                  <td class="px-1 py-1">
+                    <button type="button" @click="removeBand(direction.key, i)"
+                      class="text-rose-500 hover:text-rose-700 text-xs">
+                      <i class="pi pi-trash" />
+                    </button>
+                  </td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+          <button type="button" @click="addBand(direction.key)"
+            class="mt-2 px-2 py-1 rounded border border-slate-300 text-slate-600 hover:bg-slate-50 text-xs">
+            + เพิ่มช่วง
+          </button>
+        </div>
+      </div>
+
+      <!-- OV (Override) — a single flat % the carrier pays InsureHub on
+           top of MAIN. Carrier → hub only, applies to any scheme. -->
+      <div class="mt-4 border-t border-slate-200 pt-4">
+        <div class="text-sm font-semibold text-slate-700 mb-1">ค่าคอม OV (Override)</div>
+        <div class="text-xs text-slate-500 mb-3">
+          ค่าคอมส่วนเพิ่มที่บริษัทประกันจ่ายให้ InsureHub นอกเหนือจากค่าคอมมาตรฐาน — เว้นว่างได้
+        </div>
+        <div class="border border-slate-200 rounded-lg p-3 inline-block">
+          <div class="text-sm font-medium text-slate-800 mb-2">บริษัท → InsureHub (OV)</div>
+          <div class="relative w-32">
+            <input v-model.number="form.carrierToHubOv" type="number" min="0" max="100" step="0.01"
+              placeholder="เช่น 3"
+              class="w-full border border-slate-200 rounded-lg pl-3 pr-8 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+            <span class="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm">%</span>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Footer actions (duplicate of header for long forms) -->
+    <div class="flex items-center justify-end gap-2">
+      <button type="button" @click="cancel"
+        class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100">
+        ยกเลิก
+      </button>
+      <button type="button" @click="submit" :disabled="saving || !canSubmit"
+        class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:bg-slate-300 disabled:cursor-not-allowed flex items-center gap-1.5">
+        <i class="pi pi-check text-xs" v-if="!saving" />
+        <i class="pi pi-spin pi-spinner text-xs" v-else />
+        {{ saving ? 'กำลังบันทึก…' : 'บันทึกผลิตภัณฑ์' }}
+      </button>
+    </div>
+  </div>
 </template>

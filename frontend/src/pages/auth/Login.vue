@@ -45,9 +45,13 @@ async function submitCredentials() {
     }
   } catch (err) {
     if (err instanceof ApiError && err.status === 422) {
-      errorMsg.value = err.body?.errors?.email?.[0] ?? t('auth.login.invalidCreds')
-    } else if (err instanceof Error) {
-      errorMsg.value = err.message
+      // Server returns a code, not a human string, so the UI stays Thai
+      // (tasks 14 & 15). Unknown codes fall back to the generic message.
+      const code = err.body?.errors?.email?.[0] ?? ''
+      errorMsg.value =
+        code === 'email_not_found' ? t('auth.login.emailNotFound')
+        : code === 'invalid_password' ? t('auth.login.invalidPassword')
+        : t('auth.login.invalidCreds')
     } else {
       errorMsg.value = t('auth.login.invalidCreds')
     }

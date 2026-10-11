@@ -52,6 +52,18 @@ export function fetchAgent(id: string) {
   return api.get<{ data: Record<string, unknown> }>(`agents/${id}`)
 }
 
+/** Document-photo kinds an admin can upload for an agent (#22, #24). */
+export type AgentPhotoKind = 'license_life' | 'license_non_life' | 'id_card' | 'bank_book'
+
+/** Upload one document photo (license life/non-life, id-card, book-bank) for
+ *  an agent via POST /agents/{id}/photo/{kind}. FormData is handled by the
+ *  client (it leaves Content-Type to the browser). */
+export function uploadAgentPhoto(agentId: string, kind: AgentPhotoKind, file: File) {
+  const form = new FormData()
+  form.append('photo', file)
+  return api.post<{ data: Record<string, unknown> }>(`agents/${agentId}/photo/${kind}`, form)
+}
+
 // ── สายงาน (upline), ranks, hierarchy editing, promotion approval ──
 
 export interface RankRow {

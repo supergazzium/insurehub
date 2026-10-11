@@ -68,6 +68,11 @@ Thumbs.db
 # Vue type-check stamp
 /frontend/*.tsbuildinfo
 
+# DomPDF generated font cache (regenerated at runtime; source Sarabun-*.ttf stay tracked)
+/backend/storage/fonts/installed-fonts.json
+/backend/storage/fonts/*_[0-9a-f]*.ttf
+/backend/storage/fonts/*.ufm
+/backend/storage/fonts/*.ufm.json
 /docs/tasks/**/*.png
 /docs/tasks/**/*.gif
 /docs/tasks/**/*.jpg

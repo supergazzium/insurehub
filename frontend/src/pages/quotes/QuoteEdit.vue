@@ -12,6 +12,7 @@ import { fetchProductList, type ProductListRow } from '../../api/products'
 import { useAuthStore } from '../../stores/auth'
 import { ApiError } from '../../api/client'
 import DateInput from '../../components/DateInput.vue'
+import MoneyInput from '../../components/MoneyInput.vue'
 
 const { t } = useI18n()
 const route = useRoute()
@@ -236,18 +237,18 @@ async function submit(): Promise<void> {
       <div class="grid grid-cols-2 gap-3 text-sm">
         <div v-if="calcMode !== 'vatInclusive'">
           <label class="text-xs text-slate-500 mb-1 block">{{ t('quotes.premium.netPremium') }}</label>
-          <input v-model.number="form.netPremium" type="number" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-2 font-mono" />
+          <MoneyInput v-model="form.netPremium"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-2 font-mono'" />
         </div>
         <div v-if="calcMode === 'vatInclusive'">
           <label class="text-xs text-slate-500 mb-1 block">{{ t('quotes.premium.totalPaid') }}</label>
-          <input v-model.number="totalPaidInput" type="number" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-2 font-mono" />
+          <MoneyInput v-model="totalPaidInput"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-2 font-mono'" />
         </div>
         <div v-if="calcMode === 'fixedDuty'">
           <label class="text-xs text-slate-500 mb-1 block">{{ t('quotes.premium.fixedDuty') }}</label>
-          <input v-model.number="fixedDuty" type="number" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-2 font-mono" />
+          <MoneyInput v-model="fixedDuty"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-2 font-mono'" />
         </div>
       </div>
 

@@ -18,10 +18,7 @@ class CommissionPayoutBatch extends Model
     public const STATUS_APPROVED = 'APPROVED';
     public const STATUS_PAID = 'PAID';
     public const STATUS_CANCELLED = 'CANCELLED';
-
-    public const CALC_V1 = 1;
-
-    public const CALC_V2 = 2;
+    public const STATUS_REVERSED = 'REVERSED';
 
     protected $casts = [
         'from_date' => 'date',
@@ -29,8 +26,8 @@ class CommissionPayoutBatch extends Model
         'payment_date' => 'date',
         'approved_at' => 'datetime',
         'paid_at' => 'datetime',
+        'reversed_at' => 'datetime',
         'total_amount' => 'decimal:2',
-        'calc_version' => 'integer',
     ];
 
     public function tenant(): BelongsTo
@@ -48,14 +45,16 @@ class CommissionPayoutBatch extends Model
         return $this->hasMany(CommissionPayoutAdjustment::class, 'batch_id');
     }
 
-    public function payees(): HasMany
+    /** Per-agent roll-up + payment-tracking rows (one per agent in the batch). */
+    public function agentRows(): HasMany
     {
-        return $this->hasMany(CommissionPayoutPayee::class, 'batch_id');
+        return $this->hasMany(CommissionPayoutBatchAgent::class, 'batch_id');
     }
 
-    public function isV2(): bool
+    /** The batch this one was created to correct/re-pay (reversal → re-issue). */
+    public function reissuedFrom(): BelongsTo
     {
-        return (int) $this->calc_version >= self::CALC_V2;
+        return $this->belongsTo(self::class, 'reissued_from_batch_id');
     }
 
     public function isEditable(): bool

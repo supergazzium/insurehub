@@ -11,7 +11,10 @@ use App\Models\Agent;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
+use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
+use Symfony\Component\HttpFoundation\StreamedResponse;
 
 class AgentController extends ApiController
 {
@@ -140,5 +143,62 @@ class AgentController extends ApiController
         if ((int) $agent->tenant_id !== $this->tenantId($request)) {
             abort(404);
         }
+    }
+
+    // ── Document photos (admin) ──────────────────────────────────────────
+    // Admin-side counterpart to the agent-portal uploads in MeAgentController:
+    // scanned license (life / non-life), national-id card, and bank book
+    // page — used to verify identity and avoid payout mistakes (#22, #24).
+    // Stored on the private `local` disk; read back through the authenticated
+    // stream endpoint below, never a public URL.
+
+    /** kind → column map shared by upload + stream. */
+    private const PHOTO_COLUMNS = [
+        'license_life' => 'license_life_photo_path',
+        'license_non_life' => 'license_non_life_photo_path',
+        'id_card' => 'id_card_photo_path',
+        'bank_book' => 'bank_book_photo_path',
+    ];
+
+    public function uploadPhoto(Request $request, Agent $agent, string $kind): AgentResource
+    {
+        $this->authorizeTenant($request, $agent);
+        $column = self::PHOTO_COLUMNS[$kind] ?? abort(404);
+
+        $request->validate([
+            'photo' => ['required', 'image', 'mimes:jpeg,jpg,png,webp', 'max:5120'], // 5 MB
+        ]);
+
+        /** @var UploadedFile $file */
+        $file = $request->file('photo');
+        // Segregate by tenant + agent so a leaked path can't reveal cross-tenant files.
+        $dir = "agent-uploads/{$agent->tenant_id}/{$agent->id}/{$kind}";
+        $storedPath = $file->store($dir, 'local');
+
+        // Best-effort cleanup of the previous file — never crash the upload.
+        $old = $agent->{$column};
+        if ($old && Storage::disk('local')->exists($old)) {
+            try { Storage::disk('local')->delete($old); } catch (\Throwable) { /* ignore */ }
+        }
+
+        $agent->update([$column => $storedPath]);
+        return new AgentResource($agent->fresh());
+    }
+
+    public function photo(Request $request, Agent $agent, string $kind): StreamedResponse
+    {
+        $this->authorizeTenant($request, $agent);
+        $column = self::PHOTO_COLUMNS[$kind] ?? abort(404);
+
+        $path = $agent->{$column};
+        if (! $path || ! Storage::disk('local')->exists($path)) {
+            abort(404);
+        }
+        $mime = Storage::disk('local')->mimeType($path) ?: 'application/octet-stream';
+        return Storage::disk('local')->response($path, basename($path), [
+            'Content-Type' => $mime,
+            'Content-Disposition' => 'inline; filename="'.addslashes(basename($path)).'"',
+            'Cache-Control' => 'private, max-age=60',
+        ]);
     }
 }

@@ -115,6 +115,7 @@ if (typeof BroadcastChannel !== 'undefined') {
         phone: String(r.phone ?? ''),
         email: String(r.email ?? ''),
         province: String(r.province ?? ''),
+        gender: String(r.gender ?? ''),
         assignedAgentId: null,
         assignedAgentCode: null,
         assignedAgentName: '',

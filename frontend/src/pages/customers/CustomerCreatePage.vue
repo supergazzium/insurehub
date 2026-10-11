@@ -21,7 +21,7 @@ import { fetchCustomerList, type CustomerListRow } from '../../api/customers'
 import { fetchProvinces, fetchDistricts, fetchSubDistricts, fetchNamePrefixes, fetchNationalities, type NamePrefixRow, type NationalityRow } from '../../api/portal'
 import { genderFromTitle } from '../../utils/genderFromTitle'
 import { useI18n } from 'vue-i18n'
-import { isThaiName, isThaiJuristicName, isThaiId13, isThaiMobile, isThaiLandline, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
+import { isThaiName, isThaiJuristicName, isThaiId13, isThaiMobile, isLatinOrThaiName, isInternationalPhone, isPassportNumber } from '../../utils/thaiValidation'
 
 const router = useRouter()
 const { t } = useI18n()
@@ -354,14 +354,9 @@ function validateMobile(v: string): string | null {
   }
   return null
 }
-function validateBackupPhone(v: string): string | null {
-  const t = v.trim()
-  if (t === '') return null
-  if (form.customerType === 'foreign_individual') {
-    if (!isInternationalPhone(t)) return 'รูปแบบเบอร์โทรไม่ถูกต้อง (6-15 หลัก, ใส่ + ได้)'
-  } else {
-    if (!isThaiMobile(t) && !isThaiLandline(t)) return 'รูปแบบเบอร์โทรไม่ถูกต้อง (มือถือ 06/08/09 หรือเบอร์บ้าน 02-05)'
-  }
+// Backup phone ("เบอร์สำรอง") — optional and format-free (#31): it may hold a
+// mobile, landline, or any reachable number, so we accept anything.
+function validateLandline(_v: string): string | null {
   return null
 }
 function validateEmailFmt(v: string): string | null {
@@ -386,7 +381,7 @@ const errTaxId = computed(() => validateThaiNationalId(form.taxId))
 const errPassport = computed(() => validatePassport(form.passport))
 const errNationality = computed(() => validateNationality())
 const errPhone = computed(() => validateMobile(form.phone))
-const errTelPhone = computed(() => validateBackupPhone(form.telPhone))
+const errTelPhone = computed(() => validateLandline(form.telPhone))
 const errEmail = computed(() => validateEmailFmt(form.email))
 const errEmail2 = computed(() => validateEmailFmt(form.email2))
 const errContactEmail = computed(() => validateEmailFmt(form.contactEmail))
@@ -944,7 +939,8 @@ function cancel(): void {
         </FormField>
         <FormField :label="t('customers.fields.telPhone')" error-key="telPhone" :errors="fieldErrors">
           <div class="relative">
-            <input v-model.trim="form.telPhone" inputmode="tel" placeholder="0812345678 หรือ 021234567"
+            <input v-model.trim="form.telPhone" inputmode="tel" placeholder="เบอร์โทรสำรอง (ใส่ได้ทุกแบบ)"
+
               :class="inputClass(showTelPhone, telPhoneValid)"
               @blur="markTouched('telPhone')" />
             <i v-if="telPhoneValid" class="pi pi-check text-emerald-500 absolute right-3 top-1/2 -translate-y-1/2 text-xs" />

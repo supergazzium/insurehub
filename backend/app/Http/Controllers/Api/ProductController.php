@@ -254,6 +254,27 @@ class ProductController extends ApiController
                 $values,
             );
         }
+
+        // OV (Override) — a single flat rate the carrier pays InsureHub on top
+        // of MAIN. Carrier → hub only, no per-year bands, so it is handled
+        // outside the directional loop and always stores scheme=flat.
+        if (array_key_exists('carrierToHubOv', $rates)) {
+            $ovPanel = $rates['carrierToHubOv'] ?? [];
+            ProductCommissionRate::updateOrCreate(
+                [
+                    'tenant_id' => $tenantId,
+                    'product_id' => $product->id,
+                    'direction' => ProductCommissionRate::DIRECTION_CARRIER_TO_HUB_OV,
+                    'effective_from' => null,
+                ],
+                [
+                    'flat_rate' => $ovPanel['flatRate'] ?? null,
+                    'yr_1' => null, 'yr_2' => null, 'yr_3' => null, 'yr_4' => null,
+                    'yr_5' => null, 'yr_6_10' => null, 'yr_11_up' => null,
+                    'scheme' => ProductCommissionRate::SCHEME_FLAT,
+                ],
+            );
+        }
     }
 
     /**

@@ -103,6 +103,9 @@ class ProductRequest extends FormRequest
             'commissionRates.hubToAgent.yr5' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
             'commissionRates.hubToAgent.yr6_10' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
             'commissionRates.hubToAgent.yr11Up' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
+            // OV (Override) — single flat rate, carrier → hub only.
+            'commissionRates.carrierToHubOv' => ['sometimes', 'array'],
+            'commissionRates.carrierToHubOv.flatRate' => ['sometimes', 'nullable', 'numeric', 'min:0', 'max:1'],
 
             // Banded rates. One entry per band; used for Life products where
             // the rate depends on sum-assured range + entry-age range +

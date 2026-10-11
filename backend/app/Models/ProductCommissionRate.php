@@ -11,6 +11,9 @@ class ProductCommissionRate extends Model
 {
     public const DIRECTION_CARRIER_TO_HUB = 'carrier_to_hub';
     public const DIRECTION_HUB_TO_AGENT = 'hub_to_agent';
+    // Override (OV) commission the carrier pays InsureHub, on top of MAIN.
+    // Single flat rate, carrier → hub direction only.
+    public const DIRECTION_CARRIER_TO_HUB_OV = 'carrier_to_hub_ov';
 
     public const SCHEME_FLAT = 'flat';
     public const SCHEME_LIFE_YEARS = 'life_years';

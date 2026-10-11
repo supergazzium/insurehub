@@ -150,12 +150,15 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-payout-batches/by-agent', [CommissionPayoutController::class, 'byAgent']);
     Route::get('commission-payout-batches/by-agent/{agent}', [CommissionPayoutController::class, 'agentDetail']);
     Route::post('commission-payout-batches/by-agent/{agent}/pay', [CommissionPayoutController::class, 'payAgent']);
-    Route::get('commission-payout-batches/wht-report', [CommissionPayoutController::class, 'whtReport']);
-    Route::post('policies/{policy}/payout-override', [CommissionPayoutController::class, 'override']);
-    Route::delete('policies/{policy}/payout-override', [CommissionPayoutController::class, 'revokeOverride']);
+    // History / management reads — MUST precede the {batch} routes so these
+    // static paths are not captured as a batch id.
+    Route::get('commission-payout-batches/history', [CommissionPayoutController::class, 'history']);
+    Route::get('commission-payout-batches/summary', [CommissionPayoutController::class, 'summary']);
+    Route::get('commission-payout-batches/find-by-reference', [CommissionPayoutController::class, 'findByReference']);
     Route::get('commission-payout-batches', [CommissionPayoutController::class, 'index']);
     Route::post('commission-payout-batches', [CommissionPayoutController::class, 'store']);
     Route::get('commission-payout-batches/{batch}', [CommissionPayoutController::class, 'show']);
+    Route::get('commission-payout-batches/{batch}/audit-log', [CommissionPayoutController::class, 'auditLog']);
     Route::post('commission-payout-batches/{batch}/adjustments', [CommissionPayoutController::class, 'addAdjustment']);
     Route::post('commission-payout-batches/{batch}/mark-paid', [CommissionPayoutController::class, 'markPaid']);
     Route::post('commission-payout-batches/{batch}/approve', [CommissionPayoutController::class, 'approve']);
@@ -166,6 +169,19 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-payout-batches/{batch}/bank.csv', [CommissionPayoutController::class, 'bankCsv']);
     Route::get('commission-payout-batches/{batch}/payees/{payee}/certificate', [CommissionPayoutController::class, 'certificate']);
     Route::post('commission-payout-batches/{batch}/cancel', [CommissionPayoutController::class, 'cancel']);
+    // Per-agent bulk-run pay (each agent = separate transfer with its own ref).
+    Route::post('commission-payout-batches/{batch}/agents/{agent}/mark-paid', [CommissionPayoutController::class, 'markAgentPaid']);
+    // Wrong-payment handling — reverse (void) whole batch or one agent, then re-issue.
+    Route::post('commission-payout-batches/{batch}/reverse', [CommissionPayoutController::class, 'reverse']);
+    Route::post('commission-payout-batches/{batch}/agents/{agent}/reverse', [CommissionPayoutController::class, 'reverseAgent']);
+    Route::post('commission-payout-batches/{batch}/reissue', [CommissionPayoutController::class, 'reissue']);
+    // Per-item exclude / re-include before pay.
+    Route::post('commission-payout-batches/{batch}/items/{item}/exclude', fn (\Illuminate\Http\Request $r, \App\Models\CommissionPayoutBatch $batch, int $item) => app(CommissionPayoutController::class)->setItemExcluded($r, $batch, $item, true));
+    Route::post('commission-payout-batches/{batch}/items/{item}/include', fn (\Illuminate\Http\Request $r, \App\Models\CommissionPayoutBatch $batch, int $item) => app(CommissionPayoutController::class)->setItemExcluded($r, $batch, $item, false));
+
+    // บัญชี — Withholding-tax (ภาษีหัก ณ ที่จ่าย) report for tax filing.
+    Route::get('wht-report', [\App\Http\Controllers\Api\WhtReportController::class, 'index']);
+    Route::get('wht-report/export.csv', [\App\Http\Controllers\Api\WhtReportController::class, 'exportCsv']);
 
     // รับค่าคอมจากบริษัทประกัน (insurer commission receipt — Phase 1 manual).
     Route::get('commission-receivables', [CommissionReceiptController::class, 'index']);
@@ -236,7 +252,11 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::delete('agents/{agent}/documents/{kind}', [AgentDocumentController::class, 'destroy']);
     Route::get('agents/{agent}/notes', [AgentNoteController::class, 'index']);
     Route::post('agents/{agent}/notes', [AgentNoteController::class, 'store']);
-    Route::get('agents/{agent}/level-progress', [LevelProgressController::class, 'show']);    Route::get('ranks', [RankController::class, 'index']);
+    Route::get('agents/{agent}/level-progress', [LevelProgressController::class, 'show']);
+    // Admin document photos: license (life/non-life), id-card, book-bank (#22, #24).
+    Route::post('agents/{agent}/photo/{kind}', [AgentController::class, 'uploadPhoto']);
+    Route::get('agents/{agent}/photo/{kind}', [AgentController::class, 'photo']);
+    Route::get('ranks', [RankController::class, 'index']);
     Route::patch('ranks/{rank}', [RankController::class, 'update']);
     Route::post('agents/{agent}/rank-requests', [RankPromotionController::class, 'requestChange']);
     Route::get('rank-promotions', [RankPromotionController::class, 'index']);

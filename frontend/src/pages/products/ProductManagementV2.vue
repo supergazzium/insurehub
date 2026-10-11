@@ -2,41 +2,33 @@
 // Server-paginated product list.
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useProductStore } from '../../stores/products'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
-import { fetchProductTaxonomyGaps, type ProductTaxonomyGap } from '../../api/products'
-import ProductDetailDrawer from './ProductDetailDrawer.vue'
-import ProductCreateModal from './ProductCreateModal.vue'
+import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const productStore = useProductStore()
 
-const detailId = ref<string | null>(null)
-// Auto-open the create modal when the URL has ?new=1 — used by the policy
-// create wizard's "New product" button, which opens this page in a new tab
-// pre-set to open the product form.
-const openedForNew = route.query.new === '1'
-const showCreate = ref(openedForNew)
+/** Open the full-page create form. The product create UI moved from a modal
+ *  to a dedicated page (products/new). The policy wizard's "New product"
+ *  button opens this list with ?new=1; preserve that by forwarding the flag
+ *  so the create page can still broadcast + close its tab on success. */
+function openCreate(): void {
+  router.push({ name: 'product-new', query: route.query.new === '1' ? { new: '1' } : {} })
+}
 
-/** Broadcast a newly-created product to the parent tab (the policy wizard) and
- *  close ourselves. Only fires when we were opened via ?new=1 — regular
- *  list-page create should not close the tab. */
-function handleCreated(row: Record<string, unknown>): void {
-  if (openedForNew) {
-    try {
-      const bc = new BroadcastChannel('insurehub')
-      bc.postMessage({ type: 'product:created', row })
-      bc.close()
-    } catch {
-      // BroadcastChannel unavailable — fall through and just close.
-    }
-    window.close()
-    return
-  }
-  page.value = 1
-  load()
+/** Open the full-page view/edit form for one product. Replaced the old
+ *  slide-in detail drawer. */
+function openEdit(id: string): void {
+  router.push({ name: 'product-edit', params: { id } })
+}
+// Preserve the policy-wizard flow: ?new=1 on the list jumps straight to the
+// full-page create form (carrying the flag through).
+if (route.query.new === '1') {
+  void router.replace({ name: 'product-new', query: { new: '1' } })
 }
 
 const filters = reactive({
@@ -50,20 +42,8 @@ const filters = reactive({
   type: '',
   mainRider: '',
   activeOnly: false,
-  unmatched: false,
   perPage: 25,
 })
-
-const gaps = ref<ProductTaxonomyGap[]>([])
-const gapMeta = ref<{ unmatched: number; total: number } | null>(null)
-const showGaps = ref(false)
-async function loadGaps(): Promise<void> {
-  try {
-    const res = await fetchProductTaxonomyGaps()
-    gaps.value = res.data
-    gapMeta.value = res.meta
-  } catch { gapMeta.value = null }
-}
 
 const page = ref(1)
 
@@ -86,7 +66,6 @@ async function load(): Promise<void> {
     type: filters.type || undefined,
     mainRider: filters.mainRider || undefined,
     activeOnly: filters.activeOnly || undefined,
-    taxonomy: filters.unmatched ? 'unmatched' : undefined,
     page: page.value,
     perPage: filters.perPage,
   })
@@ -94,12 +73,12 @@ async function load(): Promise<void> {
 
 onMounted(() => {
   void loadCarriers()
-  void loadGaps()
   void load()
-  // Cross-page deep-link — /products?open=<id> opens that product's drawer.
+  // Cross-page deep-link — /products?open=<id> jumps to that product's
+  // full-page view/edit form.
   const openId = route.query.open
   if (typeof openId === 'string' && openId.trim() !== '') {
-    detailId.value = openId.trim()
+    void router.replace({ name: 'product-edit', params: { id: openId.trim() } })
   }
 })
 
@@ -109,6 +88,16 @@ const filteredCarriers = computed<CarrierListRow[]>(() =>
     ? carriers.value
     : carriers.value.filter((c) => c.insureType === filters.insureType),
 )
+
+// Options for the searchable carrier filter (#18 — type to search by code /
+// name). Leading "ทั้งหมด" clears the filter.
+const carrierOptions = computed<SearchOption[]>(() => [
+  { value: '', label: 'ทั้งหมด' },
+  ...filteredCarriers.value.map((c) => ({
+    value: String(c.id),
+    label: `${c.code} — ${c.nicknameTh || c.name}`,
+  })),
+])
 
 // Product-group options mirror the create modal so the two flows use the
 // same vocabulary. When insureType is blank we show every group.
@@ -168,7 +157,7 @@ watch(
   },
 )
 watch(
-  () => [filters.insureType, filters.carrierId, filters.type, filters.mainRider, filters.activeOnly, filters.unmatched, filters.perPage],
+  () => [filters.insureType, filters.carrierId, filters.type, filters.mainRider, filters.activeOnly, filters.perPage],
   () => { page.value = 1; void load() },
 )
 
@@ -225,44 +214,11 @@ function fmtBaht(n: number | null): string {
         <div v-if="productStore.listMeta" class="text-sm text-slate-500">{{ rangeText }}</div>
         <button type="button"
           class="px-3 py-1.5 rounded-lg bg-brand-600 text-white hover:bg-brand-700 text-sm flex items-center gap-1.5"
-          @click="showCreate = true">
+          @click="openCreate">
           <i class="pi pi-plus text-xs" /> New Product
         </button>
       </div>
     </header>
-
-    <section v-if="gapMeta && gapMeta.unmatched > 0" class="card p-4 border-amber-200 bg-amber-50/40" data-testid="taxonomy-gaps">
-      <div class="flex items-center justify-between gap-3 flex-wrap">
-        <div class="text-sm text-amber-800">
-          <i class="pi pi-exclamation-triangle mr-1" />
-          สินค้า <b>{{ gapMeta.unmatched.toLocaleString() }}</b> จาก {{ gapMeta.total.toLocaleString() }} รายการ ยังไม่ผูกหมวด/หมวดย่อยตามตารางหมวดผลิตภัณฑ์
-          — จะไม่ขึ้นเมื่อกรองตามหมวดย่อยในงานต่ออายุ
-        </div>
-        <div class="flex items-center gap-2">
-          <button type="button" data-testid="taxonomy-unmatched-chip"
-            :class="['px-3 py-1 rounded-full border text-xs', filters.unmatched ? 'border-amber-500 bg-amber-100 text-amber-900 font-medium' : 'border-amber-300 text-amber-800 hover:bg-amber-100']"
-            @click="filters.unmatched = !filters.unmatched">
-            {{ filters.unmatched ? 'กำลังแสดงเฉพาะที่ยังไม่ผูก' : 'แสดงเฉพาะที่ยังไม่ผูกหมวดย่อย' }}
-          </button>
-          <button type="button" class="px-3 py-1 rounded-full border border-amber-300 text-xs text-amber-800 hover:bg-amber-100"
-            @click="showGaps = !showGaps">
-            {{ showGaps ? 'ซ่อนสรุป' : 'สรุปตามหมวด' }}
-          </button>
-        </div>
-      </div>
-      <table v-if="showGaps" class="mt-3 w-full text-xs">
-        <thead class="text-slate-500">
-          <tr><th class="text-left py-1">หมวด</th><th class="text-left py-1">หมวดย่อยที่บันทึกไว้</th><th class="text-right py-1">จำนวน</th></tr>
-        </thead>
-        <tbody class="divide-y divide-amber-100">
-          <tr v-for="(g, i) in gaps" :key="i">
-            <td class="py-1 text-slate-700">{{ g.category || '(ไม่มีหมวด)' }}</td>
-            <td class="py-1 text-slate-500">{{ g.subCategory || '(ว่าง)' }}</td>
-            <td class="py-1 text-right text-slate-900">{{ g.count.toLocaleString() }}</td>
-          </tr>
-        </tbody>
-      </table>
-    </section>
 
     <section class="card p-4 space-y-3">
       <!-- Same order as the create modal: insureType → carrier → main/rider → product group. -->
@@ -290,12 +246,7 @@ function fmtBaht(n: number | null): string {
       <div class="grid grid-cols-1 md:grid-cols-6 gap-3 items-end">
         <div>
           <label class="text-xs font-medium text-slate-500 mb-1 block">บริษัทประกัน</label>
-          <select v-model="filters.carrierId" class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white">
-            <option value="">ทั้งหมด</option>
-            <option v-for="c in filteredCarriers" :key="c.id" :value="c.id">
-              {{ c.code }} — {{ c.nicknameTh || c.name }}
-            </option>
-          </select>
+          <SearchSelect v-model="filters.carrierId" :options="carrierOptions" placeholder="พิมพ์ค้น (เช่น วิริยะ / VIB)" />
         </div>
         <div>
           <label class="text-xs font-medium text-slate-500 mb-1 block">Main / Rider</label>
@@ -339,7 +290,7 @@ function fmtBaht(n: number | null): string {
     <section class="card overflow-hidden">
       <div class="overflow-x-auto">
         <table class="min-w-full text-sm">
-          <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider">
+          <thead class="bg-slate-50 text-slate-500 text-xs uppercase tracking-wider sticky top-0 z-10 shadow-sm">
             <tr>
               <th class="px-4 py-2 text-left">Code</th>
               <th class="px-4 py-2 text-left">ชื่อสินค้า</th>
@@ -353,7 +304,7 @@ function fmtBaht(n: number | null): string {
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="p in productStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer" @click="detailId = p.id">
+            <tr v-for="p in productStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer" @click="openEdit(p.id)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ p.code }}</td>
               <td class="px-4 py-2">
                 <div class="text-slate-900 truncate max-w-[320px]" :title="p.name">{{ p.name }}</div>
@@ -417,10 +368,5 @@ function fmtBaht(n: number | null): string {
         </div>
       </div>
     </section>
-
-    <ProductDetailDrawer :product-id="detailId" @close="detailId = null" />
-    <ProductCreateModal :open="showCreate"
-      @close="() => { showCreate = false }"
-      @created="handleCreated" />
   </div>
 </template>

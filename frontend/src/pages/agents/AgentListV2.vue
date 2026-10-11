@@ -251,6 +251,8 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ a.agentCode }}</td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ aName(a) }}</div>
+                <!-- Email only in the list — hide phone to reduce bulk-copying of
+                     contact numbers (#25). Corporate agents get a kind badge. -->
                 <div class="text-xs text-slate-500">
                   <span v-if="a.kind === 'corporate'" class="mr-1 rounded bg-slate-100 px-1 text-[10px] text-slate-600">นิติบุคคล</span>{{ a.email || '—' }}
                 </div>

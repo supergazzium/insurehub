@@ -55,7 +55,7 @@ import { MODULES } from '../types/modules'
 const IMPLEMENTED_MODULES = new Set([
   'tenant-settings', 'carriers', 'products', 'contracts',
   'agents', 'customers', 'policies', 'renewal-pipeline', 'collections', 'follow-ups',
-  'rebate-reconciliation', 'commission-payout', 'commission-receipt',
+  'rebate-reconciliation', 'commission-payout', 'commission-payout-history', 'commission-receipt', 'wht-report',
   'import-failures',
   'agent-support', 'agent-operation-support',
   // Phase 2 (agent portal)
@@ -139,6 +139,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'account', name: 'user-account', component: UserAccount },
       { path: 'carriers', name: 'carriers', component: CarrierManagement, meta: { moduleKey: 'carriers' } },
       { path: 'products', name: 'products', component: ProductManagement, meta: { moduleKey: 'products' } },
+      { path: 'products/new', name: 'product-new', component: () => import('../pages/products/ProductCreatePage.vue'), meta: { moduleKey: 'products' } },
+      { path: 'products/:id/edit', name: 'product-edit', component: () => import('../pages/products/ProductDetailPage.vue'), meta: { moduleKey: 'products' } },
       { path: 'contracts', name: 'contracts', component: ContractManagement, meta: { moduleKey: 'contracts' } },
       { path: 'agents', name: 'agents', component: AgentList, meta: { moduleKey: 'agents' } },
       { path: 'agents/hierarchy', name: 'agents-hierarchy', component: AgentHierarchy, meta: { moduleKey: 'agents' } },
@@ -165,10 +167,12 @@ const routes: RouteRecordRaw[] = [
       { path: 'policies/:id/renewal', name: 'policy-renewal', component: () => import('../pages/policies/RenewalDetail.vue'), meta: { moduleKey: 'renewal-pipeline' } },
       { path: 'commissions/rebates', name: 'commission-rebates', component: RebateReconciliation, meta: { moduleKey: 'rebate-reconciliation' } },
       { path: 'commissions/payouts', name: 'commission-payouts', component: () => import('../pages/commissions/CommissionPayouts.vue'), meta: { moduleKey: 'commission-payout' } },
-      { path: 'commissions/payouts/wht-report', name: 'commission-wht-report', component: () => import('../pages/commissions/WhtReport.vue'), meta: { moduleKey: 'commission-payout' } },
+      // History MUST precede :id so "history" is not captured as a batch id.
+      { path: 'commissions/payouts/history', name: 'commission-payout-history', component: () => import('../pages/commissions/PayoutHistory.vue'), meta: { moduleKey: 'commission-payout-history' } },
       { path: 'commissions/payouts/:id', name: 'commission-payout-detail', component: () => import('../pages/commissions/CommissionPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/payouts/agent/:agentId', name: 'agent-payout-detail', component: () => import('../pages/commissions/AgentPayoutDetail.vue'), meta: { moduleKey: 'commission-payout' } },
       { path: 'commissions/receipts', name: 'commission-receipts', component: () => import('../pages/commissions/CommissionReceipts.vue'), meta: { moduleKey: 'commission-receipt' } },
+      { path: 'accounting/wht', name: 'wht-report', component: () => import('../pages/accounting/WhtReport.vue'), meta: { moduleKey: 'wht-report' } },
       { path: 'settings/import-failures', name: 'settings-import-failures', component: ImportFailures, meta: { moduleKey: 'import-failures' } },
       { path: 'support', name: 'agent-support', component: AgentSupport, meta: { moduleKey: 'agent-support' } },
       { path: 'ops', name: 'agent-operation-support', component: AgentOperationSupport, meta: { moduleKey: 'agent-operation-support' } },

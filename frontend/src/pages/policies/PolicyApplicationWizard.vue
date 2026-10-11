@@ -31,10 +31,12 @@ import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import { useAuthStore } from '../../stores/auth'
 import FormField from '../../components/FormField.vue'
+import MoneyInput from '../../components/MoneyInput.vue'
 import DateInput from '../../components/DateInput.vue'
 import DurationChip from '../../components/DurationChip.vue'
 import RiskFieldRenderer from '../../components/RiskFieldRenderer.vue'
 import EntityPicker from '../../components/EntityPicker.vue'
+import ProductSearchSelect from '../../components/ProductSearchSelect.vue'
 import PolicyPeriodBadge from '../../components/PolicyPeriodBadge.vue'
 import RenewalSourceSearchModal from '../../components/RenewalSourceSearchModal.vue'
 import CustomerCreateModal from '../customers/CustomerCreateModal.vue'
@@ -503,6 +505,25 @@ const VECTOR_YEAR_LABELS: Record<string, string> = {
  *  the vector grid vs the single rate+amount cards. */
 const isVectorScheme = computed(() => productDetail.value?.commissionRates?.scheme === 'life_years')
 
+// #45 — "ดึงแค่ปีปัจจุบันขึ้นมาแสดง ไม่ต้องให้กรอก 6 ปี": a life policy only
+// uses its CURRENT policy-year commission, so by default the vector grid
+// shows just that one row. The operator can expand to all six.
+const showAllVectorYears = ref(false)
+/** Map the policy-year ordinal (1,2,3,…) to its vector key; year ≥6 → yr_6_up. */
+const currentVectorYear = computed<typeof VECTOR_YEARS[number]>(() => {
+  const n = (Number(form.policyYear) || 1)
+  if (n <= 1) return 'yr_1'
+  if (n === 2) return 'yr_2'
+  if (n === 3) return 'yr_3'
+  if (n === 4) return 'yr_4'
+  if (n === 5) return 'yr_5'
+  return 'yr_6_up'
+})
+/** The rows the vector grid renders: just the current year unless expanded. */
+const visibleVectorYears = computed<readonly string[]>(() =>
+  showAllVectorYears.value ? VECTOR_YEARS : [currentVectorYear.value],
+)
+
 /** C-23: live warning when the insured age / sum-assured falls outside every
  *  RATED hub→agent commission band — the policy would accrue no agent
  *  commission. Computed from the same product data the grid uses; shown as a
@@ -821,11 +842,31 @@ watch(() => form.premiumMode, (mode) => {
   form.installmentTerm = n > 1 ? String(n) : ''
 }, { immediate: true })
 
+// #43 — งวดการผ่อน (รายปี) ทำให้สับสน: the installment detail fields (count /
+// term / mode) only make sense when the policy is actually paid in
+// instalments. For "รายปี / จ่ายครั้งเดียว" (count = 1) they're noise, so we
+// hide them unless a sub-annual frequency is chosen OR the operator has set
+// more than one instalment.
+const hasInstallmentPlan = computed<boolean>(() =>
+  (form.premiumMode !== 'annual' && form.premiumMode !== 'single') ||
+  (Number(form.installmentCount) || 1) > 1,
+)
+
 // ── Premium recalc watchers (KEEP verbatim per B3 §9) ────────────────────
 // The Access-parity math: duty = 0.4% net, vat = 7% (net + duty), total =
 // net + duty + vat. Rounded to 2dp. Operator overrides win via touched flags.
 watch(() => form.netPremium, (net) => {
   if (!net || net <= 0) return
+  // #52 — when the OPERATOR edits เบี้ยสุทธิ (i.e. not during draft
+  // hydration), net becomes the source of truth again: clear the derived
+  // fields' `touched` flags so อากร / VAT / เบี้ยรวม recompute. Without this,
+  // a hydrated draft (which marks everything touched to protect saved values)
+  // would never recalc on edit — the "auto-cal ใช้ไม่ได้ ในหน้า Edit" bug.
+  if (!hydrating.value) {
+    touched.dutyStamp = false
+    touched.vat = false
+    touched.totalPremiumPaid = false
+  }
   if (!touched.dutyStamp) form.dutyStamp = Math.round(net * 0.004 * 100) / 100
   if (!touched.vat) form.vat = Math.round((net + (form.dutyStamp ?? 0)) * 0.07 * 100) / 100
   if (!touched.totalPremiumPaid) form.totalPremiumPaid = Math.round((net + form.dutyStamp + form.vat) * 100) / 100
@@ -835,16 +876,30 @@ watch(() => form.netPremium, (net) => {
 
 // ── ยอดหัก ณ ที่จ่าย (WHT) = (เบี้ยสุทธิ + อากรแสตมป์) × 1%. Auto unless the
 //    operator edits it. Recomputes when net or duty changes.
+// #37 — checkbox toggle: when OFF, WHT is forced to 0 and the field is locked;
+//       when ON, it auto-calcs (unless the operator typed a custom value).
 const WHT_RATE = 0.01
+const whtEnabled = ref(true)
 function recomputeWht(): void {
+  if (!whtEnabled.value) { form.whtAmt = 0; return }
   if (touched.whtAmt) return
   form.whtAmt = Math.round(((Number(form.netPremium) || 0) + (Number(form.dutyStamp) || 0)) * WHT_RATE * 100) / 100
 }
 watch(() => [form.netPremium, form.dutyStamp], recomputeWht)
+// Toggling the checkbox: OFF → zero + lock; ON → clear the manual flag and
+// recompute from the current premium so the auto value comes back.
+watch(whtEnabled, (on) => {
+  if (!on) { form.whtAmt = 0 }
+  else { touched.whtAmt = false; recomputeWht() }
+})
 
 // ── ยอดสุทธิที่ต้องชำระ = รวมเบี้ยที่ต้องชำระ − ส่วนลด − ยอดหัก ณ ที่จ่าย.
 //    Auto unless edited. Recomputes when total / discount / wht changes.
 function recomputeNetCustomerPaid(): void {
+  // #52 — any operator-driven change to รวมเบี้ย / ส่วนลด / หัก ณ ที่จ่าย makes
+  // ยอดสุทธิ a derived value again, so drop its hydration `touched` flag and
+  // recompute. Skip during hydration so the saved value loads intact.
+  if (!hydrating.value) touched.netCustomerPaid = false
   if (touched.netCustomerPaid) return
   form.netCustomerPaid = Math.round(
     ((Number(form.totalPremiumPaid) || 0) - (Number(form.discountAmount) || 0) - (Number(form.whtAmt) || 0)) * 100,
@@ -1105,6 +1160,23 @@ function riderField(idx: number, key: 'name' | 'premium' | 'notes'): string | nu
   const v = riderRows.value[idx]?.[key]
   if (key === 'premium') return v === null || v === undefined || v === '' ? 0 : Number(v)
   return typeof v === 'string' ? v : ''
+}
+/** #42 — read a rider row's picked product code (powers the searchable
+ *  dropdown's v-model). Stored alongside name so the selection sticks. */
+function riderCode(idx: number): string {
+  const v = riderRows.value[idx]?.productCode
+  return typeof v === 'string' ? v : ''
+}
+/** #42 — a Life rider is picked from the product catalog (carrier-matched,
+ *  insure_type=life, mainRider=Rider). Record its code + name onto the row;
+ *  premium stays operator-entered (rider premium depends on SA/age). */
+function pickRider(idx: number, row: ProductListRow | null): void {
+  const rows = riderRows.value.slice()
+  if (!rows[idx]) return
+  rows[idx] = row
+    ? { ...rows[idx], productCode: row.code, name: row.name }
+    : { ...rows[idx], productCode: '', name: '' }
+  form.risk = { ...form.risk, 'riders.rows': rows }
 }
 
 /** @param gross the VAT/duty-inclusive amount the formula back-solved from;
@@ -1840,6 +1912,7 @@ async function hydrateFromDraft(id: string, renewMode = false, preset?: Record<s
           phone: String(c.phone ?? ''),
           email: String(c.email ?? ''),
           province: String(c.province ?? ''),
+          gender: String(c.gender ?? ''),
           assignedAgentId: null,
           assignedAgentCode: null,
           assignedAgentName: '',
@@ -2183,16 +2256,16 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm font-mono focus:outline-none focus:border-brand-400" />
         </FormField>
 
-        <!-- สถานะกรมธรรม์ — editable dropdown once the policy exists (draft or
-             beyond). Options queried from the policy_statuses lookup. -->
-        <FormField v-if="draftId" :label="t('policyCreate.statusLabel')" :hint="t('policyCreate.statusHint')">
-          <select v-model="form.status"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
-            <option v-for="s in statusOptions" :key="s.code" :value="s.code">{{ s.nameTh }}</option>
-          </select>
-        </FormField>
-
         <FormField :label="t('policyCreate.customer')" required>
+          <!-- Quick link to create a customer when search comes up empty.
+               Opens the full-page form in a new tab; the created customer is
+               broadcast back here (customer:created) and auto-selected. -->
+          <template #label-extra>
+            <a :href="router.resolve({ name: 'customer-new' }).href" target="_blank" rel="noopener"
+              class="ml-2 inline-flex items-center gap-1 text-xs text-brand-600 hover:text-brand-700 hover:underline">
+              <i class="pi pi-plus text-[10px]" /> สร้างลูกค้าใหม่
+            </a>
+          </template>
           <EntityPicker
             v-model="form.customerId"
             :fetch="searchCustomers"
@@ -2233,6 +2306,17 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             :initial-label="agentPicked ? (`${agentPicked.firstName} ${agentPicked.lastName}`.trim() || agentPicked.agentCode) : ''"
             @picked="(r) => agentPicked = r as AgentListRow | null"
           />
+        </FormField>
+
+        <!-- #39 — สถานะกรมธรรม์ moved to the bottom of the section so the
+             data-entry flow runs identity → customer → agent → status without
+             the status dropdown interrupting mid-grid. Editable once the
+             policy exists (draft or beyond); options from policy_statuses. -->
+        <FormField v-if="draftId" :label="t('policyCreate.statusLabel')" :hint="t('policyCreate.statusHint')">
+          <select v-model="form.status"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
+            <option v-for="s in statusOptions" :key="s.code" :value="s.code">{{ s.nameTh }}</option>
+          </select>
         </FormField>
       </div>
     </section>
@@ -2295,8 +2379,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           />
         </FormField>
         <FormField :label="t('policyCreate.coverage')" :class="needsConfirm('coverage') ? confirmRing : ''">
-          <input v-model.number="form.coverage" type="number" min="0" step="1"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.coverage"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
       </div>
 
@@ -2305,8 +2389,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
            ส่วนลดย้ายไปอยู่ Section เบี้ย + การชำระ. -->
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
         <FormField :label="t('policyCreate.totalPremium')" :class="needsConfirm('grossPremiumInput') ? confirmRing : ''">
-          <input v-model.number="form.grossPremiumInput" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.grossPremiumInput"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
           <p class="text-[10px] text-slate-500 mt-1">
             <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.totalPremiumHint') }}
           </p>
@@ -2336,9 +2420,10 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           :product-search-context="productSearchContext"
         />
 
-        <!-- สัญญาเพิ่มเติม (Riders) — always available, independent of the
-             product's risk schema (many products carry no rider field). -->
-        <div class="mt-4">
+        <!-- #38 — สัญญาเพิ่มเติม (Riders): เพิ่มได้เฉพาะประกันชีวิตเท่านั้น.
+             Riders are a life-insurance concept; non-life / tax products
+             don't carry them, so the whole block is gated on insureType. -->
+        <div v-if="form.insureType === 'Life'" class="mt-4">
           <div class="flex items-center justify-between mb-2">
             <h4 class="text-xs font-medium text-slate-600">
               {{ t('policyCreate.riders.title') }}
@@ -2363,8 +2448,20 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
                 <tr v-for="(_r, idx) in riderRows" :key="idx">
                   <td class="px-2 py-1 text-slate-400 text-xs">{{ idx + 1 }}</td>
                   <td class="px-2 py-1">
-                    <input :value="riderField(idx, 'name')" @input="setRiderField(idx, 'name', ($event.target as HTMLInputElement).value)"
-                      class="w-full border border-slate-200 rounded px-2 py-1" placeholder="ชื่อสัญญาเพิ่มเติม" />
+                    <!-- #42 — searchable dropdown of this carrier's Life riders.
+                         Falls back to the picked name so existing free-text
+                         rows still render; emits the full product row. -->
+                    <ProductSearchSelect
+                      :model-value="riderCode(idx) || (riderField(idx, 'name') as string)"
+                      :carrier-id="form.carrierId || null"
+                      insure-type="life"
+                      main-rider="Rider"
+                      placeholder="ค้นหาสัญญาเพิ่มเติม…"
+                      :disabled="!form.carrierId"
+                      disabled-hint="เลือกบริษัท/สินค้าหลักก่อน"
+                      @select="(row) => pickRider(idx, row)"
+                      @update:model-value="(v) => { if (!v) pickRider(idx, null) }"
+                    />
                   </td>
                   <td class="px-2 py-1">
                     <input :value="riderField(idx, 'premium')" @input="setRiderField(idx, 'premium', ($event.target as HTMLInputElement).value)"
@@ -2465,23 +2562,20 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
 
       <div class="grid grid-cols-1 md:grid-cols-4 gap-4">
         <FormField :label="t('policyCreate.netPremium')" required :class="needsConfirm('netPremium') ? confirmRing : ''">
-          <input v-model.number="form.netPremium" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.netPremium"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.dutyStamp')" :class="needsConfirm('dutyStamp') ? confirmRing : ''">
-          <input v-model.number="form.dutyStamp" type="number" min="0" step="0.01"
-            @change="touched.dutyStamp = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.dutyStamp" @update:model-value="touched.dutyStamp = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.vat')" :class="needsConfirm('vat') ? confirmRing : ''">
-          <input v-model.number="form.vat" type="number" min="0" step="0.01"
-            @change="touched.vat = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.vat" @update:model-value="touched.vat = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.totalPremiumPaid')" :class="needsConfirm('totalPremiumPaid') ? confirmRing : ''">
-          <input v-model.number="form.totalPremiumPaid" type="number" min="0" step="0.01"
-            @change="touched.totalPremiumPaid = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.totalPremiumPaid" @update:model-value="touched.totalPremiumPaid = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
       </div>
 
@@ -2493,25 +2587,32 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
       <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-5 mb-2 pt-4 border-t border-slate-100">{{ t('policyCreate.discountWhtGroup') }}</h3>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <FormField :label="t('policyCreate.discountAmount')" :class="needsConfirm('discountAmount') ? confirmRing : ''">
-          <input v-model.number="form.discountAmount" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.discountAmount"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
         <FormField :label="t('policyCreate.whtAmt')">
-          <input v-model.number="form.whtAmt" type="number" min="0" step="0.01"
-            @change="touched.whtAmt = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <label class="flex items-center gap-1.5 text-xs text-slate-600 mb-1 cursor-pointer select-none">
+            <input type="checkbox" v-model="whtEnabled" class="rounded border-slate-300 text-brand-600 focus:ring-brand-400" />
+            หัก ณ ที่จ่าย (1%)
+          </label>
+          <MoneyInput v-model="form.whtAmt" :disabled="!whtEnabled" @update:model-value="touched.whtAmt = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400 disabled:bg-slate-100 disabled:text-slate-400'" />
           <p class="text-[10px] text-slate-500 mt-1">
             <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.whtHint') }}
           </p>
         </FormField>
         <FormField :label="t('policyCreate.netCustomerPaid')">
-          <input v-model.number="form.netCustomerPaid" type="number" min="0" step="0.01"
-            @change="touched.netCustomerPaid = true"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.netCustomerPaid" @update:model-value="touched.netCustomerPaid = true"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
       </div>
 
       <h3 class="text-xs uppercase tracking-wider text-slate-400 mt-4 mb-2">{{ t('policyCreate.installment') }}</h3>
+      <!-- #43 — explain the งวด fields so "รายปี" doesn't read as an instalment. -->
+      <p class="text-[10px] text-slate-500 mb-2">
+        <i class="pi pi-info-circle mr-1" />เลือก "รายปี / จ่ายครั้งเดียว" = ชำระเต็มจำนวนครั้งเดียว (ไม่ใช่การผ่อน) ·
+        เลือกความถี่รายเดือน/ราย 3 เดือน/ราย 6 เดือน หรือใส่จำนวนงวด &gt; 1 เพื่อผ่อนชำระ
+      </p>
       <div class="grid grid-cols-1 md:grid-cols-3 gap-4">
         <FormField :label="t('policyCreate.premiumMode')">
           <select v-model="form.premiumMode"
@@ -2526,13 +2627,15 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
           <input v-model.number="form.installmentCount" type="number" min="1" max="60" step="1"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
-        <FormField :label="t('policyCreate.installmentTerm')">
+        <!-- #43 — term + mode only matter for an actual instalment plan; hidden
+             for รายปี / จ่ายครั้งเดียว to cut the confusion. -->
+        <FormField v-if="hasInstallmentPlan" :label="t('policyCreate.installmentTerm')">
           <input v-model.trim="form.installmentTerm" type="text"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
         </FormField>
         <!-- Installment mode (A/B/C) — who bears fee + interest. Drives the
              payment modal's schedule. -->
-        <FormField label="รูปแบบการผ่อน (Mode)">
+        <FormField v-if="hasInstallmentPlan" label="รูปแบบการผ่อน (Mode)">
           <select v-model="form.installmentMode"
             class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400">
             <option value="">— ไม่ระบุ —</option>
@@ -2542,8 +2645,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <!-- พ.ร.บ. — motor products only (compulsory motor insurance); billed
              in full on งวด 1. Hidden for non-motor where it doesn't apply. -->
         <FormField v-if="kind === 'motor'" label="พ.ร.บ. (compulsory)">
-          <input v-model.number="form.compulsoryPremium" type="number" min="0" step="0.01"
-            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+          <MoneyInput v-model="form.compulsoryPremium"
+            :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
         </FormField>
       </div>
 
@@ -2592,8 +2695,12 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             </tr>
           </thead>
           <tbody>
-            <tr v-for="yr in VECTOR_YEARS" :key="yr" class="border-t border-slate-100">
-              <td class="py-1.5 pr-3 text-slate-600 whitespace-nowrap">{{ VECTOR_YEAR_LABELS[yr] }}</td>
+            <tr v-for="yr in visibleVectorYears" :key="yr"
+              :class="['border-t border-slate-100', yr === currentVectorYear ? 'bg-brand-50/40' : '']">
+              <td class="py-1.5 pr-3 text-slate-600 whitespace-nowrap">
+                {{ VECTOR_YEAR_LABELS[yr] }}
+                <span v-if="yr === currentVectorYear" class="ml-1 text-[10px] text-brand-600">(ปีนี้)</span>
+              </td>
               <!-- carrier → hub: rate % (editable) + amount (computed) -->
               <td class="py-1.5 px-3">
                 <div class="relative w-24">
@@ -2625,6 +2732,12 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             </tr>
           </tbody>
         </table>
+        <!-- #45 — by default only the current policy year shows; expand for all 6. -->
+        <button type="button" @click="showAllVectorYears = !showAllVectorYears"
+          class="mt-1 text-xs text-brand-600 hover:text-brand-700 flex items-center gap-1">
+          <i :class="['pi text-[10px]', showAllVectorYears ? 'pi-chevron-up' : 'pi-chevron-down']" />
+          {{ showAllVectorYears ? 'ย่อ — แสดงเฉพาะปีปัจจุบัน' : 'แสดงค่าคอมทุกปี (6 ปี)' }}
+        </button>
       </div>
 
       <!-- Flat products: single rate + amount per direction. -->
@@ -2644,9 +2757,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
               </div>
             </FormField>
             <FormField :label="t('policyCreate.commissionAmount')">
-              <input v-model.number="form.commCarrierToHubAmount" @change="touched.commCarrierToHubAmount = true"
-                type="number" min="0" step="0.01"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="form.commCarrierToHubAmount" @update:model-value="touched.commCarrierToHubAmount = true"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
           </div>
         </div>
@@ -2666,9 +2778,8 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
               </div>
             </FormField>
             <FormField :label="t('policyCreate.commissionAmount')">
-              <input v-model.number="form.commHubToAgentAmount" @change="touched.commHubToAgentAmount = true"
-                type="number" min="0" step="0.01"
-                class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+              <MoneyInput v-model="form.commHubToAgentAmount" @update:model-value="touched.commHubToAgentAmount = true"
+                :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
             </FormField>
           </div>
         </div>
@@ -2984,6 +3095,37 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
     </section>
     </fieldset>
 
+    <!-- #44 — Bottom action bar: duplicates the header actions so the operator
+         can save right where they finish typing instead of scrolling back up. -->
+    <div class="flex items-center justify-end gap-2 pb-4">
+      <template v-if="isDraftMode">
+        <button type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
+          class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
+          <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
+        </button>
+        <button type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
+          class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
+          <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
+        </button>
+        <button type="button" @click="submitToCarrier" :disabled="saving"
+          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+          <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
+        </button>
+      </template>
+      <template v-else>
+        <button type="button" @click="startRenewal" :disabled="saving"
+          class="px-3 py-1.5 rounded-lg text-sm text-brand-700 border border-brand-300 hover:bg-brand-50 disabled:opacity-50">
+          <i class="pi pi-replay text-xs mr-1" /> {{ t('policyCreate.action.renew') }}
+        </button>
+        <button type="button" @click="savePolicyNow" :disabled="saving"
+          class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
+          <i class="pi pi-check text-xs mr-1" /> {{ t('policyCreate.action.save') }}
+        </button>
+      </template>
+    </div>
+
+    <!-- สลักหลังเบี้ยเพิ่ม (v1) modal. Submits to the endorsement API, which
+         updates the policy premium and records the before→after delta. -->
     <PolicyEndorsementModal
       :open="showEndorsementModal"
       :current-annual-premium="Number(form.annualPremium) || 0"

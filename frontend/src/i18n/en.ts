@@ -28,6 +28,8 @@ export default {
       orContinueWith: 'Or continue with',
       backToLogin: 'Back to sign-in',
       invalidCreds: 'Invalid email or password.',
+      emailNotFound: 'This email is not registered.',
+      invalidPassword: 'Incorrect password.',
     },
     forgot: {
       title: 'Forgot password',
@@ -155,6 +157,7 @@ export default {
       taxIdInvalid: 'Business registration number must be a valid 13-digit Thai ID',
       birthDate: 'Date of birth',
       birthDateFuture: 'Date of birth must be in the past',
+      birthDateUnder18: 'Applicant must be at least 18 years old',
       phone: 'Mobile phone (at least 8 digits)',
       phoneInvalid: 'Mobile phone must be a valid Thai number (e.g. 08x-xxx-xxxx)',
       terms: 'You must accept the terms and conditions',
@@ -164,6 +167,7 @@ export default {
       juristicName: 'Business name may be in Thai or English',
       thaiId13: '13-digit Thai ID (with checksum validation)',
       thaiMobile: '10-digit Thai mobile number starting with 06, 08, or 09',
+      minAge18: 'Must be at least 18 years old',
     },
     placeholders: {
       juristicName: 'บริษัท ตัวอย่าง จำกัด',
@@ -218,6 +222,8 @@ export default {
     reportMailing: { name: 'Mailing Pipeline', short: 'Mailing' },
     reportPayments: { name: 'Payment History', short: 'Payments' },
     quotes: { name: 'Quotations', short: 'Quotes' },
+    commissionPayoutHistory: { name: 'Payout History', short: 'Payout History' },
+    whtReport: { name: 'Withholding Tax Report', short: 'WHT Report' },
   },
 
   carriers: {

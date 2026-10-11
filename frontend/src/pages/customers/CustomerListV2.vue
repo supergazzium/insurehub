@@ -21,6 +21,15 @@ const customerStore = useCustomerStore()
 function goCreate(): void { router.push({ name: 'customer-new' }) }
 function openCustomer(id: string): void { router.push({ name: 'customer-edit', params: { id } }) }
 
+// Gender stored values are mixed-case / abbreviated (male/M, female/F, other).
+function genderLabel(g: string | null | undefined): string {
+  const v = (g || '').toLowerCase()
+  if (v === 'male' || v === 'm') return 'ชาย'
+  if (v === 'female' || v === 'f') return 'หญิง'
+  if (v === '' || v === 'null') return '—'
+  return 'อื่นๆ'
+}
+
 const filters = reactive({
   q: '',
   customerType: '' as '' | 'individual' | 'foreign_individual' | 'corporate' | 'other',
@@ -52,12 +61,6 @@ const TIER_CLASS: Record<string, string> = {
   vip: 'bg-violet-50 text-violet-700 ring-1 ring-violet-200',
   gold: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
   silver: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200',
-}
-
-function genderLabel(g: string | null | undefined): string {
-  if (g === 'M') return t('customers.gender.male')
-  if (g === 'F') return t('customers.gender.female')
-  return '—'
 }
 
 function fmtMoney(n: number | null | undefined): string {

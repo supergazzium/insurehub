@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import MoneyInput from '../../components/MoneyInput.vue'
 import { fetchTenant, updateCustomerTiers, updateFollowUpSettings, updatePayoutSettings, updateTenantProfile, type CustomerTierSetting, type TenantSettingsRow } from '../../api/tenant'
 import { ApiError } from '../../api/client'
 
@@ -675,11 +676,9 @@ function exportAuditCsv() {
         <div class="space-y-4">
           <div>
             <label class="block text-sm font-medium text-slate-700 mb-1.5">{{ t('settings.payout.minBalance') }}</label>
-            <input
-              v-model.number="payout.minBalance"
-              type="number"
-              min="0"
-              class="w-full md:w-64 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+            <MoneyInput
+              v-model="payout.minBalance"
+              :input-class="'w-full md:w-64 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100'"
             />
             <p class="text-xs text-slate-500 mt-1">{{ t('settings.payout.minBalanceHint') }}</p>
           </div>

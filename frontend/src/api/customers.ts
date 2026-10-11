@@ -24,7 +24,7 @@ export interface CustomerListRow {
   telPhone?: string
   email: string
   province: string
-  gender?: 'M' | 'F' | '' | null
+  gender?: string | null
   totalPremium?: number
   tier?: { key: string; label: string } | null
   assignedAgentId: string | null
@@ -47,7 +47,7 @@ export interface CustomerListFilters {
   tier?: string
   page?: number
   perPage?: number
-  sortBy?: 'customerCode' | 'firstName' | 'lastName' | 'gender' | 'totalPremium' | 'registeredAt' | 'newest'
+  sortBy?: 'customerCode' | 'firstName' | 'lastName' | 'province' | 'gender' | 'totalPremium' | 'registeredAt' | 'newest'
   sortDir?: 'asc' | 'desc'
 }
 
