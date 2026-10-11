@@ -1,11 +1,22 @@
 <script setup lang="ts">
-import { computed, onMounted } from 'vue'
+// #3 — role-aware dashboard dispatcher. Picks the role-specific dashboard for
+// the signed-in user's role; roles without a bespoke dashboard yet fall back
+// to the generic KPI + module-launcher view below.
+import { computed, onMounted, defineAsyncComponent } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { MODULES, MODULE_GROUPS } from '../types/modules'
 import { useReportsStore } from '../stores/reports'
+import { useAuthStore } from '../stores/auth'
 
 const { t } = useI18n()
 const reports = useReportsStore()
+const auth = useAuthStore()
+
+// Lazy-load each role dashboard so the generic view isn't bundled with them.
+const ROLE_DASHBOARDS: Record<string, ReturnType<typeof defineAsyncComponent>> = {
+  executive: defineAsyncComponent(() => import('./dashboards/ExecutiveDashboard.vue')),
+}
+const roleDashboard = computed(() => ROLE_DASHBOARDS[auth.user?.role ?? ''] ?? null)
 
 onMounted(() => {
   void reports.loadKpis()
@@ -74,7 +85,11 @@ const groupedModules = MODULE_GROUPS.map((g) => ({
 </script>
 
 <template>
-  <div class="space-y-8">
+  <!-- Role-specific dashboard when one exists for this user's role (#3). -->
+  <component :is="roleDashboard" v-if="roleDashboard" />
+
+  <!-- Generic fallback: KPI grid + module launcher. -->
+  <div v-else class="space-y-8">
     <section>
       <h1 class="text-2xl font-semibold text-slate-900">{{ t('dashboard.welcome') }}</h1>
       <p class="text-slate-500 mt-1">{{ t('app.tagline') }}</p>
