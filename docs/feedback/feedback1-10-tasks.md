@@ -20,7 +20,7 @@
 
 ### Login
 - [ ] **#1** เพิ่ม **LINE** register/login + ผูกบัญชี (LINE Connect); ส่งข้อความกลับทางไลน์ได้ — ไม่เอา Facebook
-- [ ] **#2** ฝั่ง **Agent login** ใช้หน้าเดียวกับ Internal (set priority ต่างกัน)
+- [x] 🟢 **#2** แยกหน้า login: /login (พนักงาน) + /agent/login (ตัวแทน) — reject ข้าม audience + cross-link (verified) — **เสร็จ**
 
 ### Dashboard (ออกแบบแยกตาม role — เป็น spec ยาว)
 - [ ] **#3** ทำ dashboard เฉพาะแต่ละ role: **ผู้บริหาร / นักบัญชี / Sale Support / Corporate Sale / Operation / IT** (แต่ละ role มี card/widget ต่างกันตามสเปกละเอียดในเอกสาร)
