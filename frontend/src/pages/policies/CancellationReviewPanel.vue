@@ -4,6 +4,10 @@ import { fetchCancellationReview, saveCancellationReview, type CancelCheck, type
 import { ApiError } from '../../api/client'
 import DateInput from '../../components/DateInput.vue'
 import { fmtDateTime } from '../../util/dateFormat'
+import { useAuthStore } from '../../stores/auth'
+
+const auth = useAuthStore()
+const canCancel = computed(() => auth.hasPermission('policies.cancel'))
 
 const props = defineProps<{ policyId: string | null; title: string }>()
 const emit = defineEmits<{ (e: 'close'): void; (e: 'saved'): void }>()
@@ -151,14 +155,15 @@ watch(() => props.policyId, () => { void load() }, { immediate: true })
         </div>
 
         <p v-if="error" class="mt-3 text-sm text-rose-600" data-testid="cancel-review-error">{{ error }}</p>
-        <div class="mt-4 flex justify-end gap-2">
+        <div v-if="canCancel" class="mt-4 flex justify-end gap-2">
           <button type="button" class="rounded border border-slate-300 px-3 py-1.5 text-sm text-slate-600" :disabled="saving" @click="save(false)">บันทึกความคืบหน้า</button>
           <button type="button" data-testid="cancel-mark-reviewed" class="rounded bg-emerald-600 px-3 py-1.5 text-sm text-white disabled:opacity-50"
             :disabled="saving || !canMarkReviewed" :title="canMarkReviewed ? '' : 'ทุกข้อต้องเป็น เสร็จแล้ว หรือ ไม่เกี่ยวข้อง'" @click="save(true)">
             <i class="pi pi-check text-xs" /> ตรวจแล้ว
           </button>
         </div>
-        <p v-if="!canMarkReviewed" class="mt-1 text-right text-[11px] text-amber-600">ทุกข้อต้องเป็น "เสร็จแล้ว" หรือ "ไม่เกี่ยวข้อง" จึงกดตรวจแล้วได้</p>
+        <p v-else class="mt-4 text-right text-[11px] text-amber-600"><i class="pi pi-eye text-[10px]" /> ดูข้อมูลเท่านั้น</p>
+        <p v-if="canCancel && !canMarkReviewed" class="mt-1 text-right text-[11px] text-amber-600">ทุกข้อต้องเป็น "เสร็จแล้ว" หรือ "ไม่เกี่ยวข้อง" จึงกดตรวจแล้วได้</p>
       </template>
     </div>
   </div>

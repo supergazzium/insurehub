@@ -9,10 +9,14 @@ import { ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
 import PolicyPaymentModal from './PolicyPaymentModal.vue'
 import PolicyPeriodBadge from '../../components/PolicyPeriodBadge.vue'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
 const id = String(route.params.id)
+
+const auth = useAuthStore()
+const canManage = computed(() => auth.hasPermission('policies.update'))
 
 const data = ref<CollectionDetail | null>(null)
 const reminders = ref<ReminderRow[]>([])
@@ -152,7 +156,7 @@ onMounted(load)
           </div>
           <div class="mt-1 text-[11px] text-slate-400">ชำระแล้ว {{ progressPct }}%<span v-if="data.overdueCount > 0" class="ml-2 text-rose-600">· เกินกำหนด {{ data.overdueCount }} งวด</span></div>
         </div>
-        <div class="mt-4 flex gap-2">
+        <div v-if="canManage" class="mt-4 flex gap-2">
           <button type="button" class="rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700" @click="showPayment = true">
             <i class="pi pi-wallet mr-1" /> บันทึกการชำระเงิน
           </button>
@@ -160,6 +164,7 @@ onMounted(load)
             <i class="pi pi-bell mr-1" /> บันทึกการทวง
           </button>
         </div>
+        <p v-else class="mt-4 text-[11px] text-amber-600"><i class="pi pi-eye text-[10px]" /> ดูข้อมูลเท่านั้น</p>
       </div>
 
       <!-- Installment schedule -->
@@ -186,7 +191,7 @@ onMounted(load)
                 <span v-else class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-600">รอชำระ</span>
               </td>
               <td class="px-4 py-2 text-right">
-                <button v-if="!s.paid" type="button" class="text-xs text-brand-600 hover:text-brand-700" @click="openReminder(s.no)">ทวงงวดนี้</button>
+                <button v-if="!s.paid && canManage" type="button" class="text-xs text-brand-600 hover:text-brand-700" @click="openReminder(s.no)">ทวงงวดนี้</button>
               </td>
             </tr>
           </tbody>
