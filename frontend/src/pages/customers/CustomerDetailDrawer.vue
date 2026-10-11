@@ -14,6 +14,7 @@ import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import { api, ApiError } from '../../api/client'
 import { fmtDate } from '../../util/dateFormat'
 import { customerDisplayName, customerTypeLabel } from '../../utils/customerDisplay'
+import { useAuthStore } from '../../stores/auth'
 
 // EditableField uses the `value` as the option's stored form; `label` is what
 // renders in the select. Keep every enum value the backend accepts here or
@@ -42,6 +43,14 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const customerStore = useCustomerStore()
 const loading = ref(false)
+
+// View-mode by default; click "แก้ไข" to unlock the fields. Only users with
+// the customers.update permission can enter edit mode.
+const auth = useAuthStore()
+const canEdit = computed(() => auth.hasPermission('customers.update'))
+const editing = ref(false)
+function beginEdit(): void { if (canEdit.value) editing.value = true }
+function endEdit(): void { editing.value = false }
 const errorMsg = ref<string | null>(null)
 const policies = ref<PolicyListRow[]>([])
 const policiesLoading = ref(false)
@@ -150,38 +159,43 @@ function statusBadge(s: string): string {
           </div>
         </div>
         <div v-else class="text-slate-500">Loading…</div>
-        <button class="text-slate-400 hover:text-slate-700 p-2" @click="emit('close')">
-          <i class="pi pi-times" />
-        </button>
+        <div class="flex items-center gap-2">
+          <button v-if="customer && canEdit && !editing" type="button" class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5" @click="beginEdit"><i class="pi pi-pencil text-xs" /> แก้ไข</button>
+          <button v-else-if="editing" type="button" class="px-3 py-1.5 rounded-lg text-sm border border-emerald-300 text-emerald-700 hover:bg-emerald-50 flex items-center gap-1.5" @click="endEdit"><i class="pi pi-check text-xs" /> เสร็จสิ้น</button>
+          <button class="text-slate-400 hover:text-slate-700 p-2" @click="emit('close')">
+            <i class="pi pi-times" />
+          </button>
+        </div>
       </header>
 
       <div v-if="errorMsg" class="m-6 p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
         {{ errorMsg }}
       </div>
 
+      <div v-if="customer && !editing" class="mx-6 mt-4 text-xs rounded-lg px-3 py-2" :class="canEdit ? 'bg-slate-50 text-slate-500' : 'bg-amber-50 text-amber-700'"><i class="pi pi-eye mr-1" />{{ canEdit ? 'โหมดดูข้อมูล — กด "แก้ไข" เพื่อปรับข้อมูล' : 'คุณมีสิทธิ์ดูข้อมูลเท่านั้น' }}</div>
       <div v-if="customer" class="flex-1 p-6 space-y-6">
         <!-- Identity -->
         <section>
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Name &amp; type</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
             <div><div class="text-xs text-slate-400">Customer type</div>
-              <EditableField entity="customers" :id="customer.id" field="customerType" type="select" :options="CUSTOMER_TYPE_OPTIONS" :value="customer.customerType" @update="v => apply('customerType', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="customerType" type="select" :options="CUSTOMER_TYPE_OPTIONS" :value="customer.customerType" @update="v => apply('customerType', v)" /></div>
             <div><div class="text-xs text-slate-400">Title (Thai)</div>
-              <EditableField entity="customers" :id="customer.id" field="titleTh" :value="customer.titleTh" @update="v => apply('titleTh', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="titleTh" :value="customer.titleTh" @update="v => apply('titleTh', v)" /></div>
             <div><div class="text-xs text-slate-400">First name</div>
-              <EditableField entity="customers" :id="customer.id" field="firstName" :value="customer.firstName" @update="v => apply('firstName', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="firstName" :value="customer.firstName" @update="v => apply('firstName', v)" /></div>
             <div><div class="text-xs text-slate-400">Last name</div>
-              <EditableField entity="customers" :id="customer.id" field="lastName" :value="customer.lastName" @update="v => apply('lastName', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="lastName" :value="customer.lastName" @update="v => apply('lastName', v)" /></div>
             <div><div class="text-xs text-slate-400">Nickname</div>
-              <EditableField entity="customers" :id="customer.id" field="nickname" :value="customer.nickname" @update="v => apply('nickname', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="nickname" :value="customer.nickname" @update="v => apply('nickname', v)" /></div>
             <div><div class="text-xs text-slate-400">Title (English)</div>
-              <EditableField entity="customers" :id="customer.id" field="titleEn" :value="customer.titleEn" @update="v => apply('titleEn', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="titleEn" :value="customer.titleEn" @update="v => apply('titleEn', v)" /></div>
             <div><div class="text-xs text-slate-400">First name (EN)</div>
-              <EditableField entity="customers" :id="customer.id" field="firstNameEn" :value="customer.firstNameEn" @update="v => apply('firstNameEn', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="firstNameEn" :value="customer.firstNameEn" @update="v => apply('firstNameEn', v)" /></div>
             <div><div class="text-xs text-slate-400">Last name (EN)</div>
-              <EditableField entity="customers" :id="customer.id" field="lastNameEn" :value="customer.lastNameEn" @update="v => apply('lastNameEn', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="lastNameEn" :value="customer.lastNameEn" @update="v => apply('lastNameEn', v)" /></div>
             <div class="md:col-span-2"><div class="text-xs text-slate-400">Juristic name</div>
-              <EditableField entity="customers" :id="customer.id" field="juristicName" :value="customer.juristicName" @update="v => apply('juristicName', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="juristicName" :value="customer.juristicName" @update="v => apply('juristicName', v)" /></div>
           </div>
         </section>
 
@@ -189,25 +203,25 @@ function statusBadge(s: string): string {
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Identity</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
             <div><div class="text-xs text-slate-400">ID card</div>
-              <EditableField entity="customers" :id="customer.id" field="idCard" :value="customer.idCard" @update="v => apply('idCard', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="idCard" :value="customer.idCard" @update="v => apply('idCard', v)" /></div>
             <div><div class="text-xs text-slate-400">ID expiry</div>
-              <EditableField entity="customers" :id="customer.id" field="nationalIdExpiry" type="date" :value="customer.nationalIdExpiry" @update="v => apply('nationalIdExpiry', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="nationalIdExpiry" type="date" :value="customer.nationalIdExpiry" @update="v => apply('nationalIdExpiry', v)" /></div>
             <div><div class="text-xs text-slate-400">Passport</div>
-              <EditableField entity="customers" :id="customer.id" field="passport" :value="customer.passport" @update="v => apply('passport', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="passport" :value="customer.passport" @update="v => apply('passport', v)" /></div>
             <div><div class="text-xs text-slate-400">Tax ID</div>
-              <EditableField entity="customers" :id="customer.id" field="taxId" :value="customer.taxId" @update="v => apply('taxId', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="taxId" :value="customer.taxId" @update="v => apply('taxId', v)" /></div>
             <div><div class="text-xs text-slate-400">Birth date</div>
-              <EditableField entity="customers" :id="customer.id" field="birthDate" type="date" :value="customer.birthDate" @update="v => apply('birthDate', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="birthDate" type="date" :value="customer.birthDate" @update="v => apply('birthDate', v)" /></div>
             <div><div class="text-xs text-slate-400">Gender</div>
-              <EditableField entity="customers" :id="customer.id" field="gender" type="select" :options="GENDER_OPTIONS" :value="customer.gender" @update="v => apply('gender', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="gender" type="select" :options="GENDER_OPTIONS" :value="customer.gender" @update="v => apply('gender', v)" /></div>
             <div><div class="text-xs text-slate-400">Marital</div>
-              <EditableField entity="customers" :id="customer.id" field="maritalStatus" type="select" :options="MARITAL_OPTIONS" :value="customer.maritalStatus" @update="v => apply('maritalStatus', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="maritalStatus" type="select" :options="MARITAL_OPTIONS" :value="customer.maritalStatus" @update="v => apply('maritalStatus', v)" /></div>
             <div><div class="text-xs text-slate-400">Nationality</div>
-              <EditableField entity="customers" :id="customer.id" field="nationality" :value="customer.nationality" @update="v => apply('nationality', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="nationality" :value="customer.nationality" @update="v => apply('nationality', v)" /></div>
             <div><div class="text-xs text-slate-400">เชื้อชาติ</div>
-              <EditableField entity="customers" :id="customer.id" field="race" :value="customer.race" @update="v => apply('race', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="race" :value="customer.race" @update="v => apply('race', v)" /></div>
             <div><div class="text-xs text-slate-400">Religion</div>
-              <EditableField entity="customers" :id="customer.id" field="religion" :value="customer.religion" @update="v => apply('religion', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="religion" :value="customer.religion" @update="v => apply('religion', v)" /></div>
           </div>
         </section>
 
@@ -216,13 +230,13 @@ function statusBadge(s: string): string {
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Occupation &amp; income</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
             <div><div class="text-xs text-slate-400">Occupation</div>
-              <EditableField entity="customers" :id="customer.id" field="occupation" :value="customer.occupation" @update="v => apply('occupation', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="occupation" :value="customer.occupation" @update="v => apply('occupation', v)" /></div>
             <div><div class="text-xs text-slate-400">Position</div>
-              <EditableField entity="customers" :id="customer.id" field="position" :value="customer.position" @update="v => apply('position', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="position" :value="customer.position" @update="v => apply('position', v)" /></div>
             <div class="md:col-span-2"><div class="text-xs text-slate-400">Employer</div>
-              <EditableField entity="customers" :id="customer.id" field="employerName" :value="customer.employerName" @update="v => apply('employerName', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="employerName" :value="customer.employerName" @update="v => apply('employerName', v)" /></div>
             <div><div class="text-xs text-slate-400">Monthly income</div>
-              <EditableField entity="customers" :id="customer.id" field="monthlyIncome" type="currency" :value="customer.monthlyIncome" @update="v => apply('monthlyIncome', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="monthlyIncome" type="currency" :value="customer.monthlyIncome" @update="v => apply('monthlyIncome', v)" /></div>
           </div>
         </section>
 
@@ -231,17 +245,17 @@ function statusBadge(s: string): string {
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Contact</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
             <div><div class="text-xs text-slate-400">โทรศัพท์มือถือ</div>
-              <EditableField entity="customers" :id="customer.id" field="phone" :value="customer.phone" @update="v => apply('phone', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="phone" :value="customer.phone" @update="v => apply('phone', v)" /></div>
             <div><div class="text-xs text-slate-400">โทรศัพท์บ้าน</div>
-              <EditableField entity="customers" :id="customer.id" field="telPhone" :value="customer.telPhone" @update="v => apply('telPhone', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="telPhone" :value="customer.telPhone" @update="v => apply('telPhone', v)" /></div>
             <div><div class="text-xs text-slate-400">Line ID</div>
-              <EditableField entity="customers" :id="customer.id" field="lineId" :value="customer.lineId" @update="v => apply('lineId', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="lineId" :value="customer.lineId" @update="v => apply('lineId', v)" /></div>
             <div><div class="text-xs text-slate-400">Facebook</div>
-              <EditableField entity="customers" :id="customer.id" field="facebookName" :value="customer.facebookName" @update="v => apply('facebookName', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="facebookName" :value="customer.facebookName" @update="v => apply('facebookName', v)" /></div>
             <div><div class="text-xs text-slate-400">Email</div>
-              <EditableField entity="customers" :id="customer.id" field="email" :value="customer.email" @update="v => apply('email', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="email" :value="customer.email" @update="v => apply('email', v)" /></div>
             <div><div class="text-xs text-slate-400">Email (สำรอง)</div>
-              <EditableField entity="customers" :id="customer.id" field="email2" :value="customer.email2" @update="v => apply('email2', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="email2" :value="customer.email2" @update="v => apply('email2', v)" /></div>
           </div>
         </section>
 
@@ -250,15 +264,15 @@ function statusBadge(s: string): string {
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Registered address</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
             <div class="md:col-span-2"><div class="text-xs text-slate-400">Address</div>
-              <EditableField entity="customers" :id="customer.id" field="address" :value="customer.address" @update="v => apply('address', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="address" :value="customer.address" @update="v => apply('address', v)" /></div>
             <div><div class="text-xs text-slate-400">Sub-district</div>
-              <EditableField entity="customers" :id="customer.id" field="district" :value="customer.district" @update="v => apply('district', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="district" :value="customer.district" @update="v => apply('district', v)" /></div>
             <div><div class="text-xs text-slate-400">Amphoe / District</div>
-              <EditableField entity="customers" :id="customer.id" field="amphoe" :value="customer.amphoe" @update="v => apply('amphoe', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="amphoe" :value="customer.amphoe" @update="v => apply('amphoe', v)" /></div>
             <div><div class="text-xs text-slate-400">Province</div>
-              <EditableField entity="customers" :id="customer.id" field="province" :value="customer.province" @update="v => apply('province', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="province" :value="customer.province" @update="v => apply('province', v)" /></div>
             <div><div class="text-xs text-slate-400">Postcode</div>
-              <EditableField entity="customers" :id="customer.id" field="postcode" :value="customer.postcode" @update="v => apply('postcode', v)" /></div>
+              <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="postcode" :value="customer.postcode" @update="v => apply('postcode', v)" /></div>
           </div>
         </section>
 
@@ -444,7 +458,7 @@ function statusBadge(s: string): string {
         <section>
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Notes</h3>
           <div class="card p-4 text-sm">
-            <EditableField entity="customers" :id="customer.id" field="notes" type="textarea"
+            <EditableField :readonly="!editing" entity="customers" :id="customer.id" field="notes" type="textarea"
               :value="customer.notes" placeholder="ยังไม่มีบันทึก — คลิกเพื่อเพิ่ม"
               @update="v => apply('notes', v)" />
           </div>
@@ -458,7 +472,7 @@ function statusBadge(s: string): string {
         <div class="text-xs text-slate-400">
           Click any field to edit · Enter saves, Esc cancels
         </div>
-        <button type="button"
+        <button v-if="canEdit && editing" type="button"
           class="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 text-sm flex items-center gap-1.5"
           @click="showDelete = true">
           <i class="pi pi-trash text-xs" /> Delete

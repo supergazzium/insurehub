@@ -14,6 +14,7 @@ import IssuePolicyModal from './IssuePolicyModal.vue'
 import { api, ApiError } from '../../api/client'
 import { CURRENT_STATUSES, statusBadgeClass } from '../../utils/policyStatus'
 import { paymentTypeLabel } from '../../utils/paymentTypes'
+import { useAuthStore } from '../../stores/auth'
 
 const { t } = useI18n()
 
@@ -95,6 +96,14 @@ const emit = defineEmits<{ (e: 'close'): void }>()
 
 const policyStore = usePolicyStore()
 const loading = ref(false)
+
+// View-mode by default; click "แก้ไข" to unlock the inline fields. Only users
+// with the policies.update permission can enter edit mode.
+const auth = useAuthStore()
+const canEdit = computed(() => auth.hasPermission('policies.update'))
+const editing = ref(false)
+function beginEdit(): void { if (canEdit.value) editing.value = true }
+function endEdit(): void { editing.value = false }
 const errorMsg = ref<string | null>(null)
 
 const policy = computed(() => (props.policyId ? policyStore.getPolicy(props.policyId) : null))
@@ -164,15 +173,18 @@ function statusBadge(s: string): string {
             @click="showIssueModal = true">
             <i class="pi pi-check-circle text-[10px]" /> {{ $t('policyIssue.open') }}
           </button>
-          <RouterLink v-if="policy" :to="{ name: 'policy-edit-draft', params: { id: policy.id } }"
+          <RouterLink v-if="policy && canEdit" :to="{ name: 'policy-edit-draft', params: { id: policy.id } }"
             class="px-3 py-1.5 rounded-md bg-brand-600 text-white text-xs hover:bg-brand-700 flex items-center gap-1.5">
             <i class="pi pi-pencil text-[10px]" /> {{ $t('policyEdit.openFullEditor') }}
           </RouterLink>
+          <button v-if="policy && canEdit && !editing" type="button" class="px-3 py-1.5 rounded-lg text-xs border border-slate-200 text-slate-700 hover:bg-slate-50 flex items-center gap-1.5" @click="beginEdit"><i class="pi pi-pencil text-[10px]" /> แก้ไขในหน้านี้</button>
+          <button v-else-if="editing" type="button" class="px-3 py-1.5 rounded-lg text-xs border border-emerald-300 text-emerald-700 hover:bg-emerald-50 flex items-center gap-1.5" @click="endEdit"><i class="pi pi-check text-[10px]" /> เสร็จสิ้น</button>
           <button class="text-slate-400 hover:text-slate-700 p-2" @click="emit('close')">
             <i class="pi pi-times" />
           </button>
         </div>
       </header>
+      <div v-if="policy && !editing" class="mx-6 mt-4 text-xs rounded-lg px-3 py-2" :class="canEdit ? 'bg-slate-50 text-slate-500' : 'bg-amber-50 text-amber-700'"><i class="pi pi-eye mr-1" />{{ canEdit ? 'โหมดดูข้อมูล — กด "แก้ไขในหน้านี้" เพื่อปรับข้อมูล' : 'คุณมีสิทธิ์ดูข้อมูลเท่านั้น' }}</div>
 
       <div v-if="errorMsg" class="m-6 p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
         {{ errorMsg }}
@@ -184,43 +196,43 @@ function statusBadge(s: string): string {
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Overview</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
             <div><div class="text-xs text-slate-400">Application no</div>
-              <EditableField entity="policies" :id="policy.id" field="applicationNo" :value="policy.applicationNo" @update="v => apply('applicationNo', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="applicationNo" :value="policy.applicationNo" @update="v => apply('applicationNo', v)" /></div>
             <div><div class="text-xs text-slate-400">Policy no</div>
-              <EditableField entity="policies" :id="policy.id" field="policyNo" :value="policy.policyNo" @update="v => apply('policyNo', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="policyNo" :value="policy.policyNo" @update="v => apply('policyNo', v)" /></div>
             <div><div class="text-xs text-slate-400">Quote no</div>
-              <EditableField entity="policies" :id="policy.id" field="quoteNo" :value="policy.quoteNo" @update="v => apply('quoteNo', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="quoteNo" :value="policy.quoteNo" @update="v => apply('quoteNo', v)" /></div>
             <div><div class="text-xs text-slate-400">Notion no</div>
-              <EditableField entity="policies" :id="policy.id" field="notionNo" :value="policy.notionNo" @update="v => apply('notionNo', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="notionNo" :value="policy.notionNo" @update="v => apply('notionNo', v)" /></div>
             <div><div class="text-xs text-slate-400">App date</div>
-              <EditableField entity="policies" :id="policy.id" field="appDate" type="date" :value="policy.appDate" @update="v => apply('appDate', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="appDate" type="date" :value="policy.appDate" @update="v => apply('appDate', v)" /></div>
             <div><div class="text-xs text-slate-400">Create date</div>
-              <EditableField entity="policies" :id="policy.id" field="createDate" type="date" :value="policy.createDate" @update="v => apply('createDate', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="createDate" type="date" :value="policy.createDate" @update="v => apply('createDate', v)" /></div>
             <div><div class="text-xs text-slate-400">Effective</div>
-              <EditableField entity="policies" :id="policy.id" field="effectiveDate" type="date" :value="policy.effectiveDate" @update="v => apply('effectiveDate', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="effectiveDate" type="date" :value="policy.effectiveDate" @update="v => apply('effectiveDate', v)" /></div>
             <div><div class="text-xs text-slate-400">Expiry</div>
-              <EditableField entity="policies" :id="policy.id" field="expiryDate" type="date" :value="policy.expiryDate" @update="v => apply('expiryDate', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="expiryDate" type="date" :value="policy.expiryDate" @update="v => apply('expiryDate', v)" /></div>
             <div><div class="text-xs text-slate-400">Issue date</div>
-              <EditableField entity="policies" :id="policy.id" field="issueDate" type="date" :value="policy.issueDate" @update="v => apply('issueDate', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="issueDate" type="date" :value="policy.issueDate" @update="v => apply('issueDate', v)" /></div>
             <div><div class="text-xs text-slate-400">Cancel date</div>
-              <EditableField entity="policies" :id="policy.id" field="cancelDate" type="date" :value="policy.cancelDate" @update="v => apply('cancelDate', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="cancelDate" type="date" :value="policy.cancelDate" @update="v => apply('cancelDate', v)" /></div>
             <div><div class="text-xs text-slate-400">Period paid end</div>
               <div class="text-slate-500">{{ fmtDate(policy.periodPaidEnd) }}</div></div>
             <div><div class="text-xs text-slate-400">Policy end</div>
               <div class="text-slate-500">{{ fmtDate(policy.policyEnd) }}</div></div>
             <div><div class="text-xs text-slate-400">Policy year</div>
-              <EditableField entity="policies" :id="policy.id" field="policyYear" type="number" :value="policy.policyYear" @update="v => apply('policyYear', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="policyYear" type="number" :value="policy.policyYear" @update="v => apply('policyYear', v)" /></div>
             <div><div class="text-xs text-slate-400">Act year</div>
-              <EditableField entity="policies" :id="policy.id" field="actYear" type="number" :value="policy.actYear" @update="v => apply('actYear', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="actYear" type="number" :value="policy.actYear" @update="v => apply('actYear', v)" /></div>
             <div><div class="text-xs text-slate-400">New / Renew</div>
-              <EditableField entity="policies" :id="policy.id" field="newOrRenew" type="select" :options="NEW_OR_RENEW_OPTIONS" :value="policy.newOrRenew" @update="v => apply('newOrRenew', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="newOrRenew" type="select" :options="NEW_OR_RENEW_OPTIONS" :value="policy.newOrRenew" @update="v => apply('newOrRenew', v)" /></div>
             <div><div class="text-xs text-slate-400">Status</div>
-              <EditableField entity="policies" :id="policy.id" field="status" type="select" :options="POLICY_STATUS_OPTIONS" :value="policy.status" @update="v => apply('status', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="status" type="select" :options="POLICY_STATUS_OPTIONS" :value="policy.status" @update="v => apply('status', v)" /></div>
             <div><div class="text-xs text-slate-400">Premium mode</div>
-              <EditableField entity="policies" :id="policy.id" field="premiumMode" type="select" :options="PREMIUM_MODE_OPTIONS" :value="policy.premiumMode" @update="v => apply('premiumMode', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="premiumMode" type="select" :options="PREMIUM_MODE_OPTIONS" :value="policy.premiumMode" @update="v => apply('premiumMode', v)" /></div>
             <div><div class="text-xs text-slate-400">Coverage</div>
-              <EditableField entity="policies" :id="policy.id" field="coverage" type="currency" :value="policy.coverage" @update="v => apply('coverage', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="coverage" type="currency" :value="policy.coverage" @update="v => apply('coverage', v)" /></div>
             <div><div class="text-xs text-slate-400">Annual premium</div>
-              <EditableField entity="policies" :id="policy.id" field="annualPremium" type="currency" :value="policy.annualPremium" @update="v => apply('annualPremium', v)" /></div>
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="annualPremium" type="currency" :value="policy.annualPremium" @update="v => apply('annualPremium', v)" /></div>
           </div>
         </section>
 
@@ -459,7 +471,7 @@ function statusBadge(s: string): string {
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Notes</h3>
           <div class="card p-4 space-y-3 text-sm">
             <div><div class="text-xs text-slate-400">Notes</div>
-              <EditableField entity="policies" :id="policy.id" field="notes" type="textarea"
+              <EditableField :readonly="!editing" entity="policies" :id="policy.id" field="notes" type="textarea"
                 :value="policy.notes" placeholder="ยังไม่มีบันทึก — คลิกเพื่อเพิ่ม"
                 @update="v => apply('notes', v)" /></div>
           </div>
@@ -473,7 +485,7 @@ function statusBadge(s: string): string {
         <div class="text-xs text-slate-400">
           Click any field to edit · Press Enter to save, Esc to cancel
         </div>
-        <button type="button"
+        <button v-if="canEdit && editing" type="button"
           class="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 text-sm flex items-center gap-1.5"
           @click="showDelete = true">
           <i class="pi pi-trash text-xs" /> Delete
