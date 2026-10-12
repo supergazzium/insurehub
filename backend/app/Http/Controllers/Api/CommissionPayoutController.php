@@ -553,11 +553,16 @@ class CommissionPayoutController extends Controller
 
     private function renderAgentPdf(array $data)
     {
-        // Brand logo embedded as a data URI (dompdf has enable_remote=false).
+        // Brand logo + LINE QR embedded as data URIs (dompdf has enable_remote=false).
         $logoData = null;
         $logoPath = public_path('brand/logo.png');
         if (is_file($logoPath)) {
             $logoData = 'data:image/png;base64,' . base64_encode((string) file_get_contents($logoPath));
+        }
+        $qrData = null;
+        $qrPath = public_path('brand/line-qr.png');
+        if (is_file($qrPath)) {
+            $qrData = 'data:image/png;base64,' . base64_encode((string) file_get_contents($qrPath));
         }
 
         return Pdf::loadView('pdf.commission-payout', [
@@ -568,6 +573,7 @@ class CommissionPayoutController extends Controller
             'summary' => $data['summary'],
             'batch' => $data['batch'],
             'logoData' => $logoData,
+            'qrData' => $qrData,
             'generatedAt' => now()->format('Y-m-d H:i'),
         ])->setPaper('a4', 'landscape');
     }

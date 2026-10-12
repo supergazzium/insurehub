@@ -18,7 +18,8 @@
     .head-c .company { font-size: 15px; font-weight: 700; }
     .head-c .subtitle { font-size: 10px; margin-top: 2px; }
     .head-r { display: table-cell; width: 26%; vertical-align: middle; text-align: right; }
-    .head-r .qr { display: inline-block; width: 52px; height: 52px; border: 3px solid #111; }
+    .head-r .qr { display: inline-block; width: 60px; height: 60px; }
+    .head-r .qr img { width: 60px; height: 60px; display: block; }
     .head-r .ask { color: #d9480f; font-size: 8px; margin-top: 3px; }
 
     /* ── Agent identity box ───────────────────────────────────── */
@@ -75,7 +76,7 @@
       <div class="subtitle">ค่านายหน้า / ค่าแนะนำประจำเดือน : {{ $batch['periodLabel'] ?: ($batch['from'] . ' – ' . $batch['to']) }}@if ($showVat) <b style="color:#b91c1c;">· {{ $vatLabel }}</b>@endif</div>
     </div>
     <div class="head-r">
-      <div class="qr"></div>
+      <div class="qr">@if (!empty($qrData))<img src="{{ $qrData }}" alt="LINE QR" />@endif</div>
       <div class="ask">สอบถามเพิ่มเติม</div>
     </div>
   </div>
