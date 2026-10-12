@@ -68,7 +68,7 @@ import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import { fetchPolicyStatuses, type PolicyStatusRow } from '../../api/portal'
 import {
   createDraftPolicy, updateDraftPolicy, updatePolicy,
-  promotePolicyToQuotation, promotePolicyToSubmitted, requestPolicyDelete,
+  promotePolicyToQuotation, requestPolicyDelete,
   fetchRenewalDraft,
   type PolicyListRow, type RenewalBlockedError, type RenewalDraftMeta,
 } from '../../api/policies'
@@ -78,7 +78,7 @@ import { updateFreelookDocs, type VerifyRow } from '../../api/followups'
 import { durationConfig } from '../../utils/durationPresets'
 import { statusBadgeClass, type PolicyStatus } from '../../utils/policyStatus'
 import {
-  splitSchemaPayload, valueKey, validateSchemaValues, type RiskSchema,
+  splitSchemaPayload, valueKey, type RiskSchema,
 } from '../../utils/riskSchema'
 
 // Route-driven resume id — `/policies/:id/edit-draft` binds `id` prop.
@@ -1540,22 +1540,6 @@ function buildDraftPayload(): Record<string, unknown> {
 // ── Submit-gate validation ───────────────────────────────────────────────
 
 // Submit-gate = all Q gates + all S gates (schema required + premium).
-function collectSubmitProblems(): string[] {
-  const problems: string[] = []
-  if (!form.customerId) problems.push('ลูกค้า: จำเป็น')
-  if (!form.writingAgentId) problems.push('ตัวแทน: จำเป็น')
-  if (!form.productId) problems.push('สินค้า: จำเป็น')
-  if (!form.effectiveDate) problems.push('วันเริ่มคุ้มครอง: จำเป็น')
-  if (!form.expiryDate) problems.push('วันสิ้นสุดคุ้มครอง: จำเป็น')
-  if (!(form.netPremium > 0 || form.totalPremiumPaid > 0)) problems.push('เบี้ยประกัน: ต้องมากกว่า 0')
-  const schema = productDetail.value?.productType?.riskSchema as RiskSchema | null | undefined
-  if (schema) {
-    const schemaProblems = validateSchemaValues(schema, form.risk, 'submit')
-    for (const p of schemaProblems) problems.push(p.message)
-  }
-  return problems
-}
-
 // ── Action buttons ────────────────────────────────────────────────────────
 
 async function ensureDraftForPayment(): Promise<void> {
@@ -1674,40 +1658,6 @@ async function saveAsQuotation(): Promise<void> {
     await router.push({ name: 'policies' })
   } catch (e) {
     error.value = e instanceof ApiError ? (e.body as { message?: string })?.message ?? e.message : (e instanceof Error ? e.message : 'Save failed.')
-  } finally {
-    saving.value = false
-  }
-}
-
-async function submitToCarrier(): Promise<void> {
-  if (saving.value) return
-  const problems = collectSubmitProblems()
-  if (problems.length > 0) {
-    window.alert(`กรอกข้อมูลไม่ครบหรือไม่ถูกต้อง:\n\n• ${problems.join('\n• ')}`)
-    return
-  }
-  if (isRenewalInProgress.value && !renewalConfirmed.value) {
-    error.value = t('policyCreate.renewal.confirmRequired')
-    document.getElementById('renewal-confirm')?.scrollIntoView({ behavior: 'smooth', block: 'center' })
-    return
-  }
-  saving.value = true
-  error.value = null
-  try {
-    if (!draftId.value) {
-      await doAutosave()
-    }
-    if (!draftId.value) throw new Error('Draft save failed — cannot submit.')
-    const res = await promotePolicyToSubmitted(draftId.value, isRenewalInProgress.value ? { renewalTermsConfirmed: renewalConfirmed.value } : {})
-    if (takePending(res)) {
-      applyServerState(res.data)
-      flash.value = 'ส่งคำขอให้ผู้ตรวจ Verify แล้ว'
-      window.setTimeout(() => { flash.value = null }, 3000)
-      return
-    }
-    await router.push({ name: 'policies' })
-  } catch (e) {
-    reportSaveError(e)
   } finally {
     saving.value = false
   }
@@ -2098,36 +2048,13 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <span v-else-if="props.id && !canSavePolicy" class="rounded-lg bg-amber-50 px-2.5 py-1.5 text-xs text-amber-700">
           <i class="pi pi-eye mr-1" />ดูข้อมูลเท่านั้น
         </span>
-        <!-- Save/submit actions below are additionally shown only in edit mode. -->
-        <!-- Draft / create mode: the three draft → quotation → submit actions. -->
-        <template v-if="isDraftMode">
-          <button v-if="canSavePolicy && editing" type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
-            class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
-            <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
-          </button>
-          <button v-if="canSavePolicy && editing" type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
-            class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
-            <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
-          </button>
-          <button v-if="canSavePolicy && editing" type="button" @click="submitToCarrier" :disabled="saving || verifyLocked"
-            class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-            <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
-          </button>
-        </template>
-        <!-- Editing a non-draft policy: renew (pull data forward) + save. -->
-        <template v-else>
-          <button type="button" @click="startRenewal" :disabled="saving"
-            class="px-3 py-1.5 rounded-lg text-sm text-brand-700 border border-brand-300 hover:bg-brand-50 disabled:opacity-50">
-            <i class="pi pi-replay text-xs mr-1" />
-            {{ renewedTo?.live ? t('policyCreate.renewal.openRenewal') : t('policyCreate.action.renew') }}
-          </button>
+        <!-- ปุ่มบันทึก/ส่ง ย้ายไปไว้ท้ายฟอร์ม (ด้านล่าง) เพื่อให้พนักงานกรอกข้อมูล
+             ให้ครบก่อนจึงค่อยกดบันทึก. header เหลือเฉพาะ ยกเลิก + แก้ไข/ดูอย่างเดียว.
+             "ขอลบ" ยังอยู่บนนี้ — เป็นคนละ action กับการบันทึก. -->
+        <template v-if="!isDraftMode">
           <button v-if="verifyOn && !pendingChange" type="button" data-testid="request-delete" @click="showDeleteRequest = true" :disabled="saving"
             class="px-3 py-1.5 rounded-lg text-sm text-rose-600 border border-rose-200 hover:bg-rose-50 disabled:opacity-50">
             <i class="pi pi-trash text-xs mr-1" /> ขอลบ
-          </button>
-          <button v-if="canSavePolicy && editing" type="button" data-testid="save-policy" @click="savePolicyNow" :disabled="saving || verifyLocked"
-            class="px-4 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-            <i :class="['pi text-xs mr-1', holdForVerify ? 'pi-send' : 'pi-check']" /> {{ holdForVerify ? 'บันทึก / ส่งตรวจ' : t('policyCreate.action.save') }}
           </button>
         </template>
       </div>
@@ -3129,22 +3056,21 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
     </section>
     </fieldset>
 
-    <!-- #44 — Bottom action bar: duplicates the header actions so the operator
-         can save right where they finish typing instead of scrolling back up. -->
-    <div class="flex items-center justify-end gap-2 pb-4">
+    <!-- Bottom action bar — the primary (and only) save location. ปุ่มบันทึกย้าย
+         มาไว้ท้ายฟอร์ม เพื่อให้พนักงานกรอกข้อมูลให้ครบก่อนจึงค่อยกดบันทึก. -->
+    <div v-if="canSavePolicy && editing" class="mt-4 border-t border-slate-200 pt-4 flex items-center justify-end gap-2 pb-4">
+      <span class="mr-auto text-xs text-slate-400"><i class="pi pi-info-circle mr-1" />กรอกข้อมูลให้ครบแล้วจึงกดบันทึก</span>
       <template v-if="isDraftMode">
         <button v-if="canSavePolicy && editing" type="button" @click="saveDraftNow" :disabled="saving || !form.customerId"
           class="px-3 py-1.5 rounded-lg text-sm text-slate-700 border border-slate-200 hover:bg-slate-50 disabled:opacity-50">
           <i class="pi pi-save text-xs mr-1" /> {{ t('policyCreate.action.saveDraft') }}
         </button>
         <button v-if="canSavePolicy && editing" type="button" @click="saveAsQuotation" :disabled="saving || !form.customerId || !form.productId"
-          class="px-3 py-1.5 rounded-lg text-sm bg-slate-700 text-white hover:bg-slate-800 disabled:opacity-50">
+          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
           <i class="pi pi-file text-xs mr-1" /> {{ t('policyCreate.action.saveQuotation') }}
         </button>
-        <button v-if="canSavePolicy && editing" type="button" @click="submitToCarrier" :disabled="saving"
-          class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 disabled:opacity-50">
-          <i class="pi pi-send text-xs mr-1" /> {{ t('policyCreate.action.submitToCarrier') }}
-        </button>
+        <!-- "ส่งพิจารณา" ย้ายไปหน้า สนับสนุนตัวแทน (agent-support) — ฝ่ายสนับสนุน
+             จะเป็นผู้ส่งคำขอให้บริษัทจากใบเสนอราคาที่บันทึกไว้ (Part 2). -->
       </template>
       <template v-else>
         <button type="button" @click="startRenewal" :disabled="saving"
