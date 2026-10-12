@@ -3,6 +3,7 @@
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { openInNewTab } from '../../utils/openInNewTab'
 import { useCustomerStore } from '../../stores/customers'
 import { fetchTenant, type CustomerTierSetting } from '../../api/tenant'
 import {
@@ -19,7 +20,7 @@ const customerStore = useCustomerStore()
 
 // Create + view/edit are now full-page routes (customer-new / customer-edit).
 function goCreate(): void { router.push({ name: 'customer-new' }) }
-function openCustomer(id: string): void { router.push({ name: 'customer-edit', params: { id } }) }
+function openCustomer(id: string): void { openInNewTab(router, { name: 'customer-edit', params: { id } }) }
 
 // Gender stored values are mixed-case / abbreviated (male/M, female/F, other).
 function genderLabel(g: string | null | undefined): string {

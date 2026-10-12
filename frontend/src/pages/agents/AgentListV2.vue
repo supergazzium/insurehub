@@ -3,6 +3,7 @@
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { openInNewTab } from '../../utils/openInNewTab'
 import { useAgentStore } from '../../stores/agents'
 import { fetchPendingAgents, approveAgent, rejectAgent, setAgentActive, type AgentListRow } from '../../api/agents'
 import { ApiError } from '../../api/client'
@@ -14,7 +15,7 @@ import AgentsSubnav from './AgentsSubnav.vue'
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-function openAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
+function openAgent(id: string): void { openInNewTab(router, { name: 'agent-detail', params: { id } }) }
 const agentStore = useAgentStore()
 
 // ── Management actions (create / approve / deactivate) ─────────────────────

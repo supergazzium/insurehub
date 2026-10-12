@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { computed, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
+import { openInNewTab } from '../../utils/openInNewTab'
 import {
   fetchFollowUps, updateFreelookDocs,
   type AgingBucket, type FollowUpCategory, type FollowUpMeta, type FollowUpRow, type VerifyRow,
@@ -121,12 +122,16 @@ function setAging(a: AgingBucket): void { aging.value = aging.value === a ? '' :
 function setStage(s: string): void { stage.value = s; syncUrl(); void load() }
 function reload(): void { window.clearTimeout(debounce); debounce = window.setTimeout(load, 250) }
 
+// เปิดแถวในแท็บใหม่ — พนักงานกดเปิดกรมธรรม์ไปเคลียร์ทีละรายการได้ โดยไม่เสีย
+// รายการ follow-ups ที่กำลังไล่อยู่ (กลับมาแถวเดิมต่อได้ทันที). router.resolve
+// ให้ URL เต็ม (รวม BASE_URL /insurehub) แล้ว window.open แท็บใหม่.
+function rowTarget(r: FollowUpRow | VerifyRow): { name: string; params: Record<string, string> } {
+  return category.value === 'verify'
+    ? { name: 'policy-verification', params: { id: (r as VerifyRow).id } }
+    : { name: 'policy-edit-draft', params: { id: r.policyId } }
+}
 function openRow(r: FollowUpRow | VerifyRow): void {
-  if (category.value === 'verify') {
-    void router.push({ name: 'policy-verification', params: { id: (r as VerifyRow).id } })
-    return
-  }
-  void router.push({ name: 'policy-edit-draft', params: { id: r.policyId } })
+  openInNewTab(router, rowTarget(r))
 }
 
 async function markFreelook(r: FollowUpRow, field: 'sentAt' | 'signedAt' | 'returnedAt'): Promise<void> {

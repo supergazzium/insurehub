@@ -6,6 +6,7 @@
 import { onMounted, reactive, ref, computed, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { openInNewTab } from '../../utils/openInNewTab'
 import { usePolicyStore, type PolicyStatus, type PolicyDocument } from '../../stores/policies'
 import { fetchPolicy, policyDocumentDownloadUrl } from '../../api/policies'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
@@ -377,7 +378,8 @@ function fmtBaht(n: number): string {
  *  /policies/:id/edit-draft and PolicyApplicationWizard hydrates
  *  from GET /policies/{id} on mount. */
 function resumeDraft(policyId: string): void {
-  void router.push({ name: 'policy-edit-draft', params: { id: policyId } })
+  // เปิดกรมธรรม์ในแท็บใหม่ — ไม่เสียรายการ/ตัวกรองที่กำลังดูอยู่
+  openInNewTab(router, { name: 'policy-edit-draft', params: { id: policyId } })
 }
 
 /** Hard-delete a draft. Backend guard (C-11) blocks non-draft rows with

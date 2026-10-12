@@ -3,6 +3,7 @@
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { openInNewTab } from '../../utils/openInNewTab'
 import { useProductStore } from '../../stores/products'
 import { fetchCarrierList, type CarrierListRow } from '../../api/carriers'
 import SearchSelect, { type SearchOption } from '../../components/SearchSelect.vue'
@@ -23,7 +24,7 @@ function openCreate(): void {
 /** Open the full-page view/edit form for one product. Replaced the old
  *  slide-in detail drawer. */
 function openEdit(id: string): void {
-  router.push({ name: 'product-edit', params: { id } })
+  openInNewTab(router, { name: 'product-edit', params: { id } })
 }
 // Preserve the policy-wizard flow: ?new=1 on the list jumps straight to the
 // full-page create form (carrying the flag through).
