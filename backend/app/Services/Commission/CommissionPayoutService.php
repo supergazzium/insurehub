@@ -1026,7 +1026,8 @@ class CommissionPayoutService
         $sumCard = 0.0;
         $sumCommA = 0.0;    // ค่านายหน้าสุทธิ (A) = main + rider − (payoff + card)
         $sumWht = 0.0;
-        $sumPayable = 0.0;  // ยอดจ่ายสุทธิ = A − wht
+        $sumPayable = 0.0;  // ยอดจ่ายสุทธิ
+        $sumVat = 0.0;      // VAT column (corporate agents only)
         $i = 0;
         foreach ($items as $it) {
             $i++;
@@ -1035,8 +1036,24 @@ class CommissionPayoutService
             $payoff = (float) $it->snapshot_payoff_discount;
             $card = (float) $it->snapshot_card_fee;
             $commA = round($main + $rider - $payoff - $card, 2);
-            $wht = (float) $it->snapshot_wht_amount;
-            $payable = round($commA - $wht, 2);
+            // VAT + หัก ณ ที่จ่าย + ยอดจ่ายสุทธิ — 3 แบบตามประเภทตัวแทน (vatType):
+            //   '1' non-VAT      : VAT=0,            wht = C × 3%,         payable = C − wht
+            //   '3' VAT Include  : VAT = C − C/1.07, wht = (C/1.07) × 3%,  payable = C − VAT − wht
+            //   '2' VAT Exclude  : VAT = C × 7%,     wht = C × 3%,         payable = C + VAT − wht
+            if ($vatType === '3') {
+                $base = round($commA / 1.07, 2);
+                $vat = round($commA - $base, 2);
+                $wht = round($base * self::WHT_RATE, 2);
+                $payable = round($commA - $vat - $wht, 2);
+            } elseif ($vatType === '2') {
+                $vat = round($commA * 0.07, 2);
+                $wht = round($commA * self::WHT_RATE, 2);
+                $payable = round($commA + $vat - $wht, 2);
+            } else {
+                $vat = 0.0;
+                $wht = round($commA * self::WHT_RATE, 2);
+                $payable = round($commA - $wht, 2);
+            }
 
             $cust = $it->policy?->customer;
             $custName = $it->snapshot_customer_name
@@ -1056,6 +1073,7 @@ class CommissionPayoutService
                 'payoffDiscount' => $payoff,
                 'cardFee' => $card,
                 'commissionA' => $commA,
+                'vat' => $vat,
                 'wht' => $wht,
                 'payable' => $payable,
                 'note' => $it->snapshot_note,
@@ -1069,6 +1087,7 @@ class CommissionPayoutService
             $sumCommA += $commA;
             $sumWht += $wht;
             $sumPayable += $payable;
+            $sumVat += $vat;
         }
 
         // ── Per-agent adjustments (bonus / special_deduct / correction) ─────
@@ -1081,9 +1100,11 @@ class CommissionPayoutService
             ->sum('amount');
 
         // ── Summary block (mirrors the printed WHT recap) ───────────────────
-        // WHT is 3% of the base; each line shows its base and its 3% amount.
-        $whtFromCommission = round($sumCommA, 2);
-        $whtFromCommissionTax = round($whtFromCommission * self::WHT_RATE, 2);
+        // WHT is 3% of the taxable base. For VAT-include agents the base is the
+        // ex-VAT amount (commA / 1.07), so the WHT total already summed per-row
+        // ($sumWht) is the source of truth; derive the base shown back from it.
+        $whtFromCommissionTax = round($sumWht, 2);
+        $whtFromCommission = $vatType === '3' ? round($sumCommA / 1.07, 2) : round($sumCommA, 2);
         $whtFromBonus = round($bonus, 2);
         $whtFromBonusTax = round($whtFromBonus * self::WHT_RATE, 2);
         $whtFromPayoff = round($sumPayoff, 2);
@@ -1115,6 +1136,7 @@ class CommissionPayoutService
                 'payoffDiscount' => round($sumPayoff, 2),
                 'cardFee' => round($sumCard, 2),
                 'commissionA' => round($sumCommA, 2),
+                'vat' => round($sumVat, 2),
                 'wht' => round($sumWht, 2),
                 'payable' => round($sumPayable, 2),
             ],
