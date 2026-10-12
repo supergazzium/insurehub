@@ -509,7 +509,20 @@ onMounted(async () => {
             <div class="text-xs text-slate-400">Max age (0–99)</div>
             <EditableField :readonly="!editing" entity="products" :id="product.id" field="maxAge" type="number" :value="product.maxAge" @update="v => apply('maxAge', v)" />
           </div>
+          <!-- #16 — ระยะชำระเบี้ย / ระยะคุ้มครอง (เช่น 15/90). ค่าตั้งต้นของแผน; กรมธรรม์ override ได้ -->
+          <div>
+            <div class="text-xs text-slate-400">ชำระเบี้ย (ปี) · default</div>
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="payYears" type="number" :value="product.payYears" @update="v => apply('payYears', v)" />
+          </div>
+          <div>
+            <div class="text-xs text-slate-400">คุ้มครองถึงอายุ · default <span class="text-slate-300">(เช่น 90)</span></div>
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="coverageToAge" type="number" :value="product.coverageToAge" @update="v => apply('coverageToAge', v)" />
+          </div>
         </div>
+        <p v-if="(product.payYears || product.coverageToAge)" class="text-xs text-indigo-600 mt-2">
+          <i class="pi pi-info-circle mr-1" />แบบประกัน: {{ product.payYears || '–' }}/{{ product.coverageToAge || '–' }}
+          (ชำระเบี้ย {{ product.payYears || '–' }} ปี · คุ้มครองถึงอายุ {{ product.coverageToAge || '–' }})
+        </p>
       </section>
 
       <!-- Commission rates — two-panel editor. Right panel (hub→agent)

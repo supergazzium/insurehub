@@ -607,6 +607,16 @@ const rangeText = computed(() => {
                   <PolicyPeriodBadge :label="p.periodLabel" />
                   <i v-if="p.refAppToId" class="pi pi-replay text-[10px] text-teal-600" :title="t('policyCreate.renewal.renewedFrom')" />
                 </div>
+                <!-- #16 — 15/90 badge: จ่ายเบี้ย N ปี / คุ้มครองถึงอายุ M -->
+                <div v-if="p.termLabel && p.termLabel !== '–/–'" class="mt-0.5 flex items-center gap-1">
+                  <span class="inline-flex items-center px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 text-[10px] font-medium"
+                    :title="`จ่ายเบี้ย ${p.termLabel.split('/')[0]} ปี / คุ้มครองถึงอายุ ${p.termLabel.split('/')[1]}` + (p.coverageEndDate ? ` · หมดคุ้มครอง ${p.coverageEndDate}` : '')">
+                    {{ p.termLabel }}
+                  </span>
+                  <span v-if="p.coverageEndDate" class="text-[10px] text-slate-400" :title="'วันหมดความคุ้มครอง'">
+                    <i class="pi pi-shield text-[9px]" /> {{ p.coverageEndDate }}
+                  </span>
+                </div>
               </td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ p.customerName || p.customerCode }}</div>

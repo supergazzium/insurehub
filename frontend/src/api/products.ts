@@ -75,6 +75,8 @@ export interface ProductDetail extends ProductListRow {
   vehicleAgeMax: number | null
   durationYears: number
   payYears: number
+  /** #16 — คุ้มครองถึงอายุ N (เช่น 90); null = ไม่ใช่แบบ to-age */
+  coverageToAge: number | null
   premiumMode: PremiumMode
   /** งวดการชำระที่ผลิตภัณฑ์กำหนดเอง — null = ใช้ค่าเริ่มต้นตามประเภทประกัน. */
   allowedPremiumModes: PremiumMode[] | null

@@ -64,6 +64,9 @@ class PolicyController extends ApiController
                 'p.status', 'p.legacy_policy_status_id', 'p.new_or_renew',
                 'p.policy_year', 'p.customer_year', 'p.ref_app_to_id', 'p.installment_term',
                 'p.coverage', 'p.annual_premium', 'p.premium_mode',
+                // #16 — ระยะชำระเบี้ย / ระยะคุ้มครอง (15/90). policy overrides, product defaults.
+                'p.premium_paying_term', 'p.coverage_to_age', 'p.insured_person_birth_date',
+                'pr.pay_years as product_pay_years', 'pr.coverage_to_age as product_coverage_to_age',
                 'p.app_date', 'p.effective_date', 'p.expiry_date',
                 'p.issue_date', 'p.cancel_date',
                 'p.freelook_active', 'p.premium_check',

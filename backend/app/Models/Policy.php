@@ -146,6 +146,67 @@ class Policy extends Model
         return \App\Support\PolicyPeriodLabel::forPolicy($this);
     }
 
+    // ── #16: ระยะชำระเบี้ย / ระยะคุ้มครอง (e.g. 15/90) ──────────────────────
+    //
+    // Two independent axes. The premium-paying term says how many years the
+    // customer pays (and therefore how long we chase premium); coverage-to-age
+    // says until what age the policy protects (and therefore when coverage
+    // ends). Each has a per-policy value that falls back to the product default.
+
+    /** Effective premium-paying term in years: policy override → product default → null. */
+    public function getEffectivePremiumTermAttribute(): ?int
+    {
+        $term = $this->premium_paying_term ?? $this->product?->pay_years;
+        return ($term !== null && (int) $term > 0) ? (int) $term : null;
+    }
+
+    /** Effective coverage-until age: policy override → product default → null. */
+    public function getEffectiveCoverageToAgeAttribute(): ?int
+    {
+        $age = $this->coverage_to_age ?? $this->product?->coverage_to_age;
+        return ($age !== null && (int) $age > 0) ? (int) $age : null;
+    }
+
+    /**
+     * Coverage-end date = insured person's birthday + coverage-to-age years.
+     * Null when either the birthdate or the coverage age is unknown — we never
+     * guess a protection end date.
+     */
+    public function getCoverageEndDateAttribute(): ?\Illuminate\Support\Carbon
+    {
+        $age = $this->effective_coverage_to_age;
+        $birth = $this->insured_person_birth_date;
+        if ($age === null || $birth === null) {
+            return null;
+        }
+        return $birth->copy()->addYears($age);
+    }
+
+    /**
+     * Is a premium still owed by term? True while the current policy year is
+     * within the paying term (so reminders should keep firing); false once the
+     * term is complete ("จ่ายครบแล้ว"); null when the term is unknown.
+     */
+    public function getPremiumStillDueByTermAttribute(): ?bool
+    {
+        $term = $this->effective_premium_term;
+        if ($term === null) {
+            return null;
+        }
+        return (int) ($this->policy_year ?? 1) <= $term;
+    }
+
+    /** Display label "15/90" (premiumTerm/coverageAge); null if neither side is known. */
+    public function getTermLabelAttribute(): ?string
+    {
+        $term = $this->effective_premium_term;
+        $age = $this->effective_coverage_to_age;
+        if ($term === null && $age === null) {
+            return null;
+        }
+        return ($term ?? '–') . '/' . ($age ?? '–');
+    }
+
     public function riders(): HasMany
     {
         return $this->hasMany(PolicyRider::class);
