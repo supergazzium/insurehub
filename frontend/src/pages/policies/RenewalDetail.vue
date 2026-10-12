@@ -697,14 +697,25 @@ onMounted(load)
         <!-- Send quote to customer -->
         <div v-else-if="panel === 'send_quote'" class="rounded border border-slate-200 bg-slate-50 p-3">
           <p class="mb-2 text-xs font-medium text-slate-600">ส่งใบเสนอราคาให้ลูกค้า</p>
-          <input v-model="actions.sendForm.value.to" placeholder="อีเมลลูกค้า"
-            class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs" />
-          <textarea v-model="actions.sendForm.value.message" rows="4"
-            class="mb-2 w-full rounded border border-slate-300 px-2 py-1 text-xs"></textarea>
-          <div class="flex gap-2">
-            <button type="button" class="rounded bg-sky-600 px-3 py-1.5 text-xs text-white disabled:opacity-50"
-              :disabled="actions.saving.value" @click="doSend">ส่งอีเมลให้ลูกค้า</button>
-            <button type="button" class="rounded bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700"
+          <label class="mb-2 block">
+            <span class="mb-1 block text-[11px] text-slate-500">อีเมลลูกค้า</span>
+            <input v-model="actions.sendForm.value.to" type="email" placeholder="name@example.com"
+              class="w-full rounded border border-slate-300 px-2 py-1.5 text-xs focus:border-sky-400 focus:outline-none" />
+            <span v-if="!actions.sendForm.value.to" class="mt-1 block text-[11px] text-amber-600">
+              <i class="pi pi-exclamation-circle text-[10px]" /> ลูกค้ารายนี้ยังไม่มีอีเมลในระบบ — กรอกอีเมล หรือกด "ส่งเองแล้ว" เพื่อบันทึกว่าส่งผ่านช่องทางอื่น
+            </span>
+          </label>
+          <label class="mb-2 block">
+            <span class="mb-1 block text-[11px] text-slate-500">ข้อความถึงลูกค้า</span>
+            <textarea v-model="actions.sendForm.value.message" rows="6"
+              class="w-full rounded border border-slate-300 px-2 py-1.5 text-xs leading-relaxed focus:border-sky-400 focus:outline-none"></textarea>
+          </label>
+          <div class="flex flex-wrap gap-2">
+            <button type="button" class="rounded bg-sky-600 px-3 py-1.5 text-xs text-white hover:bg-sky-700 disabled:opacity-50"
+              :disabled="actions.saving.value || !actions.sendForm.value.to" @click="doSend">
+              <i class="pi pi-send text-[10px] mr-1" />ส่งอีเมลให้ลูกค้า
+            </button>
+            <button type="button" class="rounded bg-emerald-50 px-3 py-1.5 text-xs text-emerald-700 hover:bg-emerald-100 disabled:opacity-50"
               :disabled="actions.saving.value" @click="doManual('quote_sent')">ส่งเองแล้ว — บันทึก</button>
           </div>
         </div>
