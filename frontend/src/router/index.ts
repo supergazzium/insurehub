@@ -138,6 +138,7 @@ const routes: RouteRecordRaw[] = [
       { path: 'settings', name: 'tenant-settings', component: TenantSettings, meta: { moduleKey: 'tenant-settings' } },
       { path: 'account', name: 'user-account', component: UserAccount },
       { path: 'carriers', name: 'carriers', component: CarrierManagement, meta: { moduleKey: 'carriers' } },
+      { path: 'carriers/:id/edit', name: 'carrier-edit', component: () => import('../pages/carriers/CarrierDetailPage.vue'), meta: { moduleKey: 'carriers' } },
       { path: 'products', name: 'products', component: ProductManagement, meta: { moduleKey: 'products' } },
       { path: 'products/new', name: 'product-new', component: () => import('../pages/products/ProductCreatePage.vue'), meta: { moduleKey: 'products' } },
       { path: 'products/:id/edit', name: 'product-edit', component: () => import('../pages/products/ProductDetailPage.vue'), meta: { moduleKey: 'products' } },
