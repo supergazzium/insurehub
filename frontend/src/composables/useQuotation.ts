@@ -36,6 +36,15 @@ export interface QuotationContext {
   productName: string
 }
 
+/** หนึ่งรายการในตารางใบเสนอราคา (FlowAccount style). subItems = รายชื่อผู้เอาประกัน ฯลฯ */
+export interface QuotationLineItem {
+  description: string
+  subItems?: string[]
+  quantity: number
+  unitPrice: number
+  amount: number
+}
+
 export interface Quotation extends QuotationContext, QuotationExtraction {
   quotationNumber: string
   generatedAt: string
@@ -44,6 +53,24 @@ export interface Quotation extends QuotationContext, QuotationExtraction {
   agencyPhone: string
   agencyEmail: string
   validUntil: string
+
+  // ── FlowAccount-style document fields (optional; fall back gracefully) ──
+  /** ที่อยู่เต็มของบริษัทผู้ขาย (หลายบรรทัด \n ได้) */
+  agencyAddress?: string | null
+  agencyTaxId?: string | null
+  agencyMobile?: string | null
+  agencyWebsite?: string | null
+  /** ชื่อผู้ขาย (sales rep) แสดงในหัว "ผู้ขาย" */
+  sellerName?: string | null
+  /** ชื่องาน เช่น "ประกันเดินทางรายปี แผนผู้บริหาร 5 ท่าน" */
+  jobTitle?: string | null
+  /** ข้อมูลลูกค้าสำหรับหัวเอกสาร */
+  clientAddress?: string | null
+  clientTaxId?: string | null
+  /** VAT rate เป็น % (ประกันส่วนใหญ่ 0) */
+  vatRate?: number
+  /** รายการในตาราง; ถ้าไม่ส่งมา จะสังเคราะห์ 1 รายการจาก coverage/premium */
+  lineItems?: QuotationLineItem[]
 }
 
 // ── Build the AI prompt ────────────────────────────────────────────────────

@@ -19,6 +19,7 @@ import {
   type EmailTemplate as StoredEmailTemplate,
 } from '../../stores/emailTemplates'
 import { useQuotation, type Quotation, type QuotationExtraction } from '../../composables/useQuotation'
+import { fetchTenant, type TenantSettingsRow } from '../../api/tenant'
 import { useQuotationPdf } from '../../composables/useQuotationPdf'
 import {
   useCaseStatus,
@@ -2609,9 +2610,17 @@ const quotationContext = ref<{
 const quotationDraft = ref<Quotation | null>(null)
 
 // Tenant/agency info (eventually from tenant store)
-const QUOTATION_AGENCY_NAME = 'บริษัท เอบีซี อินชัวรันส์ จำกัด'
-const QUOTATION_AGENCY_PHONE = '02-555-0100'
-const QUOTATION_AGENCY_EMAIL = 'support@abc-insure.co.th'
+// ข้อมูลบริษัทผู้ขายบนใบเสนอราคา — ดึงจาก tenant settings จริง (โหลดครั้งเดียว).
+// Fallback ถ้ายังไม่ได้ตั้งค่า / โหลดไม่สำเร็จ.
+const agencyTenant = ref<TenantSettingsRow | null>(null)
+onMounted(() => { void fetchTenant().then((x) => { agencyTenant.value = x.data }).catch(() => undefined) })
+function tenantAddressLine(t: TenantSettingsRow | null): string | null {
+  if (!t) return null
+  return [t.address, t.district, t.amphoe, t.province, t.postcode].filter(Boolean).join(' ') || null
+}
+const QUOTATION_AGENCY_NAME = 'บริษัท อินชัวร์ฮับ จำกัด'
+const QUOTATION_AGENCY_PHONE = '020044722'
+const QUOTATION_AGENCY_EMAIL = 'support@insurehub.co.th'
 
 function buildEmptyExtraction(): QuotationExtraction {
   return {
@@ -2645,9 +2654,15 @@ function buildQuotationFrom(caseRef: SupportCase, carrierCode: string, extractio
     quotationNumber: quotationApi.makeQuotationNumber(caseRef.caseId),
     generatedAt: new Date().toLocaleDateString('th-TH', { day: 'numeric', month: 'short', year: 'numeric' }),
     agentName: caseRef.agentName,
-    agencyName: QUOTATION_AGENCY_NAME,
-    agencyPhone: QUOTATION_AGENCY_PHONE,
-    agencyEmail: QUOTATION_AGENCY_EMAIL,
+    agencyName: agencyTenant.value?.name || QUOTATION_AGENCY_NAME,
+    agencyPhone: agencyTenant.value?.phone || QUOTATION_AGENCY_PHONE,
+    agencyEmail: agencyTenant.value?.email || QUOTATION_AGENCY_EMAIL,
+    // FlowAccount-style fields from the real tenant profile.
+    agencyAddress: tenantAddressLine(agencyTenant.value),
+    agencyTaxId: agencyTenant.value?.taxId ?? null,
+    agencyMobile: null,
+    agencyWebsite: null,
+    sellerName: caseRef.agentName,
     validUntil: quotationApi.defaultValidUntil(),
   }
 }
