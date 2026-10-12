@@ -19,7 +19,8 @@
 
 import { jsPDF } from 'jspdf'
 import html2canvas from 'html2canvas'
-import type { Quotation } from './useQuotation'
+import type { Quotation, QuotationLineItem } from './useQuotation'
+import { bahtText } from '../utils/bahtText'
 
 // ── Brand palette (matches the InsureHub logo + tailwind brand scale) ──────
 export const BRAND = {
@@ -53,17 +54,7 @@ export async function loadLogo(): Promise<string | null> {
   } catch { return null }
 }
 
-const fmtTHB = (n: number): string => n.toLocaleString('th-TH')
-
-function premiumModeLabel(mode: Quotation['premium_mode']): string {
-  return {
-    monthly: 'รายเดือน',
-    quarterly: 'รายไตรมาส',
-    semiannual: 'ราย 6 เดือน',
-    annual: 'รายปี',
-    single: 'จ่ายครั้งเดียว',
-  }[mode]
-}
+const money2 = (n: number): string => Number(n || 0).toLocaleString('th-TH', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 
 /**
  * Renders the quotation as an HTML node, then passes it to jsPDF.html()
@@ -75,141 +66,156 @@ function buildQuotationHtml(q: Quotation, logo: string | null): HTMLElement {
   const wrapper = document.createElement('div')
   wrapper.style.cssText = `
     width: 794px;
-    padding: 0 0 40px;
-    font-family: 'IBM Plex Sans Thai', 'Sarabun', system-ui, sans-serif;
+    min-height: 1123px;
+    padding: 46px 52px 40px;
+    position: relative;
+    font-family: 'Sarabun', 'IBM Plex Sans Thai', system-ui, sans-serif;
     background: #ffffff;
-    color: #1e293b;
+    color: #1a1a1a;
     font-size: 13px;
     line-height: 1.5;
+    box-sizing: border-box;
   `
 
-  const carrier = q.carrierName
-  const summaryRow = (label: string, value: string) =>
-    `<tr>
-      <td style="padding:6px 12px 6px 0; color:#64748b; vertical-align:top; width:160px;">${label}</td>
-      <td style="padding:6px 0; color:#0f172a;">${value}</td>
-    </tr>`
+  // ── รายการในตาราง: ถ้าไม่มี lineItems → สังเคราะห์ 1 รายการจาก product/coverage ──
+  const items: QuotationLineItem[] = (q.lineItems && q.lineItems.length)
+    ? q.lineItems
+    : [{
+        description: `${escapeHtml(q.carrierName)} ${escapeHtml(q.productName)}`.trim() || escapeHtml(q.productName),
+        quantity: 1,
+        unitPrice: q.annual_premium,
+        amount: q.annual_premium,
+      }]
 
-  const listSection = (title: string, items: string[]) => {
-    if (!items.length) return ''
-    return `
-      <section style="margin-top:24px;">
-        <h3 style="font-size:14px; font-weight:600; color:#0f172a; margin:0 0 8px; border-bottom:2px solid #1f8893; padding-bottom:4px;">${title}</h3>
-        <ol style="margin:0; padding-left:20px; color:#334155;">
-          ${items.map((x) => `<li style="margin-bottom:4px;">${escapeHtml(x)}</li>`).join('')}
-        </ol>
-      </section>`
+  const subtotal = items.reduce((s2, it) => s2 + (Number(it.amount) || 0), 0)
+  const vatRate = q.vatRate ?? 0
+  const vat = Math.round(subtotal * (vatRate / 100) * 100) / 100
+  const grand = subtotal + vat
+
+  // ที่อยู่ผู้ขาย: หลายบรรทัดด้วย \n
+  const agencyAddrHtml = (q.agencyAddress || '')
+    .split('\n').map((l) => escapeHtml(l.trim())).filter(Boolean).join('<br/>')
+
+  const sellerLines: string[] = []
+  if (agencyAddrHtml) sellerLines.push(agencyAddrHtml)
+  if (q.agencyTaxId) sellerLines.push(`เลขประจำตัวผู้เสียภาษี ${escapeHtml(q.agencyTaxId)}`)
+  if (q.agencyPhone) sellerLines.push(`โทร. ${escapeHtml(q.agencyPhone)}`)
+  if (q.agencyMobile) sellerLines.push(`เบอร์มือถือ ${escapeHtml(q.agencyMobile)}`)
+  if (q.agencyWebsite) sellerLines.push(escapeHtml(q.agencyWebsite))
+
+  const metaRow = (k: string, v: string, extraPad = false) =>
+    `<tr${extraPad ? ' style="border-top:1px solid #d9dde3;"' : ''}>
+       <td style="padding:${extraPad ? '9px' : '5px'} 8px 5px; font-size:12.5px; color:#1f8893; width:64px; vertical-align:top; border-bottom:1px solid #eef1f4;">${k}</td>
+       <td style="padding:${extraPad ? '9px' : '5px'} 8px 5px; font-size:12.5px; color:#1a1a1a; vertical-align:top; border-bottom:1px solid #eef1f4;">${v}</td>
+     </tr>`
+
+  const itemRow = (it: QuotationLineItem, i: number) => {
+    const subs = (it.subItems && it.subItems.length)
+      ? `<ul style="margin:4px 0 0; padding:0; list-style:none;">
+           ${it.subItems.map((x) => `<li style="font-size:12.5px; padding:1px 0 1px 6px; color:#1a1a1a;">${escapeHtml(x)}</li>`).join('')}
+         </ul>`
+      : ''
+    return `<tr>
+      <td style="padding:9px 10px; font-size:13px; vertical-align:top; color:#6b7280;">${i + 1}</td>
+      <td style="padding:9px 10px; font-size:13px; vertical-align:top;">
+        <div style="font-weight:500;">${escapeHtml(it.description)}</div>${subs}
+      </td>
+      <td style="padding:9px 10px; font-size:13px; vertical-align:top; text-align:right; font-variant-numeric:tabular-nums;">${Number(it.quantity).toLocaleString('th-TH')}</td>
+      <td style="padding:9px 10px; font-size:13px; vertical-align:top; text-align:right; font-variant-numeric:tabular-nums;">${money2(it.unitPrice)}</td>
+      <td style="padding:9px 10px; font-size:13px; vertical-align:top; text-align:right; font-variant-numeric:tabular-nums;">${money2(it.amount)}</td>
+    </tr>`
   }
 
+  const totalRow = (k: string, v: string, grandTotal = false) =>
+    `<tr${grandTotal ? ' style="border-top:1.5px solid #d9dde3;"' : ''}>
+       <td style="padding:${grandTotal ? '9px' : '6px'} 10px 6px; text-align:right; color:#1f8893; font-size:13px; ${grandTotal ? 'font-weight:700;' : ''}">${k}</td>
+       <td style="padding:${grandTotal ? '9px' : '6px'} 10px 6px; text-align:right; width:150px; font-size:13px; font-variant-numeric:tabular-nums; ${grandTotal ? 'font-weight:700;' : ''}">${v}</td>
+     </tr>`
+
   wrapper.innerHTML = `
-    <!-- Branded header band -->
-    <header style="background:${BRAND.teal}; color:#ffffff; padding:28px 48px; display:flex; justify-content:space-between; align-items:center;">
-      <div style="display:flex; align-items:center; gap:16px;">
-        ${logo
-          ? `<img src="${logo}" alt="InsureHub" style="height:52px; width:auto; background:#ffffff; padding:8px 12px; border-radius:8px;" />`
-          : `<div style="font-size:24px; font-weight:700; letter-spacing:-0.5px;">${escapeHtml(q.agencyName)}</div>`}
-      </div>
-      <div style="text-align:right;">
-        <div style="font-size:12px; text-transform:uppercase; letter-spacing:2px; opacity:0.85;">ใบเสนอราคา</div>
-        <div style="font-size:11px; letter-spacing:1px; opacity:0.7;">QUOTATION</div>
-        <div style="font-family:'Courier New',monospace; font-size:15px; font-weight:700; margin-top:6px;">
-          ${escapeHtml(q.quotationNumber)}
-        </div>
-      </div>
-    </header>
+    <!-- Orange corner fold -->
+    <div style="position:absolute; top:0; right:0; width:0; height:0; border-style:solid; border-width:0 64px 64px 0; border-color:transparent #f5a623 transparent transparent;"></div>
 
-    <!-- Company info + dates strip -->
-    <div style="padding:14px 48px; background:${BRAND.tealTint}; border-bottom:2px solid ${BRAND.amber}; display:flex; justify-content:space-between; align-items:flex-start; font-size:11px; color:${BRAND.slate};">
-      <div>
-        <div style="font-weight:700; color:${BRAND.tealDark}; font-size:13px;">${escapeHtml(q.agencyName)}</div>
-        <div style="margin-top:2px;">โทร ${escapeHtml(q.agencyPhone)} · ${escapeHtml(q.agencyEmail)}</div>
+    <!-- Header -->
+    <div style="display:flex; justify-content:space-between; align-items:flex-start; gap:24px;">
+      <div style="flex:1;">
+        ${logo ? `<img src="${logo}" alt="logo" style="height:58px; width:auto; display:block; margin-bottom:14px;" />` : ''}
+        <div style="font-weight:700; font-size:14px; color:#1a1a1a;">${escapeHtml(q.agencyName)}</div>
+        <div style="font-size:12px; line-height:1.7; margin-top:2px;">${sellerLines.join('<br/>')}</div>
       </div>
-      <div style="text-align:right;">
-        <div>วันที่ออก: <span style="color:${BRAND.ink};">${escapeHtml(q.generatedAt)}</span></div>
-        <div style="margin-top:2px;">ใบเสนอราคามีผลถึง: <span style="color:${BRAND.ink}; font-weight:600;">${escapeHtml(q.validUntil)}</span></div>
+      <div style="width:320px; flex:none;">
+        <div style="text-align:center; font-size:22px; font-weight:700; color:#1f8893; letter-spacing:1px; margin:2px 0 14px;">ใบเสนอราคา</div>
+        <table style="width:100%; border-collapse:collapse; border:1px solid #d9dde3; border-radius:4px; overflow:hidden;">
+          ${metaRow('เลขที่', escapeHtml(q.quotationNumber))}
+          ${metaRow('วันที่', escapeHtml(q.generatedAt))}
+          ${metaRow('ผู้ขาย', escapeHtml(q.sellerName || q.agentName || '—'))}
+          ${q.jobTitle ? metaRow('ชื่องาน', escapeHtml(q.jobTitle), true) : ''}
+        </table>
       </div>
     </div>
 
-    <!-- Body -->
-    <div style="padding:28px 48px 0;">
-    <!-- Proposal summary callout -->
-    <div style="background:${BRAND.tealTint}; border:1px solid ${BRAND.tealLine}; border-radius:8px; padding:12px 16px; margin-bottom:24px;">
-      <div style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:1px; color:${BRAND.teal};">สรุปข้อเสนอ</div>
-      <div style="font-size:14px; color:${BRAND.ink}; margin-top:4px;">${escapeHtml(q.proposal_summary || '—')}</div>
+    <!-- Customer -->
+    <div style="margin-top:26px;">
+      <div style="color:#f5a623; font-weight:600; font-size:12.5px; margin-bottom:3px;">ลูกค้า</div>
+      <div style="font-weight:600;">${escapeHtml(q.clientName)}</div>
+      ${q.clientAddress ? `<div>${escapeHtml(q.clientAddress)}</div>` : ''}
+      ${q.clientTaxId ? `<div>เลขประจำตัวผู้เสียภาษี ${escapeHtml(q.clientTaxId)}</div>`
+        : (q.clientIdCard ? `<div>เลขบัตรประชาชน ${escapeHtml(q.clientIdCard)}</div>` : '')}
     </div>
 
-    <!-- Client section -->
-    <section style="margin-top:8px;">
-      <h3 style="font-size:14px; font-weight:600; color:#0f172a; margin:0 0 8px; border-bottom:2px solid #1f8893; padding-bottom:4px;">ข้อมูลผู้เอาประกัน</h3>
-      <table style="width:100%; border-collapse:collapse; font-size:12px;">
-        ${summaryRow('ชื่อ-นามสกุล', escapeHtml(q.clientName))}
-        ${q.clientIdCard ? summaryRow('เลขบัตรประชาชน', `<span style="font-family:monospace;">${escapeHtml(q.clientIdCard)}</span>`) : ''}
-        ${q.clientAge ? summaryRow('อายุ', `${q.clientAge} ปี`) : ''}
-        ${q.clientOccupation ? summaryRow('อาชีพ', escapeHtml(q.clientOccupation)) : ''}
-        ${summaryRow('เลขเคส', `<span style="font-family:monospace;">${escapeHtml(q.caseId)}</span>`)}
+    <!-- Items -->
+    <table style="width:100%; border-collapse:collapse; margin-top:22px;">
+      <thead>
+        <tr>
+          <th style="font-weight:600; font-size:12.5px; color:#6b7280; border-bottom:1.5px solid #d9dde3; padding:8px 10px; text-align:left; width:34px;">#</th>
+          <th style="font-weight:600; font-size:12.5px; color:#6b7280; border-bottom:1.5px solid #d9dde3; padding:8px 10px; text-align:left;">รายละเอียด</th>
+          <th style="font-weight:600; font-size:12.5px; color:#6b7280; border-bottom:1.5px solid #d9dde3; padding:8px 10px; text-align:right; width:70px;">จำนวน</th>
+          <th style="font-weight:600; font-size:12.5px; color:#6b7280; border-bottom:1.5px solid #d9dde3; padding:8px 10px; text-align:right; width:120px;">ราคาต่อหน่วย</th>
+          <th style="font-weight:600; font-size:12.5px; color:#6b7280; border-bottom:1.5px solid #d9dde3; padding:8px 10px; text-align:right; width:120px;">ยอดรวม</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${items.map(itemRow).join('')}
+        <tr><td colspan="5" style="border-bottom:1px solid #d9dde3; padding:0; height:0;"></td></tr>
+      </tbody>
+    </table>
+
+    <!-- Totals -->
+    <div style="display:flex; justify-content:flex-end; margin-top:10px;">
+      <table style="border-collapse:collapse; min-width:340px;">
+        ${totalRow('รวมเป็นเงิน', `${money2(subtotal)} บาท`)}
+        ${totalRow(`ภาษีมูลค่าเพิ่ม ${vatRate}%`, `${money2(vat)} บาท`)}
+        ${totalRow('จำนวนเงินรวมทั้งสิ้น', `${money2(grand)} บาท`, true)}
       </table>
-    </section>
+    </div>
+    <div style="text-align:right; margin-top:6px; color:#6b7280; font-size:12.5px;">(${escapeHtml(bahtText(grand))})</div>
 
-    <!-- Premium + coverage highlight -->
-    <section style="margin-top:24px; display:flex; gap:12px;">
-      <div style="flex:1; background:${BRAND.teal}; color:#ffffff; border-radius:10px; padding:16px 18px;">
-        <div style="font-size:10px; text-transform:uppercase; letter-spacing:1px; opacity:0.85;">ทุนประกัน</div>
-        <div style="font-size:24px; font-weight:700; margin-top:2px;">฿${fmtTHB(q.coverage_amount)}</div>
-      </div>
-      <div style="flex:1; background:${BRAND.amber}; color:#ffffff; border-radius:10px; padding:16px 18px;">
-        <div style="font-size:10px; text-transform:uppercase; letter-spacing:1px; opacity:0.9;">เบี้ยประกัน (${escapeHtml(premiumModeLabel(q.premium_mode))})</div>
-        <div style="font-size:24px; font-weight:700; margin-top:2px;">฿${fmtTHB(q.annual_premium)}</div>
-      </div>
-    </section>
+    ${q.next_steps ? `<div style="margin-top:20px; color:#6b7280; font-size:12px;">หมายเหตุ: ${escapeHtml(q.next_steps)}</div>` : ''}
 
-    <!-- Insurance proposal -->
-    <section style="margin-top:24px;">
-      <h3 style="font-size:14px; font-weight:600; color:${BRAND.ink}; margin:0 0 8px; border-bottom:2px solid ${BRAND.teal}; padding-bottom:4px;">รายละเอียดความคุ้มครอง</h3>
-      <table style="width:100%; border-collapse:collapse; font-size:12px;">
-        ${summaryRow('บริษัทประกัน', `<strong>${escapeHtml(carrier)}</strong> <span style="color:#94a3b8;">(${escapeHtml(q.carrierCode)})</span>`)}
-        ${summaryRow('ผลิตภัณฑ์', escapeHtml(q.productName))}
-        ${q.policy_number ? summaryRow('เลขกรมธรรม์', `<span style="font-family:monospace;">${escapeHtml(q.policy_number)}</span>`) : ''}
-        ${summaryRow('ระยะเวลาคุ้มครอง', `${q.coverage_period_years} ปี`)}
-        ${summaryRow('ระยะเวลาชำระเบี้ย', `${q.payment_period_years} ปี`)}
-        ${q.effective_date_thai ? summaryRow('วันคุ้มครองเริ่ม', escapeHtml(q.effective_date_thai)) : ''}
-        ${q.waiting_period_days > 0 ? summaryRow('ระยะเวลารอคอย', `${q.waiting_period_days} วัน`) : ''}
-      </table>
-    </section>
-
-    ${listSection('สัญญาเพิ่มเติม (Riders)', q.riders)}
-    ${listSection('เงื่อนไขความคุ้มครอง', q.conditions)}
-    ${listSection('ข้อยกเว้น', q.exclusions)}
-    ${listSection('เอกสารที่ต้องเตรียม', q.documents_required)}
-
-    <!-- Next steps -->
-    ${q.next_steps ? `<section style="margin-top:24px; background:#fff8eb; border-left:4px solid ${BRAND.amber}; padding:12px 16px; border-radius:0 8px 8px 0;">
-      <div style="font-size:10px; font-weight:600; text-transform:uppercase; letter-spacing:1px; color:#b2440a;">ขั้นถัดไป</div>
-      <div style="font-size:13px; color:${BRAND.ink}; margin-top:4px;">${escapeHtml(q.next_steps)}</div>
-    </section>` : ''}
-
-    <!-- Signature section -->
-    <section style="margin-top:48px; display:flex; gap:48px;">
-      <div style="flex:1;">
-        <div style="border-top:1px solid #94a3b8; padding-top:6px; font-size:11px; color:${BRAND.slate}; text-align:center;">
-          ผู้เสนอราคา<br /><span style="color:${BRAND.ink};">${escapeHtml(q.agentName || q.agencyName)}</span>
+    <!-- Signatures -->
+    <div style="display:flex; gap:48px; margin-top:110px;">
+      <div style="flex:1; text-align:center;">
+        <div style="font-size:12px; margin-bottom:56px;">ในนาม ${escapeHtml(q.clientName)}</div>
+        <div style="display:flex; gap:16px; justify-content:center;">
+          <div style="flex:1;"><div style="border-top:1px solid #1a1a1a; padding-top:5px; font-size:11.5px; color:#6b7280;">ผู้สั่งซื้อสินค้า</div></div>
+          <div style="flex:1; max-width:90px;"><div style="border-top:1px solid #1a1a1a; padding-top:5px; font-size:11.5px; color:#6b7280;">วันที่</div></div>
         </div>
       </div>
-      <div style="flex:1;">
-        <div style="border-top:1px solid #94a3b8; padding-top:6px; font-size:11px; color:${BRAND.slate}; text-align:center;">
-          ผู้เอาประกัน<br /><span style="color:${BRAND.ink};">${escapeHtml(q.clientName)}</span>
+      <div style="flex:1; text-align:center;">
+        <div style="font-size:12px; margin-bottom:56px;">ในนาม ${escapeHtml(q.agencyName)}</div>
+        <div style="display:flex; gap:16px; justify-content:center;">
+          <div style="flex:1;"><div style="border-top:1px solid #1a1a1a; padding-top:5px; font-size:11.5px; color:#6b7280;">ผู้อนุมัติ</div></div>
+          <div style="flex:1; max-width:90px;"><div style="border-top:1px solid #1a1a1a; padding-top:5px; font-size:11.5px; color:#6b7280;">วันที่</div></div>
         </div>
       </div>
-    </section>
-    </div><!-- /body -->
+    </div>
 
-    <!-- Footer band -->
-    <footer style="margin-top:40px; background:${BRAND.tealDark}; color:#cbd5e1; padding:16px 48px; font-size:10px; text-align:center;">
-      <span style="color:#ffffff; font-weight:600;">${escapeHtml(q.agencyName)}</span> · โทร ${escapeHtml(q.agencyPhone)} · ${escapeHtml(q.agencyEmail)}
-      <br style="line-height:1.8;" />เงื่อนไขความคุ้มครองเป็นไปตามที่บริษัทประกันกำหนด · เอกสารฉบับนี้เป็นใบเสนอราคา ไม่ใช่กรมธรรม์
-    </footer>
+    <!-- Footer -->
+    <div style="margin-top:34px; text-align:right; color:#6b7280; font-size:11px;">
+      ออกโดยระบบ <span style="color:#1f8893; font-weight:600;">InsureHub</span> · ระบบจัดการตัวแทนประกันภัย
+    </div>
   `
 
-  // Stage the node off-screen so jsPDF can read its rendered layout
   wrapper.style.position = 'fixed'
   wrapper.style.left = '-9999px'
   wrapper.style.top = '0'
