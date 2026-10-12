@@ -19,6 +19,7 @@ export interface AuthUser {
   locale: string
   tenantId: string | null
   agentId: string | null
+  lineLinked?: boolean
 }
 
 interface LoginResponse {

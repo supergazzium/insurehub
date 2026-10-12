@@ -69,4 +69,15 @@ return [
         'poll_window_minutes' => (int) env('ZOHO_POLL_WINDOW_MINUTES', 10),
     ],
 
+    // #1 — LINE Login (OAuth 2.0 / OIDC) for agents. Create a "LINE Login"
+    // channel at https://developers.line.biz, then set these in .env. The
+    // callback must be registered in the channel as a Callback URL.
+    'line' => [
+        'channel_id' => env('LINE_CHANNEL_ID'),
+        'channel_secret' => env('LINE_CHANNEL_SECRET'),
+        // Where LINE redirects back after the user authorises. Must match a
+        // Callback URL registered on the channel exactly.
+        'redirect' => env('LINE_REDIRECT_URI', env('APP_URL') . '/api/v1/auth/line/callback'),
+    ],
+
 ];

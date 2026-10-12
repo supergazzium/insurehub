@@ -274,3 +274,15 @@ export type { AgentRelation, AgentRelations } from './agents'
 export function fetchMyRelations() {
   return api.get<import('./agents').AgentRelations>('me/agent/relations')
 }
+
+// #1 — LINE Login. The login-url is public (no auth); connect-url requires the
+// signed-in user. Both return a LINE authorize URL for the browser to visit.
+export function fetchLineLoginUrl() {
+  return api.get<{ url: string }>('auth/line/login-url')
+}
+export function fetchLineConnectUrl() {
+  return api.get<{ url: string }>('auth/line/connect-url')
+}
+export function disconnectLine() {
+  return api.post<{ message: string }>('auth/line/disconnect', {})
+}

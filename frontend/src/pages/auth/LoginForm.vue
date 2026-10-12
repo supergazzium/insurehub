@@ -4,11 +4,12 @@
 //   - agent login (/agent/login)  → variant="agent", rejects internal users
 // Keeps one implementation of the credentials + MFA flow; the variant only
 // changes which user type is allowed and where a mismatched user is sent.
-import { ref, reactive, computed } from 'vue'
+import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter, useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import { useAuthStore } from '../../stores/auth'
-import { ApiError } from '../../api/client'
+import { ApiError, setToken } from '../../api/client'
+import { fetchLineLoginUrl } from '../../api/portal'
 
 const props = defineProps<{
   /** Which audience this login page serves. */
@@ -108,6 +109,54 @@ function onMfaPaste(e: ClipboardEvent) {
   digits.forEach((d, i) => (mfaCode.value[i] = d))
   mfaInputs.value[Math.min(digits.length, 5)]?.focus()
 }
+
+// ── #1 LINE Login (agent variant only) ──────────────────────────────────────
+const lineBusy = ref(false)
+const LINE_ERRORS: Record<string, string> = {
+  not_configured: 'LINE Login ยังไม่ได้ตั้งค่าในระบบ',
+  cancelled: 'ยกเลิกการเข้าสู่ระบบด้วย LINE',
+  not_linked: 'บัญชี LINE นี้ยังไม่ได้เชื่อมกับบัญชีตัวแทน — กรุณาเข้าสู่ระบบด้วยอีเมลแล้วเชื่อม LINE ในหน้าตั้งค่าก่อน',
+  exchange_failed: 'เชื่อมต่อ LINE ไม่สำเร็จ ลองใหม่อีกครั้ง',
+  bad_state: 'คำขอหมดอายุ กรุณาลองใหม่',
+  no_profile: 'อ่านข้อมูลจาก LINE ไม่สำเร็จ',
+}
+
+async function lineLogin(): Promise<void> {
+  errorMsg.value = ''
+  lineBusy.value = true
+  try {
+    const { url } = await fetchLineLoginUrl()
+    window.location.href = url
+  } catch (err) {
+    errorMsg.value = err instanceof ApiError && err.status === 503
+      ? LINE_ERRORS.not_configured
+      : 'เริ่มการเข้าสู่ระบบด้วย LINE ไม่สำเร็จ'
+    lineBusy.value = false
+  }
+}
+
+// On return from LINE: a token arrives in the URL fragment (#line_token=…) on
+// success, or ?line_error=… on failure. Handle both, then clean the URL.
+onMounted(async () => {
+  const err = typeof route.query.line_error === 'string' ? route.query.line_error : ''
+  if (err) {
+    errorMsg.value = LINE_ERRORS[err] ?? 'เข้าสู่ระบบด้วย LINE ไม่สำเร็จ'
+    history.replaceState(null, '', route.path)
+    return
+  }
+  const hash = window.location.hash
+  const m = hash.match(/line_token=([^&]+)/)
+  if (m) {
+    history.replaceState(null, '', route.path) // strip the token from the URL
+    setToken(decodeURIComponent(m[1]))
+    try {
+      await authStore.restore()          // hydrate the user from the token
+      router.push(homeRoute())
+    } catch {
+      errorMsg.value = 'เข้าสู่ระบบด้วย LINE ไม่สำเร็จ'
+    }
+  }
+})
 </script>
 
 <template>
@@ -164,6 +213,20 @@ function onMfaPaste(e: ClipboardEvent) {
           <i v-if="submitting" class="pi pi-spin pi-spinner" /><span>{{ t('auth.login.submit') }}</span>
         </button>
       </form>
+
+      <!-- #1 — LINE Login (agent portal only). -->
+      <template v-if="variant === 'agent'">
+        <div class="my-5 flex items-center gap-3 text-xs text-slate-400">
+          <span class="h-px flex-1 bg-slate-200" />หรือ<span class="h-px flex-1 bg-slate-200" />
+        </div>
+        <button type="button" :disabled="lineBusy" @click="lineLogin"
+          class="w-full py-2.5 rounded-lg bg-[#06C755] text-white font-medium hover:bg-[#05b34c] transition disabled:opacity-50 flex items-center justify-center gap-2">
+          <i v-if="lineBusy" class="pi pi-spin pi-spinner" />
+          <i v-else class="pi pi-comment" />
+          เข้าสู่ระบบด้วย LINE
+        </button>
+        <p class="mt-2 text-center text-[11px] text-slate-400">ต้องเชื่อม LINE กับบัญชีในหน้าตั้งค่าก่อนครั้งแรก</p>
+      </template>
 
       <!-- Agent page: offer self-registration. Both pages cross-link. -->
       <p v-if="variant === 'agent'" class="text-center text-sm text-slate-500 mt-6">

@@ -1,12 +1,58 @@
 <script setup lang="ts">
 // Change-password form. The controller revokes all *other* Sanctum tokens
 // on success, so the current session survives but other devices sign out.
-import { computed, reactive, ref } from 'vue'
+import { computed, reactive, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { changePassword } from '../../api/portal'
+import { useRoute } from 'vue-router'
+import { changePassword, fetchLineConnectUrl, disconnectLine } from '../../api/portal'
 import { ApiError } from '../../api/client'
+import { useAuthStore } from '../../stores/auth'
 
 const { t } = useI18n()
+const route = useRoute()
+const auth = useAuthStore()
+
+// #1 — LINE connect/disconnect. lineLinked comes from the auth user payload.
+const lineLinked = computed(() => auth.user?.lineLinked ?? false)
+const lineBusy = ref(false)
+const lineMsg = ref<{ ok: boolean; text: string } | null>(null)
+
+async function connectLine(): Promise<void> {
+  lineBusy.value = true
+  lineMsg.value = null
+  try {
+    const { url } = await fetchLineConnectUrl()
+    window.location.href = url
+  } catch (e) {
+    lineMsg.value = { ok: false, text: e instanceof ApiError && e.status === 503 ? 'LINE Login ยังไม่ได้ตั้งค่า' : 'เริ่มเชื่อม LINE ไม่สำเร็จ' }
+    lineBusy.value = false
+  }
+}
+async function unlinkLine(): Promise<void> {
+  lineBusy.value = true
+  lineMsg.value = null
+  try {
+    await disconnectLine()
+    await auth.restore()        // refresh lineLinked
+    lineMsg.value = { ok: true, text: 'ยกเลิกการเชื่อม LINE แล้ว' }
+  } catch {
+    lineMsg.value = { ok: false, text: 'ยกเลิกการเชื่อมไม่สำเร็จ' }
+  } finally {
+    lineBusy.value = false
+  }
+}
+
+// Handle the redirect back from LINE connect.
+onMounted(async () => {
+  if (route.query.line_connected === '1') {
+    await auth.restore()
+    lineMsg.value = { ok: true, text: 'เชื่อม LINE สำเร็จ — ครั้งถัดไปเข้าสู่ระบบด้วย LINE ได้เลย' }
+    history.replaceState(null, '', route.path)
+  } else if (route.query.line_error === 'already_linked') {
+    lineMsg.value = { ok: false, text: 'บัญชี LINE นี้ถูกเชื่อมกับบัญชีอื่นแล้ว' }
+    history.replaceState(null, '', route.path)
+  }
+})
 
 const form = reactive({
   currentPassword: '',
@@ -83,5 +129,31 @@ async function submit(): Promise<void> {
         {{ t('portal.settings.save') }}
       </button>
     </form>
+
+    <!-- #1 — LINE Login connection -->
+    <section class="card p-5 space-y-3">
+      <h2 class="text-sm font-semibold text-slate-600">เข้าสู่ระบบด้วย LINE</h2>
+      <p class="text-xs text-slate-500">เชื่อมบัญชี LINE เพื่อเข้าสู่ระบบด้วย LINE ได้โดยไม่ต้องกรอกรหัสผ่าน</p>
+
+      <div v-if="lineMsg" :class="['px-3 py-2 rounded-md text-sm', lineMsg.ok ? 'bg-emerald-50 border border-emerald-200 text-emerald-700' : 'bg-rose-50 border border-rose-200 text-rose-700']">
+        {{ lineMsg.text }}
+      </div>
+
+      <div class="flex items-center justify-between gap-3">
+        <span class="inline-flex items-center gap-2 text-sm"
+          :class="lineLinked ? 'text-emerald-700' : 'text-slate-500'">
+          <i :class="lineLinked ? 'pi pi-check-circle' : 'pi pi-link'" />
+          {{ lineLinked ? 'เชื่อม LINE แล้ว' : 'ยังไม่ได้เชื่อม LINE' }}
+        </span>
+        <button v-if="!lineLinked" type="button" :disabled="lineBusy" @click="connectLine"
+          class="px-4 py-2 rounded-lg bg-[#06C755] text-white text-sm hover:bg-[#05b34c] disabled:opacity-50 inline-flex items-center gap-2">
+          <i v-if="lineBusy" class="pi pi-spin pi-spinner" /><i v-else class="pi pi-comment" /> เชื่อม LINE
+        </button>
+        <button v-else type="button" :disabled="lineBusy" @click="unlinkLine"
+          class="px-4 py-2 rounded-lg border border-rose-200 text-rose-600 text-sm hover:bg-rose-50 disabled:opacity-50">
+          ยกเลิกการเชื่อม
+        </button>
+      </div>
+    </section>
   </div>
 </template>
