@@ -58,6 +58,11 @@
   // Show a dash for zeros, matching the reference sheet.
   $moneyDash = fn ($n) => ((float) $n) == 0.0 ? '-' : number_format((float) $n, 2);
   $pct = fn ($n) => $n === null ? '' : rtrim(rtrim(number_format((float) $n, 2), '0'), '.') . '%';
+  // VAT column shows for corporate agents only: '3' = VAT Include, '2' = VAT Exclude.
+  $showVat = in_array($vatType, ['2', '3'], true);
+  $vatLabel = $vatType === '3' ? 'Vat Include' : ($vatType === '2' ? 'VAT Exclude' : '');
+  // ค่านายหน้าสุทธิ column note — VAT-include prints "(Include Vat)" like the reference.
+  $commANote = $vatType === '3' ? '<br/><span style="font-weight:400;font-size:7px;">(Include Vat)</span>' : '';
 @endphp
 <body>
   <!-- Header -->
@@ -67,7 +72,7 @@
     </div>
     <div class="head-c">
       <div class="company">บริษัท อินชัวร์ฮับ จำกัด</div>
-      <div class="subtitle">ค่านายหน้า / ค่าแนะนำประจำเดือน : {{ $batch['periodLabel'] ?: ($batch['from'] . ' – ' . $batch['to']) }}</div>
+      <div class="subtitle">ค่านายหน้า / ค่าแนะนำประจำเดือน : {{ $batch['periodLabel'] ?: ($batch['from'] . ' – ' . $batch['to']) }}@if ($showVat) <b style="color:#b91c1c;">· {{ $vatLabel }}</b>@endif</div>
     </div>
     <div class="head-r">
       <div class="qr"></div>
@@ -100,7 +105,8 @@
         <th colspan="2">เบี้ยประกัน</th>
         <th colspan="2">ค่าคอม</th>
         <th colspan="2">ยอดหัก (B)</th>
-        <th rowspan="2" style="width:8%">ค่านายหน้า<br/>สุทธิ (A)<br/>- ยอดหัก<br/>(A)-(B)</th>
+        <th rowspan="2" style="width:8%">ค่านายหน้า<br/>สุทธิ (A)<br/>- ยอดหัก<br/>(A)-(B){!! $commANote !!}</th>
+        @if ($showVat)<th rowspan="2" style="width:5%">VAT</th>@endif
         <th rowspan="2" style="width:6%">หัก ณ ที่จ่าย<br/>3%</th>
         <th rowspan="2" style="width:7%">ยอดจ่าย<br/>สุทธิ</th>
         <th rowspan="2" style="width:8%">หมายเหตุ</th>
@@ -129,6 +135,7 @@
         <td class="num red">{{ $moneyDash($r['payoffDiscount']) }}</td>
         <td class="num red">{{ $moneyDash($r['cardFee']) }}</td>
         <td class="num">{{ $money($r['commissionA']) }}</td>
+        @if ($showVat)<td class="num">{{ $money($r['vat'] ?? 0) }}</td>@endif
         <td class="num">{{ $money($r['wht']) }}</td>
         <td class="num">{{ $money($r['payable']) }}</td>
         <td>{{ $r['note'] ?: '' }}</td>
@@ -145,6 +152,7 @@
         <td class="num">{{ $moneyDash($columnTotals['payoffDiscount']) }}</td>
         <td class="num">{{ $moneyDash($columnTotals['cardFee']) }}</td>
         <td class="num">{{ $money($columnTotals['commissionA']) }}</td>
+        @if ($showVat)<td class="num">{{ $money($columnTotals['vat'] ?? 0) }}</td>@endif
         <td class="num">{{ $money($columnTotals['wht']) }}</td>
         <td class="num">{{ $money($columnTotals['payable']) }}</td>
         <td></td>
