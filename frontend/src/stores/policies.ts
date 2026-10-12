@@ -158,7 +158,7 @@ export interface Rider {
 }
 
 // Nested blocks emitted by PolicyResource on GET /policies/{id}. Keeping
-// them here so consumers (PolicyEdit, PolicyDetailDrawer) get proper types
+// them here so consumers (PolicyEdit, PolicyApplicationWizard) get proper types
 // without re-declaring the shape.
 export interface PolicyPremium {
   main: number | null

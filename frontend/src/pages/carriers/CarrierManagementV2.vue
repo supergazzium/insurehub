@@ -2,18 +2,18 @@
 // Server-paginated carrier list.
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { useRoute } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { useCarrierStore } from '../../stores/carriers'
 import { updateCarrier } from '../../api/carriers'
 import { ApiError } from '../../api/client'
-import CarrierDetailDrawer from './CarrierDetailDrawer.vue'
 import CarrierCreateModal from './CarrierCreateModal.vue'
 
 const { t } = useI18n()
 const route = useRoute()
+const router = useRouter()
 const carrierStore = useCarrierStore()
 
-const detailId = ref<string | null>(null)
+function goDetail(id: string): void { router.push({ name: 'carrier-edit', params: { id } }) }
 const showCreate = ref(false)
 
 const filters = reactive({
@@ -37,10 +37,10 @@ async function load(): Promise<void> {
 
 onMounted(async () => {
   await load()
-  // Cross-page deep-link — /carriers?open=<id> opens that carrier's drawer.
+  // Cross-page deep-link — /carriers?open=<id> redirects to that carrier's page.
   const openId = route.query.open
   if (typeof openId === 'string' && openId.trim() !== '') {
-    detailId.value = openId.trim()
+    goDetail(openId.trim())
   }
 })
 
@@ -175,7 +175,7 @@ async function changeStatus(carrierId: string, next: 'active' | 'inactive'): Pro
             </tr>
           </thead>
           <tbody class="divide-y divide-slate-100">
-            <tr v-for="c in carrierStore.list" :key="c.id" class="hover:bg-slate-50 cursor-pointer" @click="detailId = c.id">
+            <tr v-for="c in carrierStore.list" :key="c.id" class="hover:bg-slate-50 cursor-pointer" @click="goDetail(c.id)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">{{ c.code }}</td>
               <td class="px-4 py-2">
                 <div class="text-slate-900">{{ c.nicknameTh || c.name }}</div>
@@ -234,8 +234,6 @@ async function changeStatus(carrierId: string, next: 'active' | 'inactive'): Pro
         </div>
       </div>
     </section>
-
-    <CarrierDetailDrawer :carrier-id="detailId" @close="detailId = null" />
     <CarrierCreateModal :open="showCreate" @close="showCreate = false" @created="() => { page = 1; load() }" />
   </div>
 </template>

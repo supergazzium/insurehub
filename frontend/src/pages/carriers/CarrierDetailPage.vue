@@ -1,6 +1,8 @@
 <script setup lang="ts">
-// Carrier detail drawer — profile + list of products under this carrier.
-import { computed, onBeforeUnmount, onMounted, reactive, ref, watch } from 'vue'
+// Carrier detail page — profile + list of products under this carrier.
+// Full-page view (mirrors ProductDetailPage); replaces the old drawer.
+import { computed, onMounted, reactive, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import {
   createCarrierBankAccount,
@@ -50,8 +52,16 @@ const SUB_TYPE_OPTIONS = [
 
 const { t } = useI18n()
 const carrierStore = useCarrierStore()
-const props = defineProps<{ carrierId: string | null }>()
-const emit = defineEmits<{ (e: 'close'): void }>()
+const route = useRoute()
+const router = useRouter()
+// carrierId comes from the route (:id). Kept as a ref so the rest of this
+// file (ported verbatim from the old drawer) is unchanged — the many
+// carrierId.value sites below now read carrierId.value instead.
+const carrierId = ref<string | null>((route.params.id as string) ?? null)
+// Navigating back to the list is the page equivalent of the old @close emit.
+function goBack(): void { router.push({ name: 'carriers' }) }
+// Keep carrierId in sync if the route param changes without a remount.
+watch(() => route.params.id, (v) => { carrierId.value = (v as string) ?? null })
 
 // View-mode by default; click "แก้ไข" to unlock the fields. Only users with
 // the carriers.manage permission can enter edit mode.
@@ -61,17 +71,7 @@ const editing = ref(false)
 function beginEdit(): void { if (canEdit.value) editing.value = true }
 function endEdit(): void { editing.value = false }
 
-// Body-scroll lock — prevents the underlying page from scrolling while
-// the drawer is open (especially important on mobile where the drawer
-// is full-screen and the background scroll shouldn't compete with the
-// drawer's internal overflow-y-auto).
-watch(() => props.carrierId, (id) => {
-  if (typeof document === 'undefined') return
-  document.body.style.overflow = id ? 'hidden' : ''
-})
-onBeforeUnmount(() => {
-  if (typeof document !== 'undefined') document.body.style.overflow = ''
-})
+// Full-page layout — no body-scroll lock (the page scrolls normally).
 
 const carrier = ref<CarrierDetail | null>(null)
 
@@ -133,7 +133,7 @@ function resetNewBank(): void {
 }
 
 async function saveBankAccount(a: CarrierBankAccount, field: keyof CarrierBankAccountPayload, value: unknown): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   bankSaveError.value = null
   bankSavingId.value = a.id
   try {
@@ -144,7 +144,7 @@ async function saveBankAccount(a: CarrierBankAccount, field: keyof CarrierBankAc
       const b = value ? bankById.value[String(value)] : null
       ;(payload as CarrierBankAccountPayload).bankName = b ? b.nameTh : ''
     }
-    const res = await updateCarrierBankAccount(props.carrierId, a.id, payload)
+    const res = await updateCarrierBankAccount(carrierId.value, a.id, payload)
     const i = bankAccounts.value.findIndex((x) => x.id === a.id)
     if (i >= 0) bankAccounts.value[i] = res.data
     if (field === 'isPrimary' && value === true) {
@@ -158,7 +158,7 @@ async function saveBankAccount(a: CarrierBankAccount, field: keyof CarrierBankAc
 }
 
 async function addBankAccount(): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   bankSaveError.value = null
   bankAddingNew.value = true
   try {
@@ -171,7 +171,7 @@ async function addBankAccount(): Promise<void> {
       accountName: newBank.accountName?.trim() || undefined,
       isPrimary: !!newBank.isPrimary,
     }
-    const res = await createCarrierBankAccount(props.carrierId, payload)
+    const res = await createCarrierBankAccount(carrierId.value, payload)
     if (res.data.isPrimary) {
       bankAccounts.value = bankAccounts.value.map((x) => ({ ...x, isPrimary: false }))
     }
@@ -185,12 +185,12 @@ async function addBankAccount(): Promise<void> {
 }
 
 async function removeBankAccount(a: CarrierBankAccount): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   if (!window.confirm('Delete this bank account?')) return
   bankSaveError.value = null
   bankSavingId.value = a.id
   try {
-    await deleteCarrierBankAccount(props.carrierId, a.id)
+    await deleteCarrierBankAccount(carrierId.value, a.id)
     bankAccounts.value = bankAccounts.value.filter((x) => x.id !== a.id)
   } catch (e: unknown) {
     bankSaveError.value = e instanceof ApiError ? e.message : 'Delete failed'
@@ -245,14 +245,14 @@ const deleting = ref(false)
 const deleteError = ref<string | null>(null)
 
 async function doDelete(): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   deleting.value = true
   deleteError.value = null
   try {
-    await api.delete(`carriers/${props.carrierId}`)
+    await api.delete(`carriers/${carrierId.value}`)
     await carrierStore.loadPage({})
     showDelete.value = false
-    emit('close')
+    goBack()
   } catch (e: unknown) {
     deleteError.value = e instanceof ApiError ? e.message : 'Delete failed'
   } finally {
@@ -437,11 +437,11 @@ function removeLabelFromNew(label: string): void {
 }
 
 async function saveCredential(c: CarrierCredential, field: keyof CarrierCredentialPayload, value: unknown): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   credentialSaveError.value = null
   credentialSavingId.value = c.id
   try {
-    const res = await updateCarrierCredential(props.carrierId, c.id, { [field]: value } as CarrierCredentialPayload)
+    const res = await updateCarrierCredential(carrierId.value, c.id, { [field]: value } as CarrierCredentialPayload)
     const i = credentials.value.findIndex((x) => x.id === c.id)
     if (i >= 0) credentials.value[i] = res.data
     // Refresh tenant-wide suggestions when labels change so a brand-new
@@ -454,7 +454,7 @@ async function saveCredential(c: CarrierCredential, field: keyof CarrierCredenti
   }
 }
 async function addCredential(): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   credentialSaveError.value = null
   try {
     const payload: CarrierCredentialPayload = {
@@ -468,7 +468,7 @@ async function addCredential(): Promise<void> {
       credentialSaveError.value = 'Please fill in a URL or username first.'
       return
     }
-    const res = await createCarrierCredential(props.carrierId, payload)
+    const res = await createCarrierCredential(carrierId.value, payload)
     credentials.value.push(res.data)
     resetNewCredential()
     // New credential may have introduced new labels — refresh suggestions.
@@ -478,11 +478,11 @@ async function addCredential(): Promise<void> {
   }
 }
 async function removeCredential(c: CarrierCredential): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   if (!window.confirm('ลบข้อมูลเข้าใช้งานนี้?')) return
   credentialSaveError.value = null
   try {
-    await deleteCarrierCredential(props.carrierId, c.id)
+    await deleteCarrierCredential(carrierId.value, c.id)
     credentials.value = credentials.value.filter((x) => x.id !== c.id)
     revealedPasswords.value.delete(c.id)
   } catch (e: unknown) {
@@ -593,11 +593,11 @@ const whtCopyAllText = computed(() => [
 ].join('\n'))
 
 async function saveContact(c: CarrierContact, field: keyof CarrierContactPayload, value: unknown): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   contactSaveError.value = null
   contactSavingId.value = c.id
   try {
-    const res = await updateCarrierContact(props.carrierId, c.id, { [field]: value } as CarrierContactPayload)
+    const res = await updateCarrierContact(carrierId.value, c.id, { [field]: value } as CarrierContactPayload)
     const i = contacts.value.findIndex((x) => x.id === c.id)
     if (i >= 0) contacts.value[i] = res.data
     if (field === 'isPrimary' && value === true) {
@@ -613,11 +613,11 @@ async function saveContact(c: CarrierContact, field: keyof CarrierContactPayload
 /** #8 — the merged "ชื่อ / แผนก" field writes the whole value to firstName and
  *  clears any legacy lastName so it doesn't reappend on reload. */
 async function saveContactName(c: CarrierContact, value: string): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   contactSaveError.value = null
   contactSavingId.value = c.id
   try {
-    const res = await updateCarrierContact(props.carrierId, c.id, { firstName: value, lastName: '' } as CarrierContactPayload)
+    const res = await updateCarrierContact(carrierId.value, c.id, { firstName: value, lastName: '' } as CarrierContactPayload)
     const i = contacts.value.findIndex((x) => x.id === c.id)
     if (i >= 0) contacts.value[i] = res.data
   } catch (e: unknown) {
@@ -628,7 +628,7 @@ async function saveContactName(c: CarrierContact, value: string): Promise<void> 
 }
 
 async function addContact(): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   contactSaveError.value = null
   contactAddingNew.value = true
   try {
@@ -639,7 +639,7 @@ async function addContact(): Promise<void> {
       email: newContact.email?.trim() || undefined,
       isPrimary: !!newContact.isPrimary,
     }
-    const res = await createCarrierContact(props.carrierId, payload)
+    const res = await createCarrierContact(carrierId.value, payload)
     if (res.data.isPrimary) {
       contacts.value = contacts.value.map((x) => ({ ...x, isPrimary: false }))
     }
@@ -653,12 +653,12 @@ async function addContact(): Promise<void> {
 }
 
 async function removeContact(c: CarrierContact): Promise<void> {
-  if (!props.carrierId) return
+  if (!carrierId.value) return
   if (!window.confirm('Delete this contact?')) return
   contactSaveError.value = null
   contactSavingId.value = c.id
   try {
-    await deleteCarrierContact(props.carrierId, c.id)
+    await deleteCarrierContact(carrierId.value, c.id)
     contacts.value = contacts.value.filter((x) => x.id !== c.id)
   } catch (e: unknown) {
     contactSaveError.value = e instanceof ApiError ? e.message : 'Delete failed'
@@ -674,7 +674,7 @@ const productsLoading = ref(false)
 const errorMsg = ref<string | null>(null)
 
 watch(
-  () => props.carrierId,
+  () => carrierId.value,
   async (id) => {
     if (!id) {
       carrier.value = null
@@ -737,46 +737,34 @@ function typeBadge(insureType: string): string {
 </script>
 
 <template>
-  <!-- Overlay: fully covers the viewport at any width. Denser at mobile
-       so the underlying page can't visually bleed through. Body scroll
-       is locked via the watcher in the script block. -->
-  <div v-if="props.carrierId" class="fixed inset-0 bg-slate-900/60 sm:bg-slate-900/40 flex justify-end z-50" @click.self="emit('close')">
-    <!-- Panel widens progressively so tables never need horizontal scroll
-         on desktop while staying full-screen on mobile:
-           <  640px  → full-screen (w-full, no cap)
-           ≥  640px  → cap at 3xl (768px)
-           ≥ 1024px  → 80vw, cap 5xl (1024px) — small laptops
-           ≥ 1280px  → 78vw, cap 6xl (1152px)
-           ≥ 1536px  → 75vw, cap 7xl (1280px) — 1920px screens
-         `max-w-*` prevents the panel from becoming unusably wide on
-         very large monitors. -->
-    <div class="bg-white w-full sm:max-w-3xl lg:w-[80vw] lg:max-w-5xl xl:w-[78vw] xl:max-w-6xl 2xl:w-[75vw] 2xl:max-w-7xl h-full overflow-y-auto shadow-xl flex flex-col">
-      <header class="px-6 py-4 border-b border-slate-200 flex items-center justify-between sticky top-0 bg-white z-10">
-        <div v-if="carrier">
-          <div class="flex items-center gap-2 text-xs uppercase text-slate-400">
-            <span class="font-mono">{{ carrier.code }}</span>
-            <span v-if="carrier.insureType">·</span>
-            <span v-if="carrier.insureType" :class="['inline-flex px-2 py-0.5 rounded-md text-[10px] font-medium', typeBadge(carrier.insureType)]">{{ carrier.insureType }}</span>
-          </div>
-          <div class="text-lg font-semibold text-slate-900 mt-1">{{ carrier.nicknameTh || carrier.name }}</div>
-          <div v-if="carrier.name && carrier.name !== carrier.nicknameTh" class="text-xs text-slate-500 mt-0.5">{{ carrier.name }}</div>
+  <div class="mx-auto w-full max-w-6xl px-4 py-6 space-y-6">
+    <!-- Breadcrumb header (mirrors ProductDetailPage) -->
+    <header class="flex items-start justify-between gap-3 flex-wrap">
+      <div v-if="carrier">
+        <div class="flex items-center gap-2 text-xs uppercase text-slate-400">
+          <RouterLink :to="{ name: 'carriers' }" class="hover:text-brand-600 normal-case">บริษัทประกัน</RouterLink>
+          <span>/</span>
+          <span class="font-mono">{{ carrier.code }}</span>
+          <span v-if="carrier.insureType">·</span>
+          <span v-if="carrier.insureType" :class="['inline-flex px-2 py-0.5 rounded-md text-[10px] font-medium', typeBadge(carrier.insureType)]">{{ carrier.insureType }}</span>
         </div>
-        <div v-else class="text-slate-500">Loading…</div>
-        <div class="flex items-center gap-2">
-          <button v-if="carrier && canEdit && !editing" type="button" class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5" @click="beginEdit"><i class="pi pi-pencil text-xs" /> แก้ไข</button>
-          <button v-else-if="editing" type="button" class="px-3 py-1.5 rounded-lg text-sm border border-emerald-300 text-emerald-700 hover:bg-emerald-50 flex items-center gap-1.5" @click="endEdit"><i class="pi pi-check text-xs" /> เสร็จสิ้น</button>
-          <button class="text-slate-400 hover:text-slate-700 p-2" @click="emit('close')">
-            <i class="pi pi-times" />
-          </button>
-        </div>
-      </header>
-      <div v-if="carrier && !editing" class="mx-6 mt-4 text-xs rounded-lg px-3 py-2" :class="canEdit ? 'bg-slate-50 text-slate-500' : 'bg-amber-50 text-amber-700'"><i class="pi pi-eye mr-1" />{{ canEdit ? 'โหมดดูข้อมูล — กด "แก้ไข" เพื่อปรับข้อมูล' : 'คุณมีสิทธิ์ดูข้อมูลเท่านั้น' }}</div>
+        <h1 class="text-2xl font-semibold text-slate-900 mt-1">{{ carrier.nicknameTh || carrier.name }}</h1>
+        <div v-if="carrier.name && carrier.name !== carrier.nicknameTh" class="text-xs text-slate-500 mt-0.5">{{ carrier.name }}</div>
+      </div>
+      <div v-else class="text-slate-500 text-sm">กำลังโหลด…</div>
+      <div class="flex items-center gap-2">
+        <button v-if="carrier && canEdit && !editing" type="button" class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5" @click="beginEdit"><i class="pi pi-pencil text-xs" /> แก้ไข</button>
+        <button v-else-if="editing" type="button" class="px-3 py-1.5 rounded-lg text-sm border border-emerald-300 text-emerald-700 hover:bg-emerald-50 flex items-center gap-1.5" @click="endEdit"><i class="pi pi-check text-xs" /> เสร็จสิ้น</button>
+        <button type="button" class="px-3 py-1.5 rounded-lg text-sm text-slate-600 hover:bg-slate-100 flex items-center gap-1.5" @click="goBack()"><i class="pi pi-arrow-left text-xs" /> กลับ</button>
+      </div>
+    </header>
+      <div v-if="carrier && !editing" class="text-xs rounded-lg px-3 py-2" :class="canEdit ? 'bg-slate-50 text-slate-500' : 'bg-amber-50 text-amber-700'"><i class="pi pi-eye mr-1" />{{ canEdit ? 'โหมดดูข้อมูล — กด "แก้ไข" เพื่อปรับข้อมูล' : 'คุณมีสิทธิ์ดูข้อมูลเท่านั้น' }}</div>
 
-      <div v-if="errorMsg" class="m-6 p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
+      <div v-if="errorMsg" class="p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
         {{ errorMsg }}
       </div>
 
-      <div v-if="carrier" class="flex-1 p-6 space-y-6">
+      <div v-if="carrier" class="space-y-6">
         <!-- Profile (editable) -->
         <section>
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Profile</h3>
@@ -1384,7 +1372,7 @@ function typeBadge(insureType: string): string {
       </div>
 
       <!-- Footer -->
-      <footer v-if="carrier" class="border-t border-slate-200 px-6 py-3 flex items-center justify-between sticky bottom-0 bg-white">
+      <footer v-if="carrier" class="border-t border-slate-200 pt-3 flex items-center justify-between">
         <div class="text-xs text-slate-400">
           Click any field to edit · Enter saves, Esc cancels
         </div>
@@ -1394,7 +1382,6 @@ function typeBadge(insureType: string): string {
           <i class="pi pi-trash text-xs" /> Delete
         </button>
       </footer>
-    </div>
 
     <DeleteConfirmDialog
       v-if="carrier"

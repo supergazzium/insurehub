@@ -2,9 +2,9 @@
 // C-8 — Issue Policy modal. Handles the Approved → Issued transition.
 // See docs/audit-2026-08-21/B5-issue-modal.md for the full spec.
 //
-// Trigger points (rendered elsewhere; see PolicyDetailDrawer.vue +
+// Trigger points (rendered elsewhere; see PolicyApplicationWizard.vue +
 // PolicyListV2.vue rowActions):
-//   - Drawer header action "ออกกรมธรรม์" when policy.status === 'approved'
+//   - Detail page header action "ออกกรมธรรม์" when policy.status === 'approved'
 //   - List row kebab menu item when row.status === 'approved'
 //
 // Flow:
