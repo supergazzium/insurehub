@@ -142,6 +142,8 @@ class PolicyRequest extends FormRequest
             'insuredPersonBirthDate' => ['sometimes', 'nullable', 'date'],
             'sumAssured' => ['sometimes', 'nullable', 'numeric', 'min:0'],
             'premiumPayingTerm' => ['sometimes', 'nullable', 'integer', 'min:0', 'max:99'],
+            // #16 — คุ้มครองถึงอายุ N (override ของ product). nullable = ใช้ค่า product.
+            'coverageToAge' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:120'],
             'healthDeclaration' => ['sometimes', 'nullable', 'string'],
             // Health-only single beneficiary.
             'healthBeneficiaryName' => ['sometimes', 'nullable', 'string', 'max:255'],
@@ -314,6 +316,7 @@ class PolicyRequest extends FormRequest
             'insuredPersonBirthDate' => 'insured_person_birth_date',
             'sumAssured' => 'sum_assured',
             'premiumPayingTerm' => 'premium_paying_term',
+            'coverageToAge' => 'coverage_to_age',
             'healthDeclaration' => 'health_declaration',
             'healthBeneficiaryName' => 'health_beneficiary_name',
             'healthBeneficiaryRelation' => 'health_beneficiary_relation',

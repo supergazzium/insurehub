@@ -25,6 +25,9 @@ export interface PolicyListRow {
   customerYear: number | null
   refAppToId: string | null
   periodLabel: string | null
+  // #16 — ระยะชำระเบี้ย/ระยะคุ้มครอง "15/90" + วันหมดคุ้มครอง (computed server-side)
+  termLabel?: string | null
+  coverageEndDate?: string | null
   coverage: number
   annualPremium: number
   premiumMode: string

@@ -43,6 +43,9 @@ class PolicyListResource extends JsonResource
             'customerYear' => isset($this->customer_year) ? (int) $this->customer_year : null,
             'refAppToId' => isset($this->ref_app_to_id) ? (string) $this->ref_app_to_id : null,
             'periodLabel' => $this->period_label ?? null,
+            // #16 — 15/90 (term/coverage). Computed from raw columns (lean list, no model).
+            'termLabel' => $this->termLabel(),
+            'coverageEndDate' => $this->coverageEndDate(),
             'coverage' => (float) $this->coverage,
             'annualPremium' => (float) $this->annual_premium,
             'premiumMode' => $this->premium_mode,
@@ -68,5 +71,31 @@ class PolicyListResource extends JsonResource
             'motorVehicleBrand' => $this->motor_vehicle_brand,
             'motorVehicleModel' => $this->motor_vehicle_model,
         ];
+    }
+
+    /** Effective premium term / coverage-to-age as "15/90"; null if neither known. */
+    private function termLabel(): ?string
+    {
+        $term = $this->premium_paying_term ?: ($this->product_pay_years ?: null);
+        $age = $this->coverage_to_age ?: ($this->product_coverage_to_age ?: null);
+        if ($term === null && $age === null) {
+            return null;
+        }
+        return ($term ?? '–') . '/' . ($age ?? '–');
+    }
+
+    /** Coverage-end date = insured birthdate + effective coverage-to-age; null if unknown. */
+    private function coverageEndDate(): ?string
+    {
+        $age = $this->coverage_to_age ?: ($this->product_coverage_to_age ?: null);
+        $birth = $this->insured_person_birth_date;
+        if ($age === null || $birth === null) {
+            return null;
+        }
+        try {
+            return \Illuminate\Support\Carbon::parse($birth)->addYears((int) $age)->toDateString();
+        } catch (\Throwable) {
+            return null;
+        }
     }
 }

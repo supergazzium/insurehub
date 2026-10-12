@@ -43,7 +43,7 @@
 > 📎 ที่มา: `2.สรุปประชุม - Product.docx`
 - [x] 🟢 **#14** tier dropdown "ComTier1 : เต็มระบบ (Tier Full)" ฯลฯ — **เสร็จ** (`1cae2b4`)
 - [x] 🟢 **#15** OV ในหน้า product — **เสร็จ** (`bbb3a13`)
-- [ ] 💬 **#16** ระยะเวลาชำระเบี้ย + ระยะคุ้มครอง — รอปรึกษา (ถามถึงแบบบำนาญ)
+- [x] 🟡 **#16** ระยะเวลาชำระเบี้ย + ระยะคุ้มครอง (15/90) — schema coverage_to_age (product default + policy override) + Policy accessors (termLabel/coverageEndDate/premiumStillDueByTerm, คุ้มครอง = วันเกิด+N ปี) + badge บน policy list + field บน product (life). **เสร็จรอบแรก** (verified live 15/90 + 2070-05-20)
 - [x] 🟢 **#17** ปุ่ม "ดูดค่าคอมมาใส่ Agent" (ปีแรก 80%, ปี2-สุดท้าย 70%; flat+banded; create+edit) — **เสร็จ** (`6c40260`, verified live 15→12)
 - [x] 🟢 **#18** filter บริษัทพิมพ์ค้นได้ (SearchSelect) — **เสร็จ** (`ae71efa`)
 - [x] 🟢 **#19** Sticky header ตาราง product (`sticky top-0 z-10` บน thead) — **เสร็จ** (`468e7b7`)

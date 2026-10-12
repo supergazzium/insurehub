@@ -288,6 +288,13 @@ class PolicyResource extends JsonResource
             'insuredPersonBirthDate' => $this->insured_person_birth_date,
             'sumAssured' => $this->sum_assured !== null ? (float) $this->sum_assured : null,
             'premiumPayingTerm' => $this->premium_paying_term !== null ? (int) $this->premium_paying_term : null,
+            // #16 — ระยะชำระเบี้ย / ระยะคุ้มครอง (15/90)
+            'coverageToAge' => $this->coverage_to_age !== null ? (int) $this->coverage_to_age : null,
+            'effectivePremiumTerm' => $this->effective_premium_term,
+            'effectiveCoverageToAge' => $this->effective_coverage_to_age,
+            'coverageEndDate' => $this->coverage_end_date?->toDateString(),
+            'premiumStillDueByTerm' => $this->premium_still_due_by_term,
+            'termLabel' => $this->term_label,
             'healthDeclaration' => $this->health_declaration,
             'healthBeneficiaryName' => $this->health_beneficiary_name,
             'healthBeneficiaryRelation' => $this->health_beneficiary_relation,
