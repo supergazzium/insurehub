@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { onMounted, ref, computed } from 'vue'
 import { useRouter } from 'vue-router'
+import { openInNewTab } from '../../utils/openInNewTab'
 import {
   fetchCollections, createReminder, fetchReminders,
   type CollectionRow, type CollectionKind, type ReminderRow,
@@ -87,7 +88,7 @@ function installmentRemaining(p: CollectionRow, no: number): number {
   return s ? Math.max(0, Math.round((s.amount - (s.amountPaid ?? 0)) * 100) / 100) : 0
 }
 
-function openPolicy(id: string) { router.push({ name: 'policies-collection-detail', params: { id } }) }
+function openPolicy(id: string) { openInNewTab(router, { name: 'policies-collection-detail', params: { id } }) }
 
 // ── Reminder modal ─────────────────────────────────────────────────────────
 const reminderModal = ref<{ policy: CollectionRow; installmentNo: number | null } | null>(null)

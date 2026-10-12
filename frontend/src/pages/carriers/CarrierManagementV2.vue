@@ -3,6 +3,7 @@
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
+import { openInNewTab } from '../../utils/openInNewTab'
 import { useCarrierStore } from '../../stores/carriers'
 import { updateCarrier } from '../../api/carriers'
 import { ApiError } from '../../api/client'
@@ -13,7 +14,7 @@ const route = useRoute()
 const router = useRouter()
 const carrierStore = useCarrierStore()
 
-function goDetail(id: string): void { router.push({ name: 'carrier-edit', params: { id } }) }
+function goDetail(id: string): void { openInNewTab(router, { name: 'carrier-edit', params: { id } }) }
 const showCreate = ref(false)
 
 const filters = reactive({
