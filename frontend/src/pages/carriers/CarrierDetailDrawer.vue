@@ -30,6 +30,7 @@ import EditableField from '../../components/EditableField.vue'
 import DeleteConfirmDialog from '../../components/DeleteConfirmDialog.vue'
 import { api, ApiError } from '../../api/client'
 import { useCarrierStore } from '../../stores/carriers'
+import { useAuthStore } from '../../stores/auth'
 
 const INSURE_TYPE_OPTIONS = [
   { value: 'life', label: 'Life' },
@@ -51,6 +52,14 @@ const { t } = useI18n()
 const carrierStore = useCarrierStore()
 const props = defineProps<{ carrierId: string | null }>()
 const emit = defineEmits<{ (e: 'close'): void }>()
+
+// View-mode by default; click "แก้ไข" to unlock the fields. Only users with
+// the carriers.manage permission can enter edit mode.
+const auth = useAuthStore()
+const canEdit = computed(() => auth.hasPermission('carriers.manage'))
+const editing = ref(false)
+function beginEdit(): void { if (canEdit.value) editing.value = true }
+function endEdit(): void { editing.value = false }
 
 // Body-scroll lock — prevents the underlying page from scrolling while
 // the drawer is open (especially important on mobile where the drawer
@@ -753,10 +762,15 @@ function typeBadge(insureType: string): string {
           <div v-if="carrier.name && carrier.name !== carrier.nicknameTh" class="text-xs text-slate-500 mt-0.5">{{ carrier.name }}</div>
         </div>
         <div v-else class="text-slate-500">Loading…</div>
-        <button class="text-slate-400 hover:text-slate-700 p-2" @click="emit('close')">
-          <i class="pi pi-times" />
-        </button>
+        <div class="flex items-center gap-2">
+          <button v-if="carrier && canEdit && !editing" type="button" class="px-3 py-1.5 rounded-lg text-sm bg-brand-600 text-white hover:bg-brand-700 flex items-center gap-1.5" @click="beginEdit"><i class="pi pi-pencil text-xs" /> แก้ไข</button>
+          <button v-else-if="editing" type="button" class="px-3 py-1.5 rounded-lg text-sm border border-emerald-300 text-emerald-700 hover:bg-emerald-50 flex items-center gap-1.5" @click="endEdit"><i class="pi pi-check text-xs" /> เสร็จสิ้น</button>
+          <button class="text-slate-400 hover:text-slate-700 p-2" @click="emit('close')">
+            <i class="pi pi-times" />
+          </button>
+        </div>
       </header>
+      <div v-if="carrier && !editing" class="mx-6 mt-4 text-xs rounded-lg px-3 py-2" :class="canEdit ? 'bg-slate-50 text-slate-500' : 'bg-amber-50 text-amber-700'"><i class="pi pi-eye mr-1" />{{ canEdit ? 'โหมดดูข้อมูล — กด "แก้ไข" เพื่อปรับข้อมูล' : 'คุณมีสิทธิ์ดูข้อมูลเท่านั้น' }}</div>
 
       <div v-if="errorMsg" class="m-6 p-4 bg-rose-50 border border-rose-200 rounded-lg text-rose-700 text-sm">
         {{ errorMsg }}
@@ -768,31 +782,30 @@ function typeBadge(insureType: string): string {
           <h3 class="text-xs uppercase tracking-wider text-slate-400 mb-2">Profile</h3>
           <div class="card p-4 grid grid-cols-2 md:grid-cols-4 gap-x-4 gap-y-3 text-sm">
             <div><div class="text-xs text-slate-400">Code</div>
-              <EditableField entity="carriers" :id="carrier.id" field="code" :value="carrier.code" @update="v => apply('code', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="code" :value="carrier.code" @update="v => apply('code', v)" /></div>
             <div><div class="text-xs text-slate-400">Type</div>
-              <EditableField entity="carriers" :id="carrier.id" field="type" type="select" :options="INSURE_TYPE_OPTIONS" :value="carrier.insureType" @update="v => apply('insureType', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="type" type="select" :options="INSURE_TYPE_OPTIONS" :value="carrier.insureType" @update="v => apply('insureType', v)" /></div>
             <div><div class="text-xs text-slate-400">Sub-type <span class="text-slate-300">· F = Direct, P = Partner</span></div>
-              <EditableField entity="carriers" :id="carrier.id" field="subType" type="select" :options="SUB_TYPE_OPTIONS" :value="carrier.subType" @update="v => apply('subType', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="subType" type="select" :options="SUB_TYPE_OPTIONS" :value="carrier.subType" @update="v => apply('subType', v)" /></div>
             <div><div class="text-xs text-slate-400">OIC Insurance Code</div>
-              <EditableField entity="carriers" :id="carrier.id" field="oicInsureComCode" :value="carrier.oicInsureComCode" @update="v => apply('oicInsureComCode', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="oicInsureComCode" :value="carrier.oicInsureComCode" @update="v => apply('oicInsureComCode', v)" /></div>
             <div><div class="text-xs text-slate-400">Company Insure Code</div>
-              <EditableField entity="carriers" :id="carrier.id" field="compInsureCode" :value="carrier.compInsureCode" @update="v => apply('compInsureCode', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="compInsureCode" :value="carrier.compInsureCode" @update="v => apply('compInsureCode', v)" /></div>
             <div><div class="text-xs text-slate-400">Tax ID</div>
-              <EditableField entity="carriers" :id="carrier.id" field="taxId" :value="carrier.taxId" @update="v => apply('taxId', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="taxId" :value="carrier.taxId" @update="v => apply('taxId', v)" /></div>
             <div class="md:col-span-2"><div class="text-xs text-slate-400">Name (Thai)</div>
-              <EditableField entity="carriers" :id="carrier.id" field="name" :value="carrier.name" @update="v => apply('name', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="name" :value="carrier.name" @update="v => apply('name', v)" /></div>
             <div class="md:col-span-2"><div class="text-xs text-slate-400">Name (English)</div>
-              <EditableField entity="carriers" :id="carrier.id" field="nameEn" :value="carrier.nameEn" @update="v => apply('nameEn', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="nameEn" :value="carrier.nameEn" @update="v => apply('nameEn', v)" /></div>
             <div class="md:col-span-2"><div class="text-xs text-slate-400">Nickname</div>
-              <EditableField entity="carriers" :id="carrier.id" field="nicknameTh" :value="carrier.nicknameTh" @update="v => apply('nicknameTh', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="nicknameTh" :value="carrier.nicknameTh" @update="v => apply('nicknameTh', v)" /></div>
             <div><div class="text-xs text-slate-400">Phone</div>
-              <EditableField entity="carriers" :id="carrier.id" field="phone" :value="carrier.phone" @update="v => apply('phone', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="phone" :value="carrier.phone" @update="v => apply('phone', v)" /></div>
             <div><div class="text-xs text-slate-400">Email</div>
-              <EditableField entity="carriers" :id="carrier.id" field="email" :value="carrier.email" @update="v => apply('email', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="email" :value="carrier.email" @update="v => apply('email', v)" /></div>
             <div class="md:col-span-2"><div class="text-xs text-slate-400">Website</div>
-              <EditableField entity="carriers" :id="carrier.id" field="website" :value="carrier.website" @update="v => apply('website', v)" /></div>
+              <EditableField :readonly="!editing" entity="carriers" :id="carrier.id" field="website" :value="carrier.website" @update="v => apply('website', v)" /></div>
             <div><div class="text-xs text-slate-400">Products</div><div class="font-medium text-slate-900">{{ carrier.productCount.toLocaleString() }}</div></div>
-            <div><div class="text-xs text-slate-400">Contracts</div><div class="font-medium text-slate-900">{{ carrier.contractCount.toLocaleString() }}</div></div>
             <div><div class="text-xs text-slate-400">Status</div>
               <div class="flex items-center gap-2">
                 <select
@@ -951,12 +964,12 @@ function typeBadge(insureType: string): string {
                     </button>
                   </td>
                   <td class="px-3 py-2 text-right">
-                    <button class="text-slate-400 hover:text-rose-600 p-1" title="Delete" @click="removeBankAccount(a)">
+                    <button v-if="editing" class="text-slate-400 hover:text-rose-600 p-1" title="Delete" @click="removeBankAccount(a)">
                       <i class="pi pi-trash text-xs" />
                     </button>
                   </td>
                 </tr>
-                <tr class="bg-slate-50/50">
+                <tr v-if="editing" class="bg-slate-50/50">
                   <td class="px-3 py-2">
                     <select v-model="newBank.bankId"
                       class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm bg-white focus:outline-none">
@@ -1143,14 +1156,14 @@ function typeBadge(insureType: string): string {
                       :title="credentialCopiedField === `${c.id}:row` ? 'Copied all!' : 'Copy URL + user + password'">
                       <i :class="credentialCopiedField === `${c.id}:row` ? 'pi pi-check' : 'pi pi-clone'" class="text-xs" />
                     </button>
-                    <button class="text-slate-400 hover:text-rose-600 p-1" title="Delete"
+                    <button v-if="editing" class="text-slate-400 hover:text-rose-600 p-1" title="Delete"
                       @click="removeCredential(c)">
                       <i class="pi pi-trash text-xs" />
                     </button>
                   </td>
                 </tr>
                 <!-- New row — always visible at the bottom, saves on "+ Add" click. -->
-                <tr class="bg-slate-50/50">
+                <tr v-if="editing" class="bg-slate-50/50">
                   <td class="px-3 py-2">
                     <input v-model.trim="newCredential.url" placeholder="https://..."
                       class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-xs focus:outline-none font-mono" />
@@ -1206,7 +1219,7 @@ function typeBadge(insureType: string): string {
                     </div>
                   </td>
                   <td class="px-3 py-2 text-right">
-                    <button @click="addCredential"
+                    <button v-if="editing" @click="addCredential"
                       class="text-brand-600 hover:text-brand-700 text-xs font-medium">
                       <i class="pi pi-plus text-[10px] mr-1" /> Add
                     </button>
@@ -1286,12 +1299,12 @@ function typeBadge(insureType: string): string {
                       @change="e => saveContact(c, 'isPrimary', (e.target as HTMLInputElement).checked)" />
                   </td>
                   <td class="px-3 py-2 text-right">
-                    <button class="text-slate-400 hover:text-rose-600 p-1" title="Delete" @click="removeContact(c)">
+                    <button v-if="editing" class="text-slate-400 hover:text-rose-600 p-1" title="Delete" @click="removeContact(c)">
                       <i class="pi pi-trash text-xs" />
                     </button>
                   </td>
                 </tr>
-                <tr class="bg-slate-50/50">
+                <tr v-if="editing" class="bg-slate-50/50">
                   <td class="px-3 py-2">
                     <input v-model.trim="newContact.firstName" placeholder="ชื่อผู้ติดต่อ หรือ ชื่อแผนก" lang="th"
                       class="w-full border border-slate-200 focus:border-brand-400 rounded px-2 py-1 text-sm focus:outline-none" />
@@ -1375,7 +1388,7 @@ function typeBadge(insureType: string): string {
         <div class="text-xs text-slate-400">
           Click any field to edit · Enter saves, Esc cancels
         </div>
-        <button type="button"
+        <button v-if="canEdit && editing" type="button"
           class="px-3 py-1.5 rounded-lg border border-rose-200 text-rose-600 hover:bg-rose-50 text-sm flex items-center gap-1.5"
           @click="showDelete = true">
           <i class="pi pi-trash text-xs" /> Delete

@@ -71,6 +71,12 @@ Route::post('auth/register', [AuthController::class, 'register']);
 Route::post('auth/forgot-password', [AuthController::class, 'forgotPassword']);
 Route::post('auth/reset-password', [AuthController::class, 'resetPassword']);
 
+// #1 — LINE Login. The authorize-URL for the LOGIN flow + the callback are
+// public (LINE redirects the browser to the callback with no auth header).
+// The CONNECT flow's authorize-URL needs the signed-in user — see below.
+Route::get('auth/line/login-url', [AuthController::class, 'lineRedirect']);
+Route::get('auth/line/callback', [AuthController::class, 'lineCallback']);
+
 // Unauthenticated public data (recruitment-link preview, lookups, etc.)
 Route::get('public/recruit/{token}', [PublicController::class, 'recruitLink']);
 Route::get('public/lookup/banks', [PublicController::class, 'banks']);
@@ -82,6 +88,9 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('auth/logout', [AuthController::class, 'logout']);
     Route::get('auth/me', [AuthController::class, 'me']);
     Route::post('auth/change-password', [MeAgentController::class, 'changePassword']);
+    // #1 — LINE connect/disconnect (link the signed-in user's account).
+    Route::get('auth/line/connect-url', [AuthController::class, 'lineRedirect']);
+    Route::post('auth/line/disconnect', [AuthController::class, 'lineDisconnect']);
 
     // Agent portal — "me as an agent" endpoints. Every route checks
     // users.agent_id is set; admins-with-no-agent get 404.
@@ -104,6 +113,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('me/agent/id-card-unmask', [MeAgentController::class, 'unmaskIdCard']);
     Route::get('me/agent/referral-link', [MeAgentController::class, 'referralLink']);
     Route::get('me/agent/downline', [MeAgentController::class, 'downline']);
+    Route::get('me/agent/relations', [MeAgentController::class, 'relations']);
     Route::get('me/agent/earnings', [MeAgentController::class, 'earnings']);
     Route::get('me/agent/payouts/{batch}/statement', [MeAgentController::class, 'payoutStatement']);
     Route::get('me/agent/payouts/{batch}/certificate', [MeAgentController::class, 'payoutCertificate']);

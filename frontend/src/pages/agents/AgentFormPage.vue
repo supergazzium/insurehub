@@ -19,6 +19,7 @@ import { fetchAgentOutstandingDetail } from '../../api/commissionPayouts'
 import { levelBadgeClass } from '../../utils/agentLevel'
 import { fmtDate } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
+import { useAuthStore } from '../../stores/auth'
 
 const route = useRoute()
 const router = useRouter()
@@ -38,6 +39,9 @@ const loading = ref(false)
 const saving = ref(false)
 // View-before-edit (#21): in edit mode the form opens read-only; the operator
 // must click "แก้ไข" to unlock the data fields. Create mode is always editable.
+// Only users with agents.update may unlock editing (#13).
+const auth = useAuthStore()
+const canEdit = computed(() => auth.hasPermission('agents.update'))
 const editing = ref(false)
 const locked = computed(() => isEdit.value && !editing.value)
 const error = ref<string | null>(null)
@@ -349,10 +353,14 @@ watch(() => route.params.id, () => { if (route.name === 'agent-edit') { void loa
           </p>
         </div>
         <div v-if="isEdit" class="flex shrink-0 gap-2">
-          <!-- View mode: a single "แก้ไข" button unlocks the data fields (#21). -->
-          <button v-if="!editing" type="button" class="rounded bg-brand-600 px-3 py-1.5 text-xs text-white hover:bg-brand-700" @click="editing = true">
+          <!-- View mode: a single "แก้ไข" button unlocks the data fields (#21),
+               shown only to users with agents.update (#13). -->
+          <button v-if="!editing && canEdit" type="button" class="rounded bg-brand-600 px-3 py-1.5 text-xs text-white hover:bg-brand-700" @click="editing = true">
             <i class="pi pi-pencil mr-1 text-[10px]" />แก้ไข
           </button>
+          <span v-else-if="!editing && !canEdit" class="rounded bg-amber-50 px-2.5 py-1.5 text-[11px] text-amber-700">
+            <i class="pi pi-eye mr-1 text-[10px]" />ดูข้อมูลเท่านั้น
+          </span>
           <button v-if="approvalStatus === 'pending'" type="button" class="rounded bg-emerald-600 px-2.5 py-1.5 text-xs text-white disabled:opacity-50" :disabled="busy" @click="doApprove">อนุมัติ</button>
           <button v-if="approvalStatus === 'pending'" type="button" class="rounded border border-rose-300 px-2.5 py-1.5 text-xs text-rose-600 disabled:opacity-50" :disabled="busy" @click="doReject">ปฏิเสธ</button>
           <button type="button"

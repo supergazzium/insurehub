@@ -17,9 +17,11 @@ use App\Models\Tenant;
 use App\Models\User;
 use App\Rbac\Rbac;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\Crypt;
+use Illuminate\Support\Facades\Http;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Log;
@@ -315,6 +317,147 @@ class AuthController extends Controller
         return response()->json(['user' => $this->userPayload($user)]);
     }
 
+    // ── #1 LINE Login (OAuth 2.0 / OIDC) ─────────────────────────────────────
+
+    private function lineConfigured(): bool
+    {
+        return (bool) config('services.line.channel_id') && (bool) config('services.line.channel_secret');
+    }
+
+    /**
+     * Build the LINE authorize URL. `mode=connect` carries the signed id of the
+     * already-signed-in user (link-to-existing-account); `mode=login` (default)
+     * signs in a user whose account is already linked. Returns the URL for the
+     * SPA to redirect the browser to.
+     */
+    public function lineRedirect(Request $request): JsonResponse
+    {
+        if (! $this->lineConfigured()) {
+            return response()->json(['message' => 'LINE Login ยังไม่ได้ตั้งค่า'], 503);
+        }
+        // Mode follows authentication: a signed-in user (connect-url route under
+        // auth:sanctum) is LINKING; an anonymous caller (public login-url) is
+        // SIGNING IN with an already-linked account.
+        $connectUserId = $request->user() !== null ? (int) $request->user()->id : null;
+        $mode = $connectUserId !== null ? 'connect' : 'login';
+        $state = Crypt::encryptString(json_encode([
+            'mode' => $mode,
+            'uid' => $connectUserId,
+            'nonce' => Str::random(24),
+            'exp' => now()->addMinutes(10)->timestamp,
+        ]));
+
+        $url = 'https://access.line.me/oauth2/v2.1/authorize?' . http_build_query([
+            'response_type' => 'code',
+            'client_id' => config('services.line.channel_id'),
+            'redirect_uri' => config('services.line.redirect'),
+            'state' => $state,
+            'scope' => 'openid profile',
+        ]);
+
+        return response()->json(['url' => $url]);
+    }
+
+    /**
+     * LINE redirects here after authorisation. Exchange the code for tokens,
+     * read the LINE user id (`sub`) from the id_token, then connect or sign in.
+     * Always redirects the browser back to the SPA with a result in the query.
+     */
+    public function lineCallback(Request $request): RedirectResponse
+    {
+        $front = rtrim((string) config('app.frontend_url', env('FRONTEND_URL', '/')), '/');
+        $fail = fn (string $code): RedirectResponse => redirect()->away("{$front}/agent/login?line_error={$code}");
+
+        if (! $this->lineConfigured()) {
+            return $fail('not_configured');
+        }
+        if ($request->query('error') !== null || $request->query('code') === null) {
+            return $fail('cancelled');
+        }
+
+        // Verify + decode the signed state.
+        try {
+            $state = json_decode(Crypt::decryptString((string) $request->query('state')), true, flags: JSON_THROW_ON_ERROR);
+        } catch (\Throwable) {
+            return $fail('bad_state');
+        }
+        if (! is_array($state) || ($state['exp'] ?? 0) < now()->timestamp) {
+            return $fail('bad_state');
+        }
+        $mode = $state['mode'] ?? 'login';
+
+        // Exchange the authorization code for tokens.
+        $tokenRes = Http::asForm()->post('https://api.line.me/oauth2/v2.1/token', [
+            'grant_type' => 'authorization_code',
+            'code' => (string) $request->query('code'),
+            'redirect_uri' => config('services.line.redirect'),
+            'client_id' => config('services.line.channel_id'),
+            'client_secret' => config('services.line.channel_secret'),
+        ]);
+        if (! $tokenRes->successful()) {
+            return $fail('exchange_failed');
+        }
+        $idToken = (string) $tokenRes->json('id_token', '');
+        $lineUserId = $this->lineUserIdFromIdToken($idToken);
+        if ($lineUserId === null) {
+            return $fail('no_profile');
+        }
+
+        if ($mode === 'connect') {
+            $user = User::query()->whereKey((int) ($state['uid'] ?? 0))->first();
+            if ($user === null) {
+                return $fail('bad_state');
+            }
+            // Refuse if this LINE account is already linked to someone else.
+            $taken = User::query()->where('line_user_id', $lineUserId)->where('id', '!=', $user->id)->exists();
+            if ($taken) {
+                return redirect()->away("{$front}/portal/settings?line_error=already_linked");
+            }
+            $user->line_user_id = $lineUserId;
+            $user->save();
+            return redirect()->away("{$front}/portal/settings?line_connected=1");
+        }
+
+        // login mode — the LINE account must already be linked.
+        $user = User::query()
+            ->where('line_user_id', $lineUserId)
+            ->where('active', true)
+            ->whereNull('deleted_at')
+            ->first();
+        if ($user === null) {
+            return $fail('not_linked');
+        }
+        $token = $user->createToken('line')->plainTextToken;
+        // Hand the token to the SPA via the fragment so it isn't logged in query
+        // strings / server logs; the login page reads it and stores it.
+        return redirect()->away("{$front}/agent/login#line_token=" . urlencode($token));
+    }
+
+    /**
+     * Extract the LINE user id (`sub`) from an OIDC id_token without verifying
+     * the signature here — the token came straight from LINE's token endpoint
+     * over TLS using our channel secret, so it is trusted for the `sub` claim.
+     */
+    private function lineUserIdFromIdToken(string $idToken): ?string
+    {
+        $parts = explode('.', $idToken);
+        if (count($parts) < 2) {
+            return null;
+        }
+        $payload = json_decode((string) base64_decode(strtr($parts[1], '-_', '+/'), true), true);
+        $sub = is_array($payload) ? ($payload['sub'] ?? null) : null;
+        return is_string($sub) && $sub !== '' ? $sub : null;
+    }
+
+    /** Disconnect the signed-in user's LINE link. */
+    public function lineDisconnect(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $user->line_user_id = null;
+        $user->save();
+        return response()->json(['message' => 'ยกเลิกการเชื่อม LINE แล้ว']);
+    }
+
     /** @return array<string,mixed> */
     private function userPayload(User $user): array
     {
@@ -335,6 +478,8 @@ class AuthController extends Controller
             'locale' => $user->locale,
             'tenantId' => $user->tenant_id !== null ? (string) $user->tenant_id : null,
             'agentId' => $user->agent_id !== null ? (string) $user->agent_id : null,
+            // #1 — whether this account has a LINE login linked.
+            'lineLinked' => $user->line_user_id !== null,
         ];
     }
 }

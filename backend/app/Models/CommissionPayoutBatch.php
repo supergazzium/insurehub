@@ -20,6 +20,10 @@ class CommissionPayoutBatch extends Model
     public const STATUS_CANCELLED = 'CANCELLED';
     public const STATUS_REVERSED = 'REVERSED';
 
+    // Commission-calc version stamped on each batch (column default 1).
+    public const CALC_V1 = 1;
+    public const CALC_V2 = 2;
+
     protected $casts = [
         'from_date' => 'date',
         'to_date' => 'date',

@@ -265,6 +265,11 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') void loa
             <button v-if="canEdit" type="button" data-testid="agent-toggle-active"
               :class="['rounded px-3 py-1.5 text-xs', active ? 'border border-rose-300 text-rose-600 hover:bg-rose-50' : 'border border-emerald-300 text-emerald-600 hover:bg-emerald-50']"
               @click="activeError = null; activeDialog = true">{{ active ? 'ปิดใช้งาน' : 'เปิดใช้งาน' }}</button>
+            <!-- Jump to the full team tree for this agent. -->
+            <RouterLink :to="{ name: 'agents-hierarchy', query: { agent: agentId } }"
+              class="rounded border border-slate-300 px-3 py-1.5 text-xs text-slate-600 hover:bg-slate-50 inline-flex items-center gap-1">
+              <i class="pi pi-sitemap text-[10px]" /> ดูสายงาน
+            </RouterLink>
             <button v-if="canEdit" type="button" data-testid="agent-edit" class="rounded bg-brand-600 px-3 py-1.5 text-xs text-white hover:bg-brand-700" @click="goEdit">
               <i class="pi pi-pencil text-[10px]" /> แก้ไขข้อมูล
             </button>

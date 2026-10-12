@@ -18,8 +18,6 @@ import PortalProfile from '../pages/portal/PortalProfile.vue'
 import PortalReferral from '../pages/portal/PortalReferral.vue'
 import PortalSettings from '../pages/portal/PortalSettings.vue'
 import PortalEarnings from '../pages/portal/PortalEarnings.vue'
-import AdminAgentApprovals from '../pages/admin/AdminAgentApprovals.vue'
-import AdminDownlineTree from '../pages/admin/AdminDownlineTree.vue'
 import AdminMotorTariffs from '../pages/admin/AdminMotorTariffs.vue'
 import AdminCommissionTiers from '../pages/admin/AdminCommissionTiers.vue'
 import AdminProductTypes from '../pages/admin/AdminProductTypes.vue'
@@ -60,8 +58,9 @@ const IMPLEMENTED_MODULES = new Set([
   'agent-support', 'agent-operation-support',
   // Phase 2 (agent portal)
   'portal-dashboard', 'portal-profile', 'portal-referral', 'portal-settings', 'portal-earnings',
-  // Phase 4 (admin agent oversight)
-  'admin-agent-approvals', 'admin-downline-tree', 'admin-access',
+  // Phase 4 (admin agent oversight) — agent approvals + downline tree moved
+  // into the /agents tabs; only the access-control page remains here.
+  'admin-access',
   // Phase 9 (motor tariff admin)
   'admin-motor-tariffs',
   'admin-commission-tiers',
@@ -113,6 +112,7 @@ const routes: RouteRecordRaw[] = [
     component: AuthLayout,
     children: [
       { path: 'login', name: 'login', component: Login },
+      { path: 'agent/login', name: 'agent-login', component: () => import('../pages/auth/AgentLogin.vue') },
       { path: 'forgot-password', name: 'forgot-password', component: ForgotPassword },
       { path: 'reset-password', name: 'reset-password', component: ResetPassword },
       { path: 'invite/:token?', name: 'accept-invitation', component: AcceptInvitation },
@@ -178,11 +178,14 @@ const routes: RouteRecordRaw[] = [
       { path: 'ops', name: 'agent-operation-support', component: AgentOperationSupport, meta: { moduleKey: 'agent-operation-support' } },
       // Portal routes moved to their own PortalLayout branch below (own shell).
       // Admin approval + oversight (Phase 4). Role gate lives on backend.
-      { path: 'admin/agent-approvals', name: 'admin-agent-approvals', component: AdminAgentApprovals, meta: { moduleKey: 'admin-agent-approvals' } },
+      // Agent approvals moved into the /agents tabs (รออนุมัติ). Redirect the
+      // old admin path so bookmarks keep working.
+      { path: 'admin/agent-approvals', name: 'admin-agent-approvals', redirect: { name: 'agents-approvals' } },
       { path: 'admin/access', name: 'admin-access', component: AccessControl, meta: { moduleKey: 'admin-access' } },
       // Legacy /admin/roles URL keeps working.
       { path: 'admin/roles', redirect: { name: 'admin-access', query: { tab: 'roles' } } },
-      { path: 'admin/downline-tree', name: 'admin-downline-tree', component: AdminDownlineTree, meta: { moduleKey: 'admin-downline-tree' } },
+      // Downline tree moved into the /agents tabs (searchable, intuitive).
+      { path: 'admin/downline-tree', name: 'admin-downline-tree', redirect: { name: 'agents-hierarchy' } },
       { path: 'admin/motor-tariffs', name: 'admin-motor-tariffs', component: AdminMotorTariffs, meta: { moduleKey: 'admin-motor-tariffs' } },
       { path: 'admin/commission-tiers', name: 'admin-commission-tiers', component: AdminCommissionTiers, meta: { moduleKey: 'admin-commission-tiers' } },
       { path: 'admin/product-types', name: 'admin-product-types', component: AdminProductTypes, meta: { moduleKey: 'admin-product-types' } },
@@ -236,6 +239,7 @@ const PUBLIC_ROUTE_NAMES = new Set([
   'register-agent',
   'recruit-link',
   'login',
+  'agent-login',
   'forgot-password',
   'reset-password',
   'accept-invitation',
@@ -250,7 +254,10 @@ router.beforeEach(async (to) => {
   const isAgent = auth.isAuthenticated && auth.user?.role === 'agent'
 
   if (!auth.isAuthenticated && !isPublic) {
-    return { name: 'login', query: { redirect: to.fullPath } }
+    // #2 — send unauthenticated users to the login page that matches where
+    // they were headed: a /portal/* route → agent login, else staff login.
+    const wantsPortal = typeof to.name === 'string' && to.name.startsWith('portal-')
+    return { name: wantsPortal ? 'agent-login' : 'login', query: { redirect: to.fullPath } }
   }
   if (auth.isAuthenticated && isPublic) {
     return { name: isAgent ? 'portal-dashboard' : 'dashboard' }

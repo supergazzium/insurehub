@@ -4,6 +4,10 @@ import { useI18n } from 'vue-i18n'
 import MoneyInput from '../../components/MoneyInput.vue'
 import { fetchTenant, updateCustomerTiers, updateFollowUpSettings, updatePayoutSettings, updateTenantProfile, type CustomerTierSetting, type TenantSettingsRow } from '../../api/tenant'
 import { ApiError } from '../../api/client'
+import { useAuthStore } from '../../stores/auth'
+
+const auth = useAuthStore()
+const canSaveSettings = computed(() => auth.hasPermission('admin.settings'))
 
 const { t } = useI18n()
 
@@ -431,7 +435,7 @@ function exportAuditCsv() {
           </div>
 
           <input ref="logoInput" type="file" accept="image/*" class="hidden" @change="onLogoChange" />
-          <div class="grid grid-cols-2 gap-2 mt-3">
+          <div v-if="canSaveSettings" class="grid grid-cols-2 gap-2 mt-3">
             <button
               type="button"
               @click="pickLogo"
@@ -526,6 +530,7 @@ function exportAuditCsv() {
               <i class="pi pi-check-circle" /> {{ t('settings.profile.saved') }}
             </span>
             <button
+              v-if="canSaveSettings"
               type="submit"
               :disabled="profileSaving || profileLoading || !profile.name.trim()"
               data-testid="tenant-profile-save"
@@ -534,6 +539,7 @@ function exportAuditCsv() {
               <i v-if="profileSaving" class="pi pi-spin pi-spinner" />
               <span>{{ t('settings.profile.saveChanges') }}</span>
             </button>
+            <span v-else class="text-xs text-amber-700"><i class="pi pi-eye mr-1" />ดูข้อมูลเท่านั้น</span>
           </div>
         </form>
       </div>
@@ -715,8 +721,9 @@ function exportAuditCsv() {
       <p v-if="payoutError" class="text-xs text-rose-600">{{ payoutError }}</p>
       <div class="flex items-center justify-end gap-3">
         <span v-if="payoutSaved" class="text-xs text-emerald-600"><i class="pi pi-check" /> บันทึกแล้ว</span>
-        <button type="button" data-testid="payout-save" class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
+        <button v-if="canSaveSettings" type="button" data-testid="payout-save" class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
           :disabled="payoutSaving || payoutLoading" @click="savePayout">บันทึก</button>
+        <span v-else class="text-xs text-amber-600"><i class="pi pi-eye" /> ดูข้อมูลเท่านั้น</span>
       </div>
     </section>
 
@@ -858,7 +865,7 @@ function exportAuditCsv() {
         <p v-if="tiersError" class="text-xs text-rose-600 mt-2">{{ tiersError }}</p>
         <div class="flex items-center justify-end gap-3 mt-4">
           <span v-if="tiersSaved" class="text-xs text-emerald-600"><i class="pi pi-check" /> {{ t('settings.customerTiers.saved') }}</span>
-          <button type="button" data-testid="tier-save"
+          <button v-if="canSaveSettings" type="button" data-testid="tier-save"
             class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
             :disabled="tiersSaving || tiersLoading || !!tierValidation" @click="saveTiers">
             {{ t('settings.customerTiers.save') }}
@@ -916,7 +923,7 @@ function exportAuditCsv() {
         <p v-if="followUpError" class="text-xs text-rose-600">{{ followUpError }}</p>
         <div class="flex items-center justify-end gap-3">
           <span v-if="followUpSaved" class="text-xs text-emerald-600"><i class="pi pi-check" /> บันทึกแล้ว</span>
-          <button type="button" data-testid="followups-save"
+          <button v-if="canSaveSettings" type="button" data-testid="followups-save"
             class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
             :disabled="followUpSaving" @click="saveFollowUp">บันทึก</button>
         </div>
