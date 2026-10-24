@@ -27,6 +27,7 @@ class CommissionPayoutBatchItem extends Model
         'snapshot_card_fee' => 'decimal:2',
         'snapshot_wht_rate' => 'decimal:4',
         'snapshot_wht_amount' => 'decimal:2',
+        'vat_amount' => 'decimal:2',
     ];
 
     public function batch(): BelongsTo

@@ -249,7 +249,13 @@ class CommissionPayoutController extends Controller
             $a['bankAccountNo'] = $pr?->bank_account_no;
             $a['bankAccountName'] = $pr?->bank_account_name;
             $a['whtAmount'] = $pr ? round((float) $pr->wht_amount, 2) : 0.0;
+            $a['vatAmount'] = $pr ? round((float) $pr->vat_amount, 2) : 0.0;
             $a['netTransfer'] = $pr ? round((float) $pr->net_transfer, 2) : $a['net'];
+            $a['vatExpectedNet'] = $pr?->vat_expected_net !== null ? round((float) $pr->vat_expected_net, 2) : null;
+            // VAT is computed but NOT yet included in netTransfer (pending
+            // accounting sign-off) — the UI flags this so no one trusts the
+            // transfer figure for VAT agents.
+            $a['vatDiscrepancy'] = $a['vatAmount'] > 0;
             $a['paid'] = (bool) ($pr?->paid ?? false);
             $a['paidAt'] = $pr?->paid_at?->toIso8601String();
             $a['paymentReference'] = $pr?->payment_reference;

@@ -453,13 +453,16 @@ class CommissionPayoutService
             foreach ($rows as $row) {
                 $amt = $this->resolveAmount($row);
                 $snap = $this->snapshotColumns($row, $amt);
+                $vatType = $this->resolveVatType($row);
+                $itemVat = self::vatFor($amt['main'] + $amt['rider'], $vatType);
                 CommissionPayoutBatchItem::create(array_merge([
                     'batch_id' => $batch->id,
                     'tenant_id' => $tenantId,
                     'policy_id' => $row->policy_id,
                     'agent_id' => $row->agent_id,
                     'agent_code' => $row->agent_code,
-                    'vat_type' => $this->resolveVatType($row),
+                    'vat_type' => $vatType,
+                    'vat_amount' => $itemVat,
                     'snapshot_base_premium' => $amt['base'],
                     'snapshot_agent_commission' => $amt['main'],
                     'snapshot_rider_commission' => $amt['rider'],
@@ -474,16 +477,18 @@ class CommissionPayoutService
                         'agent_id' => $row->agent_id,
                         'agent_code' => $row->agent_code,
                         'agent_name' => $row->agent_name,
-                        'vat_type' => $this->resolveVatType($row),
+                        'vat_type' => $vatType,
                         'item_count' => 0,
                         'gross_commission' => 0.0,
                         'wht_amount' => 0.0,
+                        'vat_amount' => 0.0,
                         'payoff_card' => 0.0,
                     ];
                 }
                 $byAgent[$key]['item_count']++;
                 $byAgent[$key]['gross_commission'] += $amt['main'] + $amt['rider'];
                 $byAgent[$key]['wht_amount'] += (float) $snap['snapshot_wht_amount'];
+                $byAgent[$key]['vat_amount'] += $itemVat;
                 $byAgent[$key]['payoff_card'] += (float) $snap['snapshot_payoff_discount'] + (float) $snap['snapshot_card_fee'];
                 $total += $amt['main'] + $amt['rider'];
             }
@@ -499,7 +504,11 @@ class CommissionPayoutService
                 $gross = round($a['gross_commission'], 2);
                 $deduct = round($a['payoff_card'], 2);      // adjustments added later reduce net at pay time
                 $wht = round($a['wht_amount'], 2);
+                $vat = round($a['vat_amount'], 2);
+                // net_transfer is UNCHANGED (no VAT) — the actual paid amount.
                 $net = round($gross - $deduct - $wht, 2);
+                // What net WOULD be if VAT were included — for the discrepancy flag.
+                $vatExpectedNet = round($gross + $vat - $deduct - $wht, 2);
                 $ag = $a['agent_id'] ? ($bank[$a['agent_id']] ?? null) : null;
                 CommissionPayoutBatchAgent::create([
                     'batch_id' => $batch->id,
@@ -514,7 +523,9 @@ class CommissionPayoutService
                     'gross_commission' => $gross,
                     'deduct_amount' => $deduct,
                     'wht_amount' => $wht,
+                    'vat_amount' => $vat,
                     'net_transfer' => $net,
+                    'vat_expected_net' => $vatExpectedNet,
                 ]);
             }
 
@@ -939,10 +950,12 @@ class CommissionPayoutService
 
         $gross = 0.0;
         $wht = 0.0;
+        $vat = 0.0;
         $payoffCard = 0.0;
         foreach ($items as $it) {
             $gross += $it->total();
             $wht += (float) $it->snapshot_wht_amount;
+            $vat += (float) $it->vat_amount;
             $payoffCard += (float) $it->snapshot_payoff_discount + (float) $it->snapshot_card_fee;
         }
         // Bonuses add to the payout; special_deduct / correction subtract.
@@ -954,14 +967,18 @@ class CommissionPayoutService
             ->whereIn('type', [CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
             ->sum('amount');
         $deduct = round($payoffCard + $subtractAdj, 2);
+        // net_transfer UNCHANGED (no VAT); vat_expected_net mirrors it + VAT.
         $net = round($gross + $bonus - $deduct - $wht, 2);
+        $vat = round($vat, 2);
 
         $agentRow->update([
             'item_count' => $items->count(),
             'gross_commission' => round($gross, 2),
             'deduct_amount' => $deduct,
             'wht_amount' => round($wht, 2),
+            'vat_amount' => $vat,
             'net_transfer' => $net,
+            'vat_expected_net' => round($net + $vat, 2),
         ]);
     }
 
@@ -984,6 +1001,26 @@ class CommissionPayoutService
 
     /** VAT rate applied to agent commission when the agent carries VAT. */
     private const VAT_RATE = 0.07;
+
+    /**
+     * VAT amount for a given commission base and agent VAT type. Single source
+     * of truth shared by createBatch, recomputeAgentRollup, and the PDF builder
+     * so the stored vat_amount and the printed statement never diverge.
+     *   '2' VAT Exclude : VAT = commission × 7%
+     *   '3' VAT Include : VAT = commission − commission/1.07 (carved out)
+     *   '1' non-VAT     : 0
+     */
+    public static function vatFor(float $commission, string $vatType): float
+    {
+        if ($vatType === '2') {
+            return round($commission * self::VAT_RATE, 2);
+        }
+        if ($vatType === '3') {
+            return round($commission - round($commission / (1 + self::VAT_RATE), 2), 2);
+        }
+
+        return 0.0;
+    }
 
     /**
      * Assemble the per-agent PDF payload for a batch: the agent's items plus
@@ -1040,17 +1077,16 @@ class CommissionPayoutService
             //   '1' non-VAT      : VAT=0,            wht = C × 3%,         payable = C − wht
             //   '3' VAT Include  : VAT = C − C/1.07, wht = (C/1.07) × 3%,  payable = C − VAT − wht
             //   '2' VAT Exclude  : VAT = C × 7%,     wht = C × 3%,         payable = C + VAT − wht
+            $vat = self::vatFor($commA, $vatType);
             if ($vatType === '3') {
-                $base = round($commA / 1.07, 2);
-                $vat = round($commA - $base, 2);
-                $wht = round($base * self::WHT_RATE, 2);
+                // VAT Include: WHT is 3% of the VAT-exclusive base; VAT is carved out.
+                $wht = round(round($commA / (1 + self::VAT_RATE), 2) * self::WHT_RATE, 2);
                 $payable = round($commA - $vat - $wht, 2);
             } elseif ($vatType === '2') {
-                $vat = round($commA * 0.07, 2);
+                // VAT Exclude: VAT added on top.
                 $wht = round($commA * self::WHT_RATE, 2);
                 $payable = round($commA + $vat - $wht, 2);
             } else {
-                $vat = 0.0;
                 $wht = round($commA * self::WHT_RATE, 2);
                 $payable = round($commA - $wht, 2);
             }
