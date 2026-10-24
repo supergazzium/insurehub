@@ -241,13 +241,41 @@ class CommissionPayoutService
     }
 
     /**
+     * Split resolved rows into payable (commission > 0) vs needs-review
+     * (commission ≤ 0 — unrated policies whose rate isn't set yet). The latter
+     * are DATA ERRORS, not debt, so they must never enter a payout batch or a
+     * ฿0 PDF; they're surfaced separately for the fix-up workflow (1C).
+     *
+     * @return array{payable: \Illuminate\Support\Collection, needsReview: \Illuminate\Support\Collection}
+     */
+    private function partitionPayable(\Illuminate\Support\Collection $rows): array
+    {
+        $payable = [];
+        $needsReview = [];
+        foreach ($rows as $row) {
+            $amt = $this->resolveAmount($row);
+            if (round($amt['main'] + $amt['rider'], 2) > 0) {
+                $payable[] = $row;
+            } else {
+                $needsReview[] = $row;
+            }
+        }
+
+        return [
+            'payable' => collect($payable),
+            'needsReview' => collect($needsReview),
+        ];
+    }
+
+    /**
      * Preview eligible items grouped by agent — no persistence.
      *
-     * @return array{agents: array<int, array<string, mixed>>, totals: array<string, mixed>, warnings: array<int, string>}
+     * @return array{agents: array<int, array<string, mixed>>, totals: array<string, mixed>, warnings: array<int, string>, needsReview: array<int, array<string, mixed>>}
      */
     public function preview(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null): array
     {
-        $rows = $this->rows($tenantId, $from, $to, $agentId);
+        $all = $this->rows($tenantId, $from, $to, $agentId);
+        ['payable' => $rows, 'needsReview' => $needsReviewRows] = $this->partitionPayable($all);
         $byAgent = [];
         $warnings = [];
         $grandTotal = 0.0;
@@ -272,13 +300,19 @@ class CommissionPayoutService
             $grandTotal += $total;
             $itemCount++;
 
-            if ($amt['source'] === 'none') {
-                $warnings[] = "กรมธรรม์ {$row->policy_no} ({$row->agent_code}) ไม่มียอดค่าคอมตัวแทน";
-            }
             if (! $row->agent_code) {
                 $warnings[] = "กรมธรรม์ {$row->policy_no} ไม่มีรหัสตัวแทน";
             }
         }
+
+        // ฿0 / unrated rows — data errors to fix, NOT payable debt.
+        $needsReview = $needsReviewRows->map(fn ($r) => [
+            'policyId' => (string) $r->policy_id,
+            'policyNo' => $r->policy_no,
+            'agentCode' => $r->agent_code,
+            'agentName' => $r->agent_name,
+            'reason' => 'ยังไม่ตั้งอัตราค่าคอม (ค่าคอม ฿0)',
+        ])->values()->all();
 
         $agents = array_values($byAgent);
 
@@ -302,8 +336,10 @@ class CommissionPayoutService
                 'totalAgents' => count($agents),
                 'totalItems' => $itemCount,
                 'totalAmount' => round($grandTotal, 2),
+                'needsReviewCount' => count($needsReview),
             ],
             'warnings' => array_values(array_unique($warnings)),
+            'needsReview' => $needsReview,
         ];
     }
 
@@ -431,7 +467,9 @@ class CommissionPayoutService
         ?array $agentIds = null,
         ?string $periodLabel = null,
     ): CommissionPayoutBatch {
-        $rows = $this->rows($tenantId, $from, $to, $agentId, $agentIds);
+        // Only payable rows (commission > 0) enter the batch; ฿0/unrated rows are
+        // data errors surfaced via preview()['needsReview'], never a ฿0 line item.
+        $rows = $this->partitionPayable($this->rows($tenantId, $from, $to, $agentId, $agentIds))['payable'];
         if ($rows->isEmpty()) {
             throw new RuntimeException('ไม่พบรายการค่าคอมที่เข้าเงื่อนไขในช่วงวันที่ที่ระบุ');
         }

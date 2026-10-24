@@ -115,4 +115,38 @@ class PayoutMoneySafetyTest extends TestCase
         $row = CommissionPayoutBatchAgent::where('batch_id', $batch->id)->where('agent_id', $agent->id)->firstOrFail();
         $this->assertFalse((bool) $row->needs_info);
     }
+
+    // ── 1C: exclude ฿0 / unrated rows from payable ────────────────────────
+
+    public function test_zero_commission_policy_is_not_payable_and_goes_to_needs_review(): void
+    {
+        $agent = $this->payoutAgent(1);
+        // Unrated policy — no commission amount (rate 0, amount forced to 0).
+        $this->sellAndPay($agent, premium: 20000, rate: 0.0, policyAttrs: ['comm_hub_to_agent_amount' => 0]);
+
+        $preview = $this->service->preview((int) $this->tenant->id);
+        // Not in the payable agent list.
+        $this->assertNull(collect($preview['agents'])->firstWhere('agentCode', $agent->agent_code));
+        $this->assertSame(0.0, (float) $preview['totals']['totalAmount']);
+        // Surfaced in needsReview instead.
+        $this->assertSame(1, $preview['totals']['needsReviewCount']);
+        $this->assertSame($agent->agent_code, $preview['needsReview'][0]['agentCode']);
+
+        // And it cannot form a batch (no payable rows).
+        $this->expectException(\RuntimeException::class);
+        $this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
+    }
+
+    public function test_zero_and_rated_mix_only_pays_the_rated_one(): void
+    {
+        $rated = $this->payoutAgent(1);
+        $unrated = $this->payoutAgent(1);
+        $this->sellAndPay($rated, premium: 20000, rate: 0.10);
+        $this->sellAndPay($unrated, premium: 20000, rate: 0.0, policyAttrs: ['comm_hub_to_agent_amount' => 0]);
+
+        $batch = $this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
+        // Only the rated agent gets a row; no ฿0 line item.
+        $this->assertSame(1, CommissionPayoutBatchAgent::where('batch_id', $batch->id)->count());
+        $this->assertSame($rated->id, CommissionPayoutBatchAgent::where('batch_id', $batch->id)->value('agent_id'));
+    }
 }
