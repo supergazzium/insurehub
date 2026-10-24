@@ -151,8 +151,10 @@ const routes: RouteRecordRaw[] = [
       { path: 'agents/level-progress', name: 'agents-level-progress', component: () => import('../pages/agents/LevelProgressBoard.vue'), meta: { moduleKey: 'agents' } },
       { path: 'agents/manage', redirect: { name: 'agents' } },
       { path: 'agents/new', name: 'agent-new', component: () => import('../pages/agents/AgentFormPage.vue'), meta: { moduleKey: 'agents' } },
-      { path: 'agents/:id/edit-info', redirect: (to) => ({ name: 'agent-edit', params: { id: to.params.id } }) },
-      { path: 'agents/:id/edit', name: 'agent-edit', component: () => import('../pages/agents/AgentFormPage.vue'), meta: { moduleKey: 'agents' } },
+      // Editing moved inline into the per-agent detail page — both legacy edit
+      // routes now redirect there.
+      { path: 'agents/:id/edit-info', redirect: (to) => ({ name: 'agent-detail', params: { id: to.params.id } }) },
+      { path: 'agents/:id/edit', name: 'agent-edit', redirect: (to) => ({ name: 'agent-detail', params: { id: to.params.id } }) },
       { path: 'agents/:id', name: 'agent-detail', component: () => import('../pages/agents/AgentViewPage.vue'), meta: { moduleKey: 'agents' } },
       { path: 'customers', name: 'customers', component: CustomerList, meta: { moduleKey: 'customers' } },
       { path: 'customers/referrals', name: 'customers-referrals', component: CustomerReferral, meta: { moduleKey: 'customers' } },

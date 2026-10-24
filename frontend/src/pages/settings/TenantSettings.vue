@@ -1,18 +1,27 @@
 <script setup lang="ts">
 import { ref, reactive, computed, watch, onMounted } from 'vue'
+import { useRoute } from 'vue-router'
 import { useI18n } from 'vue-i18n'
 import MoneyInput from '../../components/MoneyInput.vue'
 import { fetchTenant, updateCustomerTiers, updateFollowUpSettings, updatePayoutSettings, updateTenantProfile, type CustomerTierSetting, type TenantSettingsRow } from '../../api/tenant'
+import { fetchRanks, updateRank, type RankRow } from '../../api/agents'
 import { ApiError } from '../../api/client'
 import { useAuthStore } from '../../stores/auth'
 
 const auth = useAuthStore()
 const canSaveSettings = computed(() => auth.hasPermission('admin.settings'))
 
-const { t } = useI18n()
+const { t, te } = useI18n()
+const route = useRoute()
 
-type Tab = 'profile' | 'commission' | 'payout' | 'branding' | 'customers' | 'followups' | 'audit'
+type Tab = 'profile' | 'commission' | 'payout' | 'branding' | 'customers' | 'followups' | 'ranks' | 'audit'
 const tab = ref<Tab>('profile')
+const TAB_KEYS: Tab[] = ['profile', 'commission', 'payout', 'branding', 'customers', 'followups', 'ranks', 'audit']
+const TAB_LABEL: Record<Tab, string> = {
+  profile: 'โปรไฟล์หน่วยงาน', commission: 'รูปแบบค่าคอมมิชชั่น', payout: 'รอบการจ่ายเงิน',
+  branding: 'แบรนด์และธีม', customers: 'เกรดลูกค้า', followups: 'ติดตามงาน & Verify',
+  ranks: 'ระดับตัวแทน', audit: 'บันทึกการตรวจสอบ',
+}
 
 const tierRows = ref<Array<{ key: CustomerTierSetting['key']; label: string; min: string }>>([])
 const tiersLoading = ref(false)
@@ -119,10 +128,57 @@ async function saveFollowUp(): Promise<void> {
   }
 }
 
+// ── ระดับตัวแทน (เกณฑ์ 10 ระดับ) — ย้ายมาจากหน้า LevelProgressBoard. ───────────
+// แก้ไขได้อย่างเดียว (ranks เป็นชุดคงที่ 10 แถว ไม่มีสร้าง/ลบ) ผ่าน updateRank.
+const rankRows = ref<Array<{ id: string; level: number; code: string; nameTh: string; target: string; licenseRequired: boolean }>>([])
+const ranksLoading = ref(false)
+const ranksSaving = ref(false)
+const ranksSaved = ref(false)
+const ranksError = ref<string | null>(null)
+let ranksLoaded = false
+function toRankRows(rows: RankRow[]): typeof rankRows.value {
+  return rows.map((r) => ({ id: r.id, level: r.level, code: r.code, nameTh: r.nameTh, target: String(r.threeMonthAccumTarget ?? 0), licenseRequired: r.licenseRequired }))
+}
+async function loadRanks(): Promise<void> {
+  ranksLoading.value = true
+  ranksError.value = null
+  try {
+    rankRows.value = toRankRows((await fetchRanks()).data)
+    ranksLoaded = true
+  } catch (e: unknown) {
+    ranksError.value = e instanceof ApiError ? (e.body?.message ?? `HTTP ${e.status}`) : 'โหลดเกณฑ์ไม่สำเร็จ'
+  } finally {
+    ranksLoading.value = false
+  }
+}
+async function saveRanks(): Promise<void> {
+  ranksSaving.value = true
+  ranksError.value = null
+  try {
+    // PATCH each rank individually (updateRank is per-row). Level 1 target is
+    // always 0 (ระดับเริ่มต้น).
+    for (const r of rankRows.value) {
+      await updateRank(r.id, {
+        nameTh: r.nameTh.trim(),
+        threeMonthAccumTarget: r.level === 1 ? 0 : (Number(r.target) || 0),
+        licenseRequired: r.licenseRequired,
+      })
+    }
+    rankRows.value = toRankRows((await fetchRanks()).data)
+    ranksSaved.value = true
+    setTimeout(() => (ranksSaved.value = false), 2000)
+  } catch (e: unknown) {
+    ranksError.value = e instanceof ApiError ? (e.body?.message ?? `HTTP ${e.status}`) : 'บันทึกไม่สำเร็จ'
+  } finally {
+    ranksSaving.value = false
+  }
+}
+
 watch(tab, (v) => {
   if (v === 'customers' && !tiersLoaded) void loadTiers()
   if (v === 'followups' && !followUpLoaded) void loadFollowUp()
   if (v === 'payout' && !payoutLoaded) void loadPayout()
+  if (v === 'ranks' && !ranksLoaded) void loadRanks()
 })
 
 // ── Profile ───────────────────────────────────────────────────────────────
@@ -171,7 +227,13 @@ async function loadProfile(): Promise<void> {
     profileLoading.value = false
   }
 }
-onMounted(loadProfile)
+onMounted(() => {
+  // Deep-link to a specific tab via ?tab= (e.g. the level-report page links
+  // here with ?tab=ranks). Falls back to 'profile'.
+  const q = route.query.tab
+  if (typeof q === 'string' && (TAB_KEYS as string[]).includes(q)) tab.value = q as Tab
+  void loadProfile()
+})
 const logoPreview = ref<string | null>(null)
 const logoInput = ref<HTMLInputElement | null>(null)
 const profileSaving = ref(false)
@@ -404,7 +466,7 @@ function exportAuditCsv() {
     <!-- Tabs -->
     <div class="border-b border-slate-200 flex items-center gap-1 overflow-x-auto">
       <button
-        v-for="tk in (['profile', 'commission', 'payout', 'branding', 'customers', 'followups', 'audit'] as Tab[])"
+        v-for="tk in TAB_KEYS"
         :key="tk"
         type="button"
         @click="tab = tk"
@@ -415,7 +477,7 @@ function exportAuditCsv() {
             : 'border-transparent text-slate-500 hover:text-slate-900',
         ]"
       >
-        {{ t(`settings.tabs.${tk}`) }}
+        {{ te(`settings.tabs.${tk}`) ? t(`settings.tabs.${tk}`) : TAB_LABEL[tk] }}
       </button>
     </div>
 
@@ -870,6 +932,52 @@ function exportAuditCsv() {
             :disabled="tiersSaving || tiersLoading || !!tierValidation" @click="saveTiers">
             {{ t('settings.customerTiers.save') }}
           </button>
+        </div>
+      </div>
+    </section>
+
+    <section v-if="tab === 'ranks'" class="space-y-4" data-testid="tenant-ranks">
+      <div class="card p-6">
+        <h3 class="font-semibold text-slate-900">เกณฑ์ 10 ระดับตัวแทน</h3>
+        <p class="text-xs text-slate-500 mt-1">กำหนดชื่อระดับ ยอดทีมสะสม 3 เดือนที่ต้องถึง และระดับที่ต้องมีใบอนุญาต</p>
+        <div v-if="ranksLoading" class="text-sm text-slate-500 mt-4">กำลังโหลด…</div>
+        <table v-else class="w-full text-sm mt-4">
+          <thead class="text-xs text-slate-500">
+            <tr>
+              <th class="text-left font-medium py-2 w-20">ระดับ</th>
+              <th class="text-left font-medium py-2 pr-3">ชื่อระดับ</th>
+              <th class="text-left font-medium py-2">ยอดทีมสะสม 3 เดือน</th>
+              <th class="text-center font-medium py-2 w-24">ต้องมีใบอนุญาต</th>
+            </tr>
+          </thead>
+          <tbody class="divide-y divide-slate-100">
+            <tr v-for="r in rankRows" :key="r.id" :data-testid="`rank-row-${r.level}`">
+              <td class="py-2 font-mono text-xs text-slate-500 uppercase">{{ r.code }}</td>
+              <td class="py-2 pr-3">
+                <input v-model="r.nameTh" maxlength="64" :disabled="!canSaveSettings"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white focus:outline-none focus:border-brand-400 disabled:bg-slate-50" />
+              </td>
+              <td class="py-2">
+                <input v-model="r.target" inputmode="decimal" :disabled="r.level === 1 || !canSaveSettings"
+                  :placeholder="r.level === 1 ? 'ระดับเริ่มต้น' : 'เช่น 100000'" :data-testid="`rank-target-${r.level}`"
+                  class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm bg-white text-right tabular-nums focus:outline-none focus:border-brand-400 disabled:bg-slate-50" />
+              </td>
+              <td class="py-2 text-center">
+                <input v-model="r.licenseRequired" type="checkbox" :disabled="!canSaveSettings" :data-testid="`rank-license-${r.level}`" />
+              </td>
+            </tr>
+          </tbody>
+        </table>
+        <ul class="mt-3 list-disc space-y-0.5 pl-4 text-[11px] text-slate-400">
+          <li>ยอดทีม = ยอดชำระเบี้ยของตัวเอง + ลูกทีมทุกชั้นที่ระดับต่ำกว่าตัวเอง</li>
+          <li>ถึงเกณฑ์แล้วระบบส่งคำขอเลื่อนระดับ — ระดับเปลี่ยนเมื่อ InsureHub อนุมัติ · ไม่มีการลดระดับอัตโนมัติ</li>
+        </ul>
+        <p v-if="ranksError" class="text-xs text-rose-600 mt-2" data-testid="ranks-error">{{ ranksError }}</p>
+        <div class="flex items-center justify-end gap-3 mt-4">
+          <span v-if="ranksSaved" class="text-xs text-emerald-600"><i class="pi pi-check" /> บันทึกแล้ว</span>
+          <button v-if="canSaveSettings" type="button" data-testid="ranks-save"
+            class="px-4 py-2 rounded-lg bg-brand-600 text-white text-sm hover:bg-brand-700 disabled:opacity-50"
+            :disabled="ranksSaving || ranksLoading" @click="saveRanks">บันทึกเกณฑ์ระดับ</button>
         </div>
       </div>
     </section>
