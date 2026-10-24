@@ -509,12 +509,22 @@ class CommissionPayoutService
             $from ??= $dates->first() ?: $today;
             $to ??= $dates->last() ?: $today;
         }
-        // Default the printed month label from the batch end date.
-        $periodLabel ??= CarbonImmutable::parse($to, 'Asia/Bangkok')->translatedFormat('F Y');
+        // Label: single month → "มีนาคม 2026"; multi-month span → a range
+        // ("ม.ค. 2024 – ธ.ค. 2026") so it never hides a 2024–2026 span behind
+        // just the end month (1F — the "December 2026 over 2024-2026" bug).
+        if ($periodLabel === null) {
+            $fromM = CarbonImmutable::parse($from, 'Asia/Bangkok');
+            $toM = CarbonImmutable::parse($to, 'Asia/Bangkok');
+            $periodLabel = $fromM->isSameMonth($toM)
+                ? $toM->translatedFormat('F Y')
+                : $fromM->translatedFormat('M Y').' – '.$toM->translatedFormat('M Y');
+        }
+        $referenceCode = $this->nextReferenceCode($tenantId, $to);
 
-        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows, $periodLabel): CommissionPayoutBatch {
+        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows, $periodLabel, $referenceCode): CommissionPayoutBatch {
             $batch = CommissionPayoutBatch::create([
                 'tenant_id' => $tenantId,
+                'reference_code' => $referenceCode,
                 'from_date' => $from,
                 'to_date' => $to,
                 'period_label' => $periodLabel,
@@ -853,12 +863,35 @@ class CommissionPayoutService
         return $batch->fresh();
     }
 
+    /** Next PO-YYMM-NN reference for the batch's end month (per tenant). */
+    private function nextReferenceCode(int $tenantId, string $to): string
+    {
+        $stamp = CarbonImmutable::parse($to, 'Asia/Bangkok')->format('ym');
+        $prefix = "PO-{$stamp}-";
+        $last = CommissionPayoutBatch::query()
+            ->where('tenant_id', $tenantId)
+            ->where('reference_code', 'like', $prefix.'%')
+            ->orderByDesc('reference_code')
+            ->value('reference_code');
+        $seq = $last ? ((int) substr($last, strlen($prefix)) + 1) : 1;
+
+        return sprintf('%s%02d', $prefix, $seq);
+    }
+
     public function cancelBatch(CommissionPayoutBatch $batch, ?int $userId): CommissionPayoutBatch
     {
         if ($batch->status === CommissionPayoutBatch::STATUS_PAID) {
             throw new RuntimeException('ไม่สามารถยกเลิก batch ที่จ่ายแล้ว (ต้องทำ reversal)');
         }
-        $batch->update(['status' => CommissionPayoutBatch::STATUS_CANCELLED]);
+        // 1F: a cancelled batch must never carry paid-* fields (reachable via
+        // reverseAgent leaving them set before a cancel).
+        $batch->update([
+            'status' => CommissionPayoutBatch::STATUS_CANCELLED,
+            'payment_date' => null,
+            'paid_at' => null,
+            'paid_by_user_id' => null,
+            'payment_reference' => null,
+        ]);
         $this->audit($batch->tenant_id, $userId, 'commission_payout.cancel', "batch:{$batch->id}", []);
 
         return $batch->fresh();
@@ -946,11 +979,13 @@ class CommissionPayoutService
                 'reversed' => true, 'reversed_at' => now(), 'reversal_reason' => $reason,
             ]);
 
-            // A paid batch with a reversed agent is no longer fully paid.
+            // A paid batch with a reversed agent is no longer fully paid. Clear
+            // payment_date too (1F) so it can't later become a cancelled batch
+            // that still shows a paid date.
             if ($batch->status === CommissionPayoutBatch::STATUS_PAID) {
                 $batch->update([
                     'status' => CommissionPayoutBatch::STATUS_APPROVED,
-                    'paid_at' => null, 'paid_by_user_id' => null,
+                    'paid_at' => null, 'paid_by_user_id' => null, 'payment_date' => null,
                 ]);
             }
 

@@ -234,4 +234,51 @@ class PayoutMoneySafetyTest extends TestCase
         // No receivable at all, but gate off → still payable.
         $this->assertNotNull(collect($this->service->preview((int) $this->tenant->id)['agents'])->firstWhere('agentCode', $agent->agent_code));
     }
+
+    // ── 1F: status + period integrity ─────────────────────────────────────
+
+    public function test_batch_gets_a_po_reference_code(): void
+    {
+        $agent = $this->payoutAgent(1);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10, policyAttrs: ['created_at' => '2026-03-10 10:00:00']);
+        $batch = $this->service->createBatch((int) $this->tenant->id, '2026-03-01', '2026-03-31', $this->admin->id);
+
+        $this->assertSame('PO-2603-01', $batch->reference_code);
+        // Single-month span → a single month label (no range dash). Month name
+        // language follows app locale, so assert structure not spelling.
+        $this->assertStringContainsString('2026', $batch->period_label);
+        $this->assertStringNotContainsString('–', $batch->period_label);
+
+        // Second batch in the same month increments.
+        $agent2 = $this->payoutAgent(1);
+        $this->sellAndPay($agent2, premium: 20000, rate: 0.10, policyAttrs: ['created_at' => '2026-03-11 10:00:00']);
+        $batch2 = $this->service->createBatch((int) $this->tenant->id, '2026-03-01', '2026-03-31', $this->admin->id);
+        $this->assertSame('PO-2603-02', $batch2->reference_code);
+    }
+
+    public function test_multi_month_span_uses_a_range_label(): void
+    {
+        $agent = $this->payoutAgent(1);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10, policyAttrs: ['created_at' => '2024-01-15 10:00:00']);
+        $batch = $this->service->createBatch((int) $this->tenant->id, '2024-01-01', '2026-12-31', $this->admin->id);
+
+        // Not just "ธันวาคม 2026" — a range.
+        $this->assertStringContainsString('–', $batch->period_label);
+        $this->assertStringContainsString('2024', $batch->period_label);
+        $this->assertStringContainsString('2026', $batch->period_label);
+    }
+
+    public function test_cancelled_batch_never_keeps_a_payment_date(): void
+    {
+        $agent = $this->payoutAgent(1);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+        $batch = $this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
+        // Simulate a stray payment_date (as reverseAgent used to leave behind).
+        $batch->forceFill(['payment_date' => now()->toDateString()])->save();
+
+        $cancelled = $this->service->cancelBatch($batch->fresh(), $this->admin->id);
+        $this->assertSame('CANCELLED', $cancelled->status);
+        $this->assertNull($cancelled->payment_date);
+        $this->assertNull($cancelled->paid_at);
+    }
 }

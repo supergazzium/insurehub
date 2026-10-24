@@ -612,6 +612,7 @@ class CommissionPayoutController extends Controller
     {
         return [
             'id' => (string) $b->id,
+            'referenceCode' => $b->reference_code,
             'fromDate' => $b->from_date?->toDateString(),
             'toDate' => $b->to_date?->toDateString(),
             'periodLabel' => $b->period_label,
