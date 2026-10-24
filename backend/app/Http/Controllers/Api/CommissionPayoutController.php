@@ -112,6 +112,7 @@ class CommissionPayoutController extends Controller
                 $data['fromDate'] ?? null,
                 $data['toDate'] ?? null,
                 $data['note'] ?? null,
+                (bool) $request->user()?->can('payouts.self_approve'),
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -366,7 +367,7 @@ class CommissionPayoutController extends Controller
     {
         $this->authorizeTenant($request, $batch);
         try {
-            $batch = $this->service->approveBatch($batch, $request->user()?->id);
+            $batch = $this->service->approveBatch($batch, $request->user()?->id, (bool) $request->user()?->can('payouts.self_approve'));
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }

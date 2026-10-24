@@ -435,10 +435,17 @@ class CommissionPayoutService
         ?string $from = null,
         ?string $to = null,
         ?string $note = null,
+        bool $allowSelfApprove = false,
     ): CommissionPayoutBatch {
+        // One user does create→approve→pay in one shot, so this path INHERENTLY
+        // self-approves — it requires the payouts.self_approve capability.
+        if (! $allowSelfApprove) {
+            throw new RuntimeException('จ่ายทันที (สร้าง+อนุมัติ+จ่ายในคนเดียว) ต้องมีสิทธิ์ "อนุมัติรอบที่ตัวเองสร้าง" — ไม่งั้นให้สร้างรอบแล้วให้คนอื่นอนุมัติ');
+        }
+
         return DB::transaction(function () use ($tenantId, $agentId, $paymentDate, $reference, $userId, $from, $to, $note): CommissionPayoutBatch {
             $batch = $this->createBatch($tenantId, $from, $to, $userId, $note, $agentId);
-            $batch = $this->approveBatch($batch, $userId);
+            $batch = $this->approveBatch($batch, $userId, allowSelfApprove: true);
 
             return $this->markPaid($batch, $paymentDate, $reference, $userId);
         });
@@ -790,10 +797,15 @@ class CommissionPayoutService
     }
 
     /** Approve a batch so it can be paid (spec §8.1: separate approve step). */
-    public function approveBatch(CommissionPayoutBatch $batch, ?int $userId): CommissionPayoutBatch
+    public function approveBatch(CommissionPayoutBatch $batch, ?int $userId, bool $allowSelfApprove = false): CommissionPayoutBatch
     {
         if (! in_array($batch->status, [CommissionPayoutBatch::STATUS_DRAFT, CommissionPayoutBatch::STATUS_GENERATED], true)) {
             throw new RuntimeException('อนุมัติได้เฉพาะ batch สถานะร่าง/สร้างเอกสารแล้ว');
+        }
+        // 1D maker-checker: the approver must differ from the creator, unless the
+        // tenant grants payouts.self_approve (small teams with no SoD).
+        if (! $allowSelfApprove && $userId !== null && (int) $batch->created_by_user_id === (int) $userId) {
+            throw new RuntimeException('ผู้อนุมัติต้องไม่ใช่คนเดียวกับผู้สร้างรอบจ่าย — ให้คนอื่นอนุมัติ หรือขอสิทธิ์อนุมัติเอง');
         }
         $batch->update([
             'status' => CommissionPayoutBatch::STATUS_APPROVED,

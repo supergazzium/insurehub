@@ -149,4 +149,48 @@ class PayoutMoneySafetyTest extends TestCase
         $this->assertSame(1, CommissionPayoutBatchAgent::where('batch_id', $batch->id)->count());
         $this->assertSame($rated->id, CommissionPayoutBatchAgent::where('batch_id', $batch->id)->value('agent_id'));
     }
+
+    // ── 1D: maker-checker (approver ≠ creator) ────────────────────────────
+
+    public function test_creator_cannot_approve_own_batch(): void
+    {
+        $agent = $this->payoutAgent(1);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+        $batch = $this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/ผู้อนุมัติต้องไม่ใช่คนเดียวกับผู้สร้าง/');
+        $this->service->approveBatch($batch, $this->admin->id); // same user as creator
+    }
+
+    public function test_a_different_user_can_approve(): void
+    {
+        $agent = $this->payoutAgent(1);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+        $batch = $this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
+
+        $approved = $this->service->approveBatch($batch, $this->staff->id); // different user
+        $this->assertSame('APPROVED', $approved->status);
+        $this->assertSame($this->staff->id, $approved->approved_by_user_id);
+    }
+
+    public function test_self_approve_is_allowed_with_the_capability_flag(): void
+    {
+        $agent = $this->payoutAgent(1);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+        $batch = $this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
+
+        $approved = $this->service->approveBatch($batch, $this->admin->id, allowSelfApprove: true);
+        $this->assertSame('APPROVED', $approved->status);
+    }
+
+    public function test_payAgent_one_shot_requires_self_approve(): void
+    {
+        $agent = $this->payoutAgent(1);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/อนุมัติรอบที่ตัวเองสร้าง/');
+        $this->service->payAgent((int) $this->tenant->id, $agent->id, now()->toDateString(), 'REF', $this->admin->id);
+    }
 }
