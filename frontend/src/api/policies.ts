@@ -28,6 +28,19 @@ export interface PolicyListRow {
   // #16 — ระยะชำระเบี้ย/ระยะคุ้มครอง "15/90" + วันหมดคุ้มครอง (computed server-side)
   termLabel?: string | null
   coverageEndDate?: string | null
+  /** ฐานการคำนวณระยะคุ้มครอง (override ของ product); null = ใช้ค่า product */
+  coverageBasis?: 'age' | 'years' | 'renewable' | null
+  coverageYears?: number | null
+  effectiveCoverageBasis?: 'age' | 'years' | 'renewable' | null
+  effectiveCoverageYears?: number | null
+  /** ทวงเบี้ยรายปี — วันนัดชำระถัดไป / ปีที่เท่าไหร่ / จ่ายครบหรือยัง (computed server-side) */
+  premiumAnniversary?: {
+    term: number | null
+    yearsElapsed: number | null
+    nextDueDate: string | null
+    nextDueYear: number | null
+    termComplete: boolean | null
+  }
   coverage: number
   annualPremium: number
   premiumMode: string

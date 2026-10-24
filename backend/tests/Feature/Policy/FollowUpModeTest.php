@@ -66,7 +66,7 @@ class FollowUpModeTest extends TestCase
         $this->actingAsAdmin();
         $res = $this->followUps(['category' => 'unpaid']);
         $this->assertSame(2, $res->json('meta.counts.unpaid'));
-        $this->assertCount(8, $res->json('meta.counts'));
+        $this->assertCount(9, $res->json('meta.counts')); // +premium_due (ทวงเบี้ยรายปี)
         $this->assertSame(['0-7' => 1, '8-30' => 0, '30+' => 1], $res->json('meta.aging'));
         $this->assertSame((string) $old->id, $res->json('data.0.policyId'));
         $this->assertSame(45, $res->json('data.0.agingDays'));
@@ -203,5 +203,34 @@ class FollowUpModeTest extends TestCase
 
         $service->cancelBatch($second->fresh(), $this->admin->id);
         $this->assertEquals(200, (float) CommissionPayoutAdjustment::query()->where('status', 'pending')->whereNull('batch_id')->sum('amount'));
+    }
+
+    public function test_premium_due_category_lists_policies_whose_annual_anniversary_is_within_the_window(): void
+    {
+        Carbon::setTestNow('2026-01-20');
+        // life product paying 15 years
+        $this->productA->update(['type' => 'life', 'pay_years' => 15]);
+
+        // Anniversary 2026-02-01 → 12 days out → in the 30-day window.
+        $due = $this->makePolicy(['effective_date' => '2025-02-01', 'premium_paying_term' => 15, 'status' => 'active']);
+        // Anniversary 2026-04-01 → 71 days out → outside the window.
+        $far = $this->makePolicy(['effective_date' => '2025-04-01', 'premium_paying_term' => 15, 'status' => 'active']);
+        // Term complete (effective 2005) → จ่ายครบ → excluded.
+        $done = $this->makePolicy(['effective_date' => '2005-02-01', 'premium_paying_term' => 15, 'status' => 'active']);
+        // Single-pay / no term → excluded.
+        $noterm = $this->makePolicy(['effective_date' => '2025-02-01', 'premium_paying_term' => 0, 'status' => 'active']);
+        $noterm->product->update(['pay_years' => 0]);
+
+        $this->actingAsAdmin();
+        $res = $this->followUps(['category' => 'premium_due']);
+
+        $ids = collect($res->json('data'))->pluck('policyId')->all();
+        $this->assertContains((string) $due->id, $ids);
+        $this->assertNotContains((string) $far->id, $ids);
+        $this->assertNotContains((string) $done->id, $ids);
+        $this->assertNotContains((string) $noterm->id, $ids);
+        $this->assertSame(1, $res->json('meta.counts.premium_due'));
+
+        Carbon::setTestNow();
     }
 }

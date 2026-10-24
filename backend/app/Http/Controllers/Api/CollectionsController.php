@@ -38,8 +38,10 @@ class CollectionsController extends Controller
             'p.effective_date', 'p.first_due_inst_date',
             DB::raw(PremiumDue::PAID_TOTAL_SQL.' as paid_total'),
             DB::raw(PremiumDue::PAID_COUNT_SQL.' as paid_count'),
-            DB::raw('(SELECT COUNT(*) FROM payment_reminders pr WHERE pr.policy_id = p.id) as reminder_count'),
-            DB::raw('(SELECT MAX(pr.created_at) FROM payment_reminders pr WHERE pr.policy_id = p.id) as last_reminder_at'),
+            // Dunning history is about STAFF follow-ups only — system anniversary
+            // alerts (kind='system') are not "chased N times".
+            DB::raw("(SELECT COUNT(*) FROM payment_reminders pr WHERE pr.policy_id = p.id AND pr.kind = 'manual') as reminder_count"),
+            DB::raw("(SELECT MAX(pr.created_at) FROM payment_reminders pr WHERE pr.policy_id = p.id AND pr.kind = 'manual') as last_reminder_at"),
             DB::raw(PremiumDue::ENDORSEMENT_TOTAL_SQL.' as endorsement_total'),
         ];
     }
@@ -334,6 +336,7 @@ class CollectionsController extends Controller
         $this->authorizeTenant($request, $policy);
         $rows = PaymentReminder::query()
             ->where('policy_id', $policy->id)
+            ->where('kind', 'manual')
             ->orderByDesc('created_at')
             ->get()
             ->map(fn (PaymentReminder $x) => [
@@ -361,6 +364,7 @@ class CollectionsController extends Controller
         $reminder = PaymentReminder::create([
             'tenant_id' => (int) $policy->tenant_id,
             'policy_id' => $policy->id,
+            'kind' => 'manual',
             'installment_no' => $data['installmentNo'] ?? null,
             'channel' => $data['channel'] ?? 'phone',
             'note' => $data['note'] ?? null,

@@ -40,6 +40,7 @@ const CATEGORIES: CatDef[] = [
   { key: 'not_delivered', label: 'ยังไม่จัดส่ง', hint: 'ยังไม่มีวันจัดส่งกรมธรรม์', icon: 'pi-send' },
   { key: 'freelook', label: 'ติดตามใบ Freelook', hint: 'ส่ง → ลูกค้าเซ็น → ส่งคืนบริษัท (ประกันชีวิต)', icon: 'pi-clock' },
   { key: 'unpaid', label: 'ยังไม่ชำระเงิน', hint: 'มีงวดถึงกำหนดแต่ยังไม่ชำระ', icon: 'pi-money-bill' },
+  { key: 'premium_due', label: 'ครบกำหนดชำระเบี้ยรายปี', hint: 'ถึงวันนัดชำระเบี้ยปีถัดไป (ภายใน 30 วัน)', icon: 'pi-calendar-clock' },
   { key: 'no_commission', label: 'ยังไม่บันทึกค่าคอม', hint: 'ค่าคอม บ.ประกัน→ฮับ หรือ ฮับ→ตัวแทน ยังว่าง', icon: 'pi-wallet' },
   { key: 'cancelled', label: 'ตรวจสอบรายการยกเลิก', hint: 'กรมธรรม์ยกเลิกที่ยังไม่ได้ตรวจ', icon: 'pi-times-circle' },
   { key: 'verify', label: 'รอ Verify', hint: 'คำขอสร้าง/แก้/ลบกรมธรรม์รอคนที่ 2 ตรวจ', icon: 'pi-verified' },
@@ -63,7 +64,7 @@ const stageCountKey = (k: string) => (k === '' ? 'all' : k)
 
 const ALSO_LABEL: Record<string, string> = {
   approval: 'รออนุมัติ', no_policy_no: 'ไม่มีเลขกรมธรรม์', not_delivered: 'ยังไม่จัดส่ง', freelook: 'Freelook',
-  unpaid: 'ค้างชำระ', no_commission: 'ไม่มีค่าคอม', cancelled: 'ยกเลิก',
+  unpaid: 'ค้างชำระ', premium_due: 'เบี้ยรายปี', no_commission: 'ไม่มีค่าคอม', cancelled: 'ยกเลิก',
 }
 const STATUS_LABEL: Record<string, string> = {
   submitted: 'รออนุมัติ', approved: 'อนุมัติแล้ว', active: 'มีผลบังคับ', issued: 'ออกกรมธรรม์แล้ว',
@@ -338,6 +339,10 @@ onMounted(() => {
               <template v-else-if="category === 'not_delivered'">
                 <span v-if="stage === 'in_transit'">ส่งเมื่อ {{ fmtDate(r.shippedDate) }}</span>
                 <span v-else>ออก/รับกรมธรรม์ {{ fmtDate(r.issueDate || r.receivedDate) || '—' }}</span>
+              </template>
+              <template v-else-if="category === 'premium_due'">
+                <div class="font-medium text-sky-700">วันนัดชำระ {{ fmtDate(r.nextPremiumDue) || '—' }}</div>
+                <div class="text-slate-400">ปีที่ {{ r.nextPremiumYear ?? '—' }}<span v-if="r.premiumTerm">/{{ r.premiumTerm }}</span> · เริ่มคุ้มครอง {{ fmtDate(r.effectiveDate) || '—' }}</div>
               </template>
               <template v-else>มีผล {{ fmtDate(r.effectiveDate) || '—' }}</template>
             </td>

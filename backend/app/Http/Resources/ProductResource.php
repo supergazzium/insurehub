@@ -66,6 +66,8 @@ class ProductResource extends JsonResource
             'durationYears' => (int) $this->duration_years,
             'payYears' => (int) $this->pay_years,
             'coverageToAge' => $this->coverage_to_age !== null ? (int) $this->coverage_to_age : null,
+            'coverageBasis' => $this->coverage_basis,
+            'coverageYears' => $this->coverage_years !== null ? (int) $this->coverage_years : null,
             'premiumMode' => $this->premium_mode,
             // Raw per-product list (null = not set) + the effective list the
             // policy wizard should offer (falls back to the insure-type default).

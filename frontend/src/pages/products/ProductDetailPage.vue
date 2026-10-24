@@ -31,6 +31,35 @@ const commissionTierOptions = computed(() =>
   commissionTiers.value.map((t) => ({ value: t.id, label: commissionTierLabel(t) })),
 )
 
+// ฐานการคำนวณระยะคุ้มครอง (#16 extension).
+const coverageBasisOptions = [
+  { value: '', label: '— อัตโนมัติ —' },
+  { value: 'age', label: 'ถึงอายุ (นับจากวันเกิด)' },
+  { value: 'years', label: 'จำนวนปี (นับจากวันเริ่มคุ้มครอง)' },
+  { value: 'renewable', label: 'ปีต่อปี' },
+]
+
+/** When basis is unset, infer it the same way the backend does. */
+const inferredBasis = computed<'age' | 'years' | 'renewable' | null>(() => {
+  const p = product.value
+  if (!p) return null
+  if (p.coverageToAge) return 'age'
+  if (p.coverageYears) return 'years'
+  return null
+})
+
+const productTermLabel = computed(() => {
+  const p = product.value
+  if (!p) return '–'
+  const basis = p.coverageBasis ?? inferredBasis.value
+  const cov =
+    basis === 'age' ? String(p.coverageToAge ?? '–')
+    : basis === 'years' ? `${p.coverageYears ?? '–'}ปี`
+    : basis === 'renewable' ? 'ต่อปี'
+    : '–'
+  return `${p.payYears || '–'}/${cov}`
+})
+
 /**
  * Insure-type helpers. DB stores `Life` / `Non-Life` / `Tax` (capitalized,
  * hyphenated) while the create form's radio uses `life` / `non-life` /
@@ -515,13 +544,24 @@ onMounted(async () => {
             <EditableField :readonly="!editing" entity="products" :id="product.id" field="payYears" type="number" :value="product.payYears" @update="v => apply('payYears', v)" />
           </div>
           <div>
+            <div class="text-xs text-slate-400">ประเภทระยะคุ้มครอง · default</div>
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="coverageBasis" type="select"
+              :options="coverageBasisOptions" :value="product.coverageBasis ?? ''" @update="v => apply('coverageBasis', v || null)" />
+          </div>
+          <div v-if="(product.coverageBasis ?? inferredBasis) === 'age'">
             <div class="text-xs text-slate-400">คุ้มครองถึงอายุ · default <span class="text-slate-300">(เช่น 90)</span></div>
             <EditableField :readonly="!editing" entity="products" :id="product.id" field="coverageToAge" type="number" :value="product.coverageToAge" @update="v => apply('coverageToAge', v)" />
           </div>
+          <div v-else-if="(product.coverageBasis ?? inferredBasis) === 'years'">
+            <div class="text-xs text-slate-400">คุ้มครอง (ปี) · default <span class="text-slate-300">(เช่น 15)</span></div>
+            <EditableField :readonly="!editing" entity="products" :id="product.id" field="coverageYears" type="number" :value="product.coverageYears" @update="v => apply('coverageYears', v)" />
+          </div>
         </div>
-        <p v-if="(product.payYears || product.coverageToAge)" class="text-xs text-indigo-600 mt-2">
-          <i class="pi pi-info-circle mr-1" />แบบประกัน: {{ product.payYears || '–' }}/{{ product.coverageToAge || '–' }}
-          (ชำระเบี้ย {{ product.payYears || '–' }} ปี · คุ้มครองถึงอายุ {{ product.coverageToAge || '–' }})
+        <p v-if="(product.payYears || product.coverageToAge || product.coverageYears)" class="text-xs text-indigo-600 mt-2">
+          <i class="pi pi-info-circle mr-1" />แบบประกัน: {{ productTermLabel }}
+          <span v-if="(product.coverageBasis ?? inferredBasis) === 'age'">(ชำระเบี้ย {{ product.payYears || '–' }} ปี · คุ้มครองถึงอายุ {{ product.coverageToAge || '–' }} — นับจากวันเกิด)</span>
+          <span v-else-if="(product.coverageBasis ?? inferredBasis) === 'years'">(ชำระเบี้ย {{ product.payYears || '–' }} ปี · คุ้มครอง {{ product.coverageYears || '–' }} ปี — นับจากวันเริ่มคุ้มครอง)</span>
+          <span v-else-if="(product.coverageBasis ?? inferredBasis) === 'renewable'">(ปีต่อปี)</span>
         </p>
       </section>
 
