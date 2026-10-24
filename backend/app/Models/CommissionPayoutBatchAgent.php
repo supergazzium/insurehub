@@ -24,6 +24,7 @@ class CommissionPayoutBatchAgent extends Model
         'vat_amount' => 'decimal:2',
         'net_transfer' => 'decimal:2',
         'vat_expected_net' => 'decimal:2',
+        'needs_info' => 'boolean',
         'paid' => 'boolean',
         'paid_at' => 'datetime',
         'pdf_generated_at' => 'datetime',

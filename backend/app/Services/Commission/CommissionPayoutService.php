@@ -281,9 +281,20 @@ class CommissionPayoutService
         }
 
         $agents = array_values($byAgent);
+
+        // Bank presence per agent (decrypted via the model) → a missingBank flag
+        // so the UI can group "รอข้อมูล" agents and keep them out of a payout.
+        $agentIds = array_values(array_filter(array_map(fn ($a) => $a['agentId'] ? (int) $a['agentId'] : null, $agents)));
+        $bank = \App\Models\Agent::query()->whereIn('id', $agentIds)->get(['id', 'bank_account_no'])->keyBy('id');
         foreach ($agents as &$a) {
             $a['amount'] = round($a['amount'], 2);
+            $acct = $a['agentId'] ? ($bank[(int) $a['agentId']]?->bank_account_no ?? null) : null;
+            $a['missingBank'] = $acct === null || trim((string) $acct) === '';
+            if ($a['missingBank'] && $a['amount'] > 0) {
+                $warnings[] = "ตัวแทน {$a['agentCode']} ไม่มีเลขบัญชีธนาคาร — ต้องแก้ข้อมูลก่อนจ่าย";
+            }
         }
+        unset($a);
 
         return [
             'agents' => $agents,
@@ -510,6 +521,10 @@ class CommissionPayoutService
                 // What net WOULD be if VAT were included — for the discrepancy flag.
                 $vatExpectedNet = round($gross + $vat - $deduct - $wht, 2);
                 $ag = $a['agent_id'] ? ($bank[$a['agent_id']] ?? null) : null;
+                // รอข้อมูล: no bank account on file → flag so markPaid refuses to
+                // transfer to this row until the data is fixed.
+                $bankNo = $ag?->bank_account_no;
+                $needsInfo = $bankNo === null || trim((string) $bankNo) === '';
                 CommissionPayoutBatchAgent::create([
                     'batch_id' => $batch->id,
                     'tenant_id' => $tenantId,
@@ -517,8 +532,10 @@ class CommissionPayoutService
                     'agent_code' => $a['agent_code'],
                     'agent_name' => $a['agent_name'],
                     'vat_type' => $a['vat_type'],
-                    'bank_account_no' => $ag?->bank_account_no,
+                    'bank_account_no' => $bankNo,
                     'bank_account_name' => $ag?->bank_account_name,
+                    'needs_info' => $needsInfo,
+                    'needs_info_reason' => $needsInfo ? 'ไม่มีเลขบัญชีธนาคาร' : null,
                     'item_count' => $a['item_count'],
                     'gross_commission' => $gross,
                     'deduct_amount' => $deduct,
@@ -598,6 +615,12 @@ class CommissionPayoutService
         }
         if ($batch->status !== CommissionPayoutBatch::STATUS_APPROVED) {
             throw new RuntimeException('ต้องอนุมัติ batch ก่อนจึงจะยืนยันการจ่ายได้');
+        }
+
+        // 1B hard guard: never transfer to an agent with no bank account.
+        $needsInfo = $batch->agentRows()->where('needs_info', true)->where('paid', false)->where('reversed', false)->pluck('agent_code');
+        if ($needsInfo->isNotEmpty()) {
+            throw new RuntimeException('จ่ายไม่ได้ — มีตัวแทนที่ยังไม่มีเลขบัญชีธนาคาร: '.$needsInfo->implode(', ').' (แก้ข้อมูลหรือนำออกจากรอบก่อน)');
         }
 
         return DB::transaction(function () use ($batch, $paymentDate, $reference, $userId): CommissionPayoutBatch {

@@ -79,4 +79,40 @@ class PayoutMoneySafetyTest extends TestCase
         // net == vat_expected_net (no VAT) → no discrepancy.
         $this->assertSame((string) $row->net_transfer, (string) $row->vat_expected_net);
     }
+
+    // ── 1B: bank-account guard ────────────────────────────────────────────
+
+    public function test_bankless_agent_is_flagged_needs_info_and_blocks_payment(): void
+    {
+        $agent = $this->payoutAgent(1, attrs: ['bank_account_no' => null, 'bank_account_name' => null]);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+
+        // Preview warns.
+        $preview = $this->service->preview((int) $this->tenant->id);
+        $this->assertTrue(collect($preview['agents'])->firstWhere('agentCode', $agent->agent_code)['missingBank']);
+        $this->assertNotEmpty(array_filter($preview['warnings'], fn ($w) => str_contains($w, 'ไม่มีเลขบัญชี')));
+
+        // Batch flags the row + payment is refused.
+        $batch = $this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
+        $row = CommissionPayoutBatchAgent::where('batch_id', $batch->id)->where('agent_id', $agent->id)->firstOrFail();
+        $this->assertTrue((bool) $row->needs_info);
+
+        $this->service->approveBatch($batch, $this->staff->id);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessageMatches('/ยังไม่มีเลขบัญชี/');
+        $this->service->markPaid($batch->fresh(), now()->toDateString(), 'REF', $this->admin->id);
+    }
+
+    public function test_agent_with_bank_is_payable(): void
+    {
+        $agent = $this->payoutAgent(1); // default fixture gives a bank account
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+
+        // Preview (before batching — batching locks the policy out of preview).
+        $this->assertFalse(collect($this->service->preview((int) $this->tenant->id)['agents'])->firstWhere('agentCode', $agent->agent_code)['missingBank']);
+
+        $batch = $this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
+        $row = CommissionPayoutBatchAgent::where('batch_id', $batch->id)->where('agent_id', $agent->id)->firstOrFail();
+        $this->assertFalse((bool) $row->needs_info);
+    }
 }

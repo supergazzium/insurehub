@@ -256,6 +256,8 @@ class CommissionPayoutController extends Controller
             // accounting sign-off) — the UI flags this so no one trusts the
             // transfer figure for VAT agents.
             $a['vatDiscrepancy'] = $a['vatAmount'] > 0;
+            $a['needsInfo'] = (bool) ($pr?->needs_info ?? false);
+            $a['needsInfoReason'] = $pr?->needs_info_reason;
             $a['paid'] = (bool) ($pr?->paid ?? false);
             $a['paidAt'] = $pr?->paid_at?->toIso8601String();
             $a['paymentReference'] = $pr?->payment_reference;
