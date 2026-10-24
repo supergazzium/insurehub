@@ -54,6 +54,19 @@ class Policy extends Model
             if ($policy->isDirty(['delivered_date', 'sales_channel', 'product_id'])) {
                 Freelook::apply($policy);
             }
+            // Keep expiry_date in step with the derived coverage end so the
+            // daily state-machine cron (active→expired on expiry_date) stays
+            // correct for life plans without a dedicated branch. Only writes
+            // when a coverage-driver changed AND a basis actually yields a
+            // date — never clobbers an operator-set expiry on a renewable /
+            // unknown-basis policy.
+            if ($policy->isDirty(['coverage_basis', 'coverage_years', 'coverage_to_age',
+                'insured_person_birth_date', 'effective_date', 'product_id'])) {
+                $end = $policy->coverage_end_date;
+                if ($end !== null) {
+                    $policy->expiry_date = $end->toDateString();
+                }
+            }
         });
     }
 
@@ -167,19 +180,59 @@ class Policy extends Model
         return ($age !== null && (int) $age > 0) ? (int) $age : null;
     }
 
+    /** Effective coverage length in years (for basis='years'): override → product → null. */
+    public function getEffectiveCoverageYearsAttribute(): ?int
+    {
+        $years = $this->coverage_years ?? $this->product?->coverage_years;
+        return ($years !== null && (int) $years > 0) ? (int) $years : null;
+    }
+
     /**
-     * Coverage-end date = insured person's birthday + coverage-to-age years.
-     * Null when either the birthdate or the coverage age is unknown — we never
-     * guess a protection end date.
+     * How this policy's coverage end date is computed:
+     *   'age'       → วันเกิด + coverage_to_age ปี (คุ้มครองถึงอายุ)
+     *   'years'     → effective_date + coverage_years ปี (คุ้มครอง N ปี)
+     *   'renewable' → ปีต่อปี; no derived end (keeps expiry_date as-is)
+     *
+     * Precedence: policy override → product default → inferred from whichever
+     * length column is populated (a to-age plan pins coverage_to_age, a
+     * fixed-term plan pins coverage_years). Null when nothing is known.
+     */
+    public function getEffectiveCoverageBasisAttribute(): ?string
+    {
+        $basis = $this->coverage_basis ?? $this->product?->coverage_basis;
+        if (in_array($basis, ['age', 'years', 'renewable'], true)) {
+            return $basis;
+        }
+        if ($this->effective_coverage_to_age !== null) {
+            return 'age';
+        }
+        if ($this->effective_coverage_years !== null) {
+            return 'years';
+        }
+        return null;
+    }
+
+    /**
+     * Coverage-end date, derived from the basis:
+     *   - 'age'   → insured person's birthday + coverage-to-age years
+     *   - 'years' → effective_date + coverage-years
+     * Null when the basis is unknown/renewable or the required input (birthdate
+     * for 'age', effective_date for 'years') is missing — we never guess a
+     * protection end date.
      */
     public function getCoverageEndDateAttribute(): ?\Illuminate\Support\Carbon
     {
-        $age = $this->effective_coverage_to_age;
-        $birth = $this->insured_person_birth_date;
-        if ($age === null || $birth === null) {
-            return null;
-        }
-        return $birth->copy()->addYears($age);
+        return match ($this->effective_coverage_basis) {
+            'age' => ($age = $this->effective_coverage_to_age) !== null
+                && ($birth = $this->insured_person_birth_date) !== null
+                    ? $birth->copy()->addYears($age)
+                    : null,
+            'years' => ($years = $this->effective_coverage_years) !== null
+                && ($eff = $this->effective_date) !== null
+                    ? $eff->copy()->addYears($years)
+                    : null,
+            default => null,
+        };
     }
 
     /**
@@ -200,11 +253,18 @@ class Policy extends Model
     public function getTermLabelAttribute(): ?string
     {
         $term = $this->effective_premium_term;
-        $age = $this->effective_coverage_to_age;
-        if ($term === null && $age === null) {
+        // Coverage half depends on the plan: "/90" for a to-age plan, "/15ปี"
+        // for a fixed-term plan, "/ต่อปี" for renewable.
+        $coverage = match ($this->effective_coverage_basis) {
+            'age' => $this->effective_coverage_to_age !== null ? (string) $this->effective_coverage_to_age : null,
+            'years' => $this->effective_coverage_years !== null ? $this->effective_coverage_years . 'ปี' : null,
+            'renewable' => 'ต่อปี',
+            default => null,
+        };
+        if ($term === null && $coverage === null) {
             return null;
         }
-        return ($term ?? '–') . '/' . ($age ?? '–');
+        return ($term ?? '–') . '/' . ($coverage ?? '–');
     }
 
     public function riders(): HasMany

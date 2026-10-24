@@ -35,6 +35,14 @@ Schedule::command('policies:transition-daily')
     ->timezone('Asia/Bangkok')
     ->withoutOverlapping();
 
+// ทวงเบี้ยรายปี — raise system reminders for policies whose annual premium
+// anniversary is within the lead window. Runs at 00:20, after the policy
+// transitions (00:15) so a policy activated today is already 'active'.
+Schedule::command('premium:anniversary-reminders')
+    ->dailyAt('00:20')
+    ->timezone('Asia/Bangkok')
+    ->withoutOverlapping();
+
 // C-17 — daily shim-soak report. Sends a JSON line to the app log at
 // 00:30 so any monitoring/alerting can pick up "risk shim silent for
 // N days" as the ops signal for scheduling C-18's drop-columns

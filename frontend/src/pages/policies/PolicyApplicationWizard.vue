@@ -346,6 +346,12 @@ const form = reactive({
   // Free Look date — life products only.
   freelookEndDate: '' as string,
   salesChannel: 'face_to_face' as string,
+  // #16 — ระยะคุ้มครอง (per-policy override ของ product). null = ใช้ค่า product.
+  //   age   → คุ้มครองถึงอายุ coverageToAge (นับจากวันเกิดผู้เอาประกัน)
+  //   years → คุ้มครอง coverageYears ปี (นับจากวันเริ่มคุ้มครอง)
+  coverageBasis: '' as '' | 'age' | 'years' | 'renewable',
+  coverageYears: null as number | null,
+  coverageToAge: null as number | null,
 })
 
 const freelookComputed = computed(() => {
@@ -751,6 +757,55 @@ const kind = computed<string>(() => {
     ?? productDetail.value?.productKind
     ?? 'misc'
 })
+
+// ── #16 — ระยะคุ้มครอง (per-policy coverage basis) ───────────────────────────
+// Shown for life/health products, where "คุ้มครองถึงอายุ" vs "คุ้มครอง N ปี"
+// is a real plan choice. The field overrides the product default.
+
+/** The basis in effect: form override → product default → infer from the
+ *  product's pinned length column. Mirrors the backend resolver. */
+const effectiveCoverageBasis = computed<'age' | 'years' | 'renewable' | null>(() => {
+  if (form.coverageBasis) return form.coverageBasis
+  const pd = productDetail.value
+  if (pd?.coverageBasis) return pd.coverageBasis
+  if (pd?.coverageToAge) return 'age'
+  if (pd?.coverageYears) return 'years'
+  return null
+})
+
+/** Effective coverage length values (override → product), for the preview. */
+const effectiveCoverageToAge = computed<number | null>(() =>
+  form.coverageToAge ?? productDetail.value?.coverageToAge ?? null)
+const effectiveCoverageYears = computed<number | null>(() =>
+  form.coverageYears ?? productDetail.value?.coverageYears ?? null)
+
+/** Live preview of the derived coverage-end date — same rule as the server:
+ *  age → birthday + N; years → effective_date + N; else null. */
+const coverageEndPreview = computed<string | null>(() => {
+  const addYears = (iso: string, n: number): string | null => {
+    const d = new Date(`${iso}T00:00:00`)
+    if (Number.isNaN(d.getTime())) return null
+    d.setFullYear(d.getFullYear() + n)
+    return d.toLocaleDateString('sv-SE')
+  }
+  if (effectiveCoverageBasis.value === 'age') {
+    const birth = form.risk['insured_person.birth_date'] as string | undefined
+    const age = effectiveCoverageToAge.value
+    return birth && age ? addYears(birth, age) : null
+  }
+  if (effectiveCoverageBasis.value === 'years') {
+    const years = effectiveCoverageYears.value
+    return form.effectiveDate && years ? addYears(form.effectiveDate, years) : null
+  }
+  return null
+})
+
+const coverageBasisOptions = [
+  { value: '', label: 'ใช้ค่าตั้งต้นของแผน' },
+  { value: 'age', label: 'ถึงอายุ (นับจากวันเกิด)' },
+  { value: 'years', label: 'จำนวนปี (นับจากวันเริ่มคุ้มครอง)' },
+  { value: 'renewable', label: 'ปีต่อปี' },
+] as const
 
 const durationCfg = computed(() => durationConfig(kind.value))
 
@@ -1523,6 +1578,10 @@ function buildDraftPayload(): Record<string, unknown> {
     // Free Look date (life products). Empty until recorded.
     freelookEndDate: form.freelookEndDate || null,
     salesChannel: form.salesChannel || 'face_to_face',
+    // #16 — ระยะคุ้มครอง (per-policy override). Empty basis = inherit product.
+    coverageBasis: form.coverageBasis || null,
+    coverageYears: form.coverageBasis === 'years' ? (form.coverageYears || null) : null,
+    coverageToAge: form.coverageBasis === 'age' ? (form.coverageToAge || null) : null,
   }
 
   // Split the risk value bag into top-level columns + risk_data.<kind>.
@@ -1755,6 +1814,10 @@ async function hydrateFromDraft(id: string, renewMode = false, preset?: Record<s
     // Free Look date — cleared on renewal (fresh lifecycle).
     form.freelookEndDate = renewMode ? '' : String(p.freelookEndDate ?? '')
     form.salesChannel = String(p.salesChannel ?? 'face_to_face')
+    // #16 — ระยะคุ้มครอง (per-policy override); carried forward on renewal.
+    form.coverageBasis = (p.coverageBasis as typeof form.coverageBasis) ?? ''
+    form.coverageYears = p.coverageYears != null ? Number(p.coverageYears) : null
+    form.coverageToAge = p.coverageToAge != null ? Number(p.coverageToAge) : null
     freelookDocs.sentAt = renewMode ? '' : String(p.freelookDocSentAt ?? '')
     freelookDocs.signedAt = renewMode ? '' : String(p.freelookDocSignedAt ?? '')
     freelookDocs.returnedAt = renewMode ? '' : String(p.freelookDocReturnedAt ?? '')
@@ -2342,6 +2405,35 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
         <FormField :label="t('policyCreate.coverage')" :class="needsConfirm('coverage') ? confirmRing : ''">
           <MoneyInput v-model="form.coverage"
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
+        </FormField>
+      </div>
+
+      <!-- #16 — ระยะคุ้มครอง (ประกันชีวิต/สุขภาพ): เลือกฐานคำนวณวันสิ้นสุด
+           ความคุ้มครอง. เว้นว่าง = ใช้ค่าตั้งต้นของแผน (product). -->
+      <div v-if="kind === 'life' || kind === 'health'" class="grid grid-cols-1 md:grid-cols-4 gap-4 mt-4">
+        <FormField label="ประเภทระยะคุ้มครอง">
+          <select v-model="form.coverageBasis"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400">
+            <option v-for="o in coverageBasisOptions" :key="o.value" :value="o.value">{{ o.label }}</option>
+          </select>
+        </FormField>
+        <FormField v-if="effectiveCoverageBasis === 'age'" label="คุ้มครองถึงอายุ (ปี)">
+          <input v-model.number="form.coverageToAge" type="number" min="1" max="120"
+            :placeholder="productDetail?.coverageToAge != null ? `ค่าแผน: ${productDetail.coverageToAge}` : 'เช่น 90'"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <FormField v-else-if="effectiveCoverageBasis === 'years'" label="คุ้มครอง (ปี)">
+          <input v-model.number="form.coverageYears" type="number" min="1" max="99"
+            :placeholder="productDetail?.coverageYears != null ? `ค่าแผน: ${productDetail.coverageYears}` : 'เช่น 15'"
+            class="w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400" />
+        </FormField>
+        <FormField v-if="coverageEndPreview" label="วันสิ้นสุดความคุ้มครอง (คำนวณ)">
+          <div class="px-3 py-1.5 text-sm text-indigo-700 bg-indigo-50 rounded-lg">
+            {{ coverageEndPreview }}
+            <span class="text-[10px] text-indigo-400">
+              ({{ effectiveCoverageBasis === 'age' ? 'นับจากวันเกิด' : 'นับจากวันเริ่มคุ้มครอง' }})
+            </span>
+          </div>
         </FormField>
       </div>
 

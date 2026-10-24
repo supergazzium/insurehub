@@ -77,6 +77,10 @@ export interface ProductDetail extends ProductListRow {
   payYears: number
   /** #16 — คุ้มครองถึงอายุ N (เช่น 90); null = ไม่ใช่แบบ to-age */
   coverageToAge: number | null
+  /** ฐานการคำนวณระยะคุ้มครอง: age (ถึงอายุ) | years (N ปีจากวันคุ้มครอง) | renewable (ปีต่อปี) */
+  coverageBasis: 'age' | 'years' | 'renewable' | null
+  /** ระยะคุ้มครอง (ปี) — ใช้เมื่อ coverageBasis = 'years' */
+  coverageYears: number | null
   premiumMode: PremiumMode
   /** งวดการชำระที่ผลิตภัณฑ์กำหนดเอง — null = ใช้ค่าเริ่มต้นตามประเภทประกัน. */
   allowedPremiumModes: PremiumMode[] | null

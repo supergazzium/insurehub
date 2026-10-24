@@ -290,11 +290,18 @@ class PolicyResource extends JsonResource
             'premiumPayingTerm' => $this->premium_paying_term !== null ? (int) $this->premium_paying_term : null,
             // #16 — ระยะชำระเบี้ย / ระยะคุ้มครอง (15/90)
             'coverageToAge' => $this->coverage_to_age !== null ? (int) $this->coverage_to_age : null,
+            // ฐานการคำนวณระยะคุ้มครอง: age|years|renewable (+ ปีสำหรับแผน years)
+            'coverageBasis' => $this->coverage_basis,
+            'coverageYears' => $this->coverage_years !== null ? (int) $this->coverage_years : null,
             'effectivePremiumTerm' => $this->effective_premium_term,
             'effectiveCoverageToAge' => $this->effective_coverage_to_age,
+            'effectiveCoverageBasis' => $this->effective_coverage_basis,
+            'effectiveCoverageYears' => $this->effective_coverage_years,
             'coverageEndDate' => $this->coverage_end_date?->toDateString(),
             'premiumStillDueByTerm' => $this->premium_still_due_by_term,
             'termLabel' => $this->term_label,
+            // ทวงเบี้ยรายปี — วันนัดชำระถัดไป / ปีที่เท่าไหร่ / จ่ายครบหรือยัง
+            'premiumAnniversary' => \App\Services\Policy\PremiumAnniversary::forPolicy($this->resource),
             'healthDeclaration' => $this->health_declaration,
             'healthBeneficiaryName' => $this->health_beneficiary_name,
             'healthBeneficiaryRelation' => $this->health_beneficiary_relation,

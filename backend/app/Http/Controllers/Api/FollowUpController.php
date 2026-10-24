@@ -16,7 +16,10 @@ use Illuminate\Support\Facades\DB;
 
 class FollowUpController extends Controller
 {
-    private const CATEGORIES = ['approval', 'no_policy_no', 'not_delivered', 'freelook', 'unpaid', 'no_commission', 'cancelled', 'verify'];
+    private const CATEGORIES = ['approval', 'no_policy_no', 'not_delivered', 'freelook', 'unpaid', 'premium_due', 'no_commission', 'cancelled', 'verify'];
+
+    /** ทวงเบี้ยรายปี — days before the anniversary to start surfacing the policy. */
+    private const PREMIUM_DUE_LEAD_DAYS = 30;
 
     private const SUBMIT_EVENTS = "'submittedFromDraft','convertedToApplication','submittedToCarrier'";
 
@@ -74,6 +77,10 @@ class FollowUpController extends Controller
             DB::raw("CONCAT_WS(' ', c.first_name, c.last_name) as customer_name"),
             'a.agent_code', DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
             'ca.name as carrier_name', 'pr.name as product_name',
+            'p.premium_paying_term', 'pr.pay_years',
+            DB::raw($this->nextAnniversarySql().' as next_premium_due'),
+            DB::raw(self::TERM_SQL.' as effective_term'),
+            DB::raw("TIMESTAMPDIFF(YEAR, p.effective_date, ".$this->nextAnniversarySql().") as next_premium_year"),
             DB::raw("{$agingExpr} as aging_days"),
         ])
             ->orderByRaw("{$agingExpr} IS NULL")
@@ -132,6 +139,10 @@ class FollowUpController extends Controller
             'oldestDueDate' => $r->oldest_due,
             'overdueCount' => $r->overdue_count !== null ? (int) $r->overdue_count : 0,
             'overdueAmount' => $r->overdue_amount !== null ? round((float) $r->overdue_amount, 2) : 0.0,
+            // ทวงเบี้ยรายปี — surfaced for the premium_due category.
+            'nextPremiumDue' => $r->next_premium_due ?? null,
+            'nextPremiumYear' => isset($r->next_premium_year) && $r->next_premium_year !== null ? (int) $r->next_premium_year : null,
+            'premiumTerm' => isset($r->effective_term) && $r->effective_term !== null ? (int) $r->effective_term : null,
             'agingDays' => $r->aging_days !== null ? max(0, (int) $r->aging_days) : null,
             'alsoIn' => $this->otherCategories($r, $category, $tenant),
         ];
@@ -221,6 +232,46 @@ class FollowUpController extends Controller
         return $q;
     }
 
+    /**
+     * SQL for the effective premium-paying term (policy override → product
+     * pay_years) and the next annual anniversary date. Mirrors
+     * App\Services\Policy\PremiumAnniversary so the list query and the cron
+     * agree. "elapsed whole years since effective" → the next anniversary is
+     * effective_date + (elapsed) years if that is still in the future,
+     * otherwise + (elapsed + 1).
+     */
+    private const TERM_SQL = 'COALESCE(NULLIF(p.premium_paying_term, 0), NULLIF(pr.pay_years, 0))';
+
+    private function nextAnniversarySql(): string
+    {
+        $today = now()->toDateString();
+
+        return "DATE_ADD(p.effective_date, INTERVAL ("
+            ."TIMESTAMPDIFF(YEAR, p.effective_date, '{$today}') "
+            ."+ IF(DATE_ADD(p.effective_date, INTERVAL TIMESTAMPDIFF(YEAR, p.effective_date, '{$today}') YEAR) < '{$today}', 1, 0)"
+            .") YEAR)";
+    }
+
+    /**
+     * ทวงเบี้ยรายปี — active/issued policies on a premium-paying term whose next
+     * anniversary falls within the lead window AND whose term is not yet
+     * complete (the anniversary year index must be ≤ the term).
+     */
+    private function premiumDueBranch(Builder $q): Builder
+    {
+        $today = now()->toDateString();
+        $windowEnd = now()->addDays(self::PREMIUM_DUE_LEAD_DAYS)->toDateString();
+        $next = $this->nextAnniversarySql();
+
+        return $q
+            ->whereNotNull('p.effective_date')
+            ->whereRaw(self::TERM_SQL.' IS NOT NULL')
+            ->whereRaw("{$next} BETWEEN ? AND ?", [$today, $windowEnd])
+            // anniversary year index (= years from effective to that date) must
+            // be within the paying term; past the term is จ่ายครบ.
+            ->whereRaw("TIMESTAMPDIFF(YEAR, p.effective_date, {$next}) BETWEEN 1 AND ".self::TERM_SQL);
+    }
+
     private function agingExpr(string $category, string $stage): string
     {
         $ref = match ($category) {
@@ -229,6 +280,7 @@ class FollowUpController extends Controller
             'not_delivered' => $stage === 'in_transit' ? 'p.shipped_date, p.mailing_date' : 'p.received_date, p.issue_date, p.effective_date',
             'freelook' => $stage === 'awaiting_return' ? 'p.freelook_doc_sent_at' : 'p.freelook_doc_sent_at, p.delivered_date, p.issue_date, p.effective_date',
             'unpaid' => 'ov.oldest_due',
+            'premium_due' => $this->nextAnniversarySql(),
             'no_commission' => 'p.effective_date',
             'cancelled' => 'p.cancel_date, p.updated_at',
             default => 'p.updated_at',
@@ -276,6 +328,7 @@ class FollowUpController extends Controller
             'freelook' => $this->freelookStage(Freelook::whereLife($q->whereIn('p.status', ['issued', 'active'])->whereNull('p.freelook_doc_returned_at'))
                 ->where(fn ($w) => $w->whereNull('p.freelook_end_date')->orWhere('p.freelook_end_date', '>=', now()->subDays(30)->toDateString())), $stage, $today),
             'unpaid' => $q->whereIn('p.status', ['active', 'issued'])->whereNotNull('ov.policy_id'),
+            'premium_due' => $this->premiumDueBranch($q->whereIn('p.status', ['active', 'issued'])),
             'no_commission' => $q->where('p.status', 'active')
                 ->whereNotNull('p.policy_no')->where('p.policy_no', '!=', '')
                 ->whereRaw('COALESCE(p.shipped_date, p.mailing_date) IS NOT NULL')

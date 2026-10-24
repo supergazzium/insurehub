@@ -61,6 +61,9 @@ class ProductRequest extends FormRequest
             'payYears' => ['sometimes', 'integer', 'min:1'],
             // #16 — คุ้มครองถึงอายุ N (เช่น 90). nullable = ไม่ใช่แบบ to-age.
             'coverageToAge' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:120'],
+            // ฐานการคำนวณระยะคุ้มครอง: age (ถึงอายุ) | years (N ปีจากวันคุ้มครอง) | renewable (ปีต่อปี)
+            'coverageBasis' => ['sometimes', 'nullable', 'string', 'in:age,years,renewable'],
+            'coverageYears' => ['sometimes', 'nullable', 'integer', 'min:1', 'max:99'],
             'premiumMode' => ['sometimes', 'string', 'in:monthly,quarterly,semiannual,annual,single'],
             // งวดการชำระที่ผลิตภัณฑ์รองรับ. null/[] = insure-type default
             // (see App\Support\PremiumMode).
@@ -167,6 +170,8 @@ class ProductRequest extends FormRequest
             'durationYears' => 'duration_years',
             'payYears' => 'pay_years',
             'coverageToAge' => 'coverage_to_age',
+            'coverageBasis' => 'coverage_basis',
+            'coverageYears' => 'coverage_years',
             'premiumMode' => 'premium_mode',
             'allowedPremiumModes' => 'allowed_premium_modes',
             'minPremium' => 'min_premium',

@@ -2,7 +2,7 @@
 import { api, buildQuery } from './client'
 
 export type FollowUpCategory =
-  | 'approval' | 'no_policy_no' | 'not_delivered' | 'freelook' | 'unpaid' | 'no_commission' | 'cancelled' | 'verify'
+  | 'approval' | 'no_policy_no' | 'not_delivered' | 'freelook' | 'unpaid' | 'premium_due' | 'no_commission' | 'cancelled' | 'verify'
 
 export type AgingBucket = '0-7' | '8-30' | '30+'
 export type CancelCheck = 'pending' | 'done' | 'na'
@@ -37,6 +37,10 @@ export interface FollowUpRow {
   oldestDueDate: string | null
   overdueCount: number
   overdueAmount: number
+  // ทวงเบี้ยรายปี (premium_due category)
+  nextPremiumDue: string | null
+  nextPremiumYear: number | null
+  premiumTerm: number | null
   agingDays: number | null
   alsoIn: string[]
 }

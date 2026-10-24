@@ -15,6 +15,7 @@ class PaymentReminder extends Model
     protected $casts = [
         'installment_no' => 'integer',
         'amount_due' => 'decimal:2',
+        'due_date' => 'date',
     ];
 
     public function policy(): BelongsTo
