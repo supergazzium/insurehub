@@ -248,15 +248,35 @@ class CommissionPayoutService
      *
      * @return array{payable: \Illuminate\Support\Collection, needsReview: \Illuminate\Support\Collection}
      */
-    private function partitionPayable(\Illuminate\Support\Collection $rows): array
+    private function partitionPayable(\Illuminate\Support\Collection $rows, ?int $tenantId = null): array
     {
+        // 1E: carrier-received / freelook / customer-paid gates. The tenant
+        // toggles (payout_require_*) decide which gates apply; an active
+        // PolicyPayoutOverride bypasses them. Gated policies are not paid — they
+        // drop to needsReview with the gate reason.
+        $gates = [];
+        if ($tenantId !== null) {
+            $ids = $rows->pluck('policy_id')->map(fn ($v) => (int) $v)->all();
+            $gates = $ids === [] ? [] : app(PayoutEligibility::class)->evaluate($tenantId, $ids);
+        }
+
         $payable = [];
         $needsReview = [];
         foreach ($rows as $row) {
             $amt = $this->resolveAmount($row);
-            if (round($amt['main'] + $amt['rider'], 2) > 0) {
+            $gate = $gates[(int) $row->policy_id] ?? null;
+            $gateBlocked = $gate !== null
+                && ($gate['override'] ?? null) === null
+                && (! empty($gate['gates']) || ($gate['customerReason'] ?? null) !== null);
+
+            if ($gateBlocked) {
+                $reason = $gate['gates'][0]['label'] ?? ($gate['customerReason']['label'] ?? 'ยังไม่พร้อมจ่าย');
+                $row->review_reason = $reason;
+                $needsReview[] = $row;
+            } elseif (round($amt['main'] + $amt['rider'], 2) > 0) {
                 $payable[] = $row;
             } else {
+                $row->review_reason = 'ยังไม่ตั้งอัตราค่าคอม (ค่าคอม ฿0)';
                 $needsReview[] = $row;
             }
         }
@@ -275,7 +295,7 @@ class CommissionPayoutService
     public function preview(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null): array
     {
         $all = $this->rows($tenantId, $from, $to, $agentId);
-        ['payable' => $rows, 'needsReview' => $needsReviewRows] = $this->partitionPayable($all);
+        ['payable' => $rows, 'needsReview' => $needsReviewRows] = $this->partitionPayable($all, $tenantId);
         $byAgent = [];
         $warnings = [];
         $grandTotal = 0.0;
@@ -311,7 +331,7 @@ class CommissionPayoutService
             'policyNo' => $r->policy_no,
             'agentCode' => $r->agent_code,
             'agentName' => $r->agent_name,
-            'reason' => 'ยังไม่ตั้งอัตราค่าคอม (ค่าคอม ฿0)',
+            'reason' => $r->review_reason ?? 'ต้องตรวจสอบ',
         ])->values()->all();
 
         $agents = array_values($byAgent);
@@ -476,7 +496,7 @@ class CommissionPayoutService
     ): CommissionPayoutBatch {
         // Only payable rows (commission > 0) enter the batch; ฿0/unrated rows are
         // data errors surfaced via preview()['needsReview'], never a ฿0 line item.
-        $rows = $this->partitionPayable($this->rows($tenantId, $from, $to, $agentId, $agentIds))['payable'];
+        $rows = $this->partitionPayable($this->rows($tenantId, $from, $to, $agentId, $agentIds), $tenantId)['payable'];
         if ($rows->isEmpty()) {
             throw new RuntimeException('ไม่พบรายการค่าคอมที่เข้าเงื่อนไขในช่วงวันที่ที่ระบุ');
         }

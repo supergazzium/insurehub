@@ -193,4 +193,45 @@ class PayoutMoneySafetyTest extends TestCase
         $this->expectExceptionMessageMatches('/อนุมัติรอบที่ตัวเองสร้าง/');
         $this->service->payAgent((int) $this->tenant->id, $agent->id, now()->toDateString(), 'REF', $this->admin->id);
     }
+
+    // ── 1E: pre-receipt gate (carrier must have remitted) ─────────────────
+
+    public function test_policy_not_received_from_carrier_is_not_payable_when_gate_on(): void
+    {
+        $this->tenant->update(['payout_require_insurer_received' => true]);
+        $agent = $this->payoutAgent(1);
+        $policy = $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+        // No 'Received' receivable → gated.
+        \App\Models\CommissionReceivable::create([
+            'tenant_id' => $this->tenant->id, 'policy_id' => $policy->id, 'commission_type' => 'MAIN',
+            'expected_amount' => 2000, 'status' => 'Pending',
+        ]);
+
+        $preview = $this->service->preview((int) $this->tenant->id);
+        $this->assertNull(collect($preview['agents'])->firstWhere('agentCode', $agent->agent_code));
+        $this->assertSame(1, $preview['totals']['needsReviewCount']);
+        $this->assertStringContainsString('รอรับค่าคอมจากบริษัทประกัน', $preview['needsReview'][0]['reason']);
+    }
+
+    public function test_received_policy_is_payable_when_gate_on(): void
+    {
+        $this->tenant->update(['payout_require_insurer_received' => true]);
+        $agent = $this->payoutAgent(1);
+        $policy = $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+        \App\Models\CommissionReceivable::create([
+            'tenant_id' => $this->tenant->id, 'policy_id' => $policy->id, 'commission_type' => 'MAIN',
+            'expected_amount' => 2000, 'received_amount' => 2000, 'status' => 'Received', 'received_date' => now()->toDateString(),
+        ]);
+
+        $this->assertNotNull(collect($this->service->preview((int) $this->tenant->id)['agents'])->firstWhere('agentCode', $agent->agent_code));
+    }
+
+    public function test_gate_off_keeps_back_compat(): void
+    {
+        // Fixture default: all payout_require_* are false → no gating.
+        $agent = $this->payoutAgent(1);
+        $this->sellAndPay($agent, premium: 20000, rate: 0.10);
+        // No receivable at all, but gate off → still payable.
+        $this->assertNotNull(collect($this->service->preview((int) $this->tenant->id)['agents'])->firstWhere('agentCode', $agent->agent_code));
+    }
 }
