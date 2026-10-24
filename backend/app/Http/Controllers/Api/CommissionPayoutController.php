@@ -112,6 +112,7 @@ class CommissionPayoutController extends Controller
                 $data['fromDate'] ?? null,
                 $data['toDate'] ?? null,
                 $data['note'] ?? null,
+                (bool) $request->user()?->can('payouts.self_approve'),
             );
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
@@ -249,7 +250,15 @@ class CommissionPayoutController extends Controller
             $a['bankAccountNo'] = $pr?->bank_account_no;
             $a['bankAccountName'] = $pr?->bank_account_name;
             $a['whtAmount'] = $pr ? round((float) $pr->wht_amount, 2) : 0.0;
+            $a['vatAmount'] = $pr ? round((float) $pr->vat_amount, 2) : 0.0;
             $a['netTransfer'] = $pr ? round((float) $pr->net_transfer, 2) : $a['net'];
+            $a['vatExpectedNet'] = $pr?->vat_expected_net !== null ? round((float) $pr->vat_expected_net, 2) : null;
+            // VAT is computed but NOT yet included in netTransfer (pending
+            // accounting sign-off) — the UI flags this so no one trusts the
+            // transfer figure for VAT agents.
+            $a['vatDiscrepancy'] = $a['vatAmount'] > 0;
+            $a['needsInfo'] = (bool) ($pr?->needs_info ?? false);
+            $a['needsInfoReason'] = $pr?->needs_info_reason;
             $a['paid'] = (bool) ($pr?->paid ?? false);
             $a['paidAt'] = $pr?->paid_at?->toIso8601String();
             $a['paymentReference'] = $pr?->payment_reference;
@@ -358,7 +367,7 @@ class CommissionPayoutController extends Controller
     {
         $this->authorizeTenant($request, $batch);
         try {
-            $batch = $this->service->approveBatch($batch, $request->user()?->id);
+            $batch = $this->service->approveBatch($batch, $request->user()?->id, (bool) $request->user()?->can('payouts.self_approve'));
         } catch (RuntimeException $e) {
             return response()->json(['message' => $e->getMessage()], 422);
         }
@@ -603,6 +612,7 @@ class CommissionPayoutController extends Controller
     {
         return [
             'id' => (string) $b->id,
+            'referenceCode' => $b->reference_code,
             'fromDate' => $b->from_date?->toDateString(),
             'toDate' => $b->to_date?->toDateString(),
             'periodLabel' => $b->period_label,

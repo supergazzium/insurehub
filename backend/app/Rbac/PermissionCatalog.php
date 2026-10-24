@@ -63,6 +63,7 @@ final class PermissionCatalog
             ['key' => 'payouts.preview',    'module' => 'payouts', 'name_th' => 'ตรวจสอบก่อนจ่ายเงิน',    'name_en' => 'Preview payouts',  'description' => null],
             ['key' => 'payouts.approve',    'module' => 'payouts', 'name_th' => 'อนุมัติรอบจ่ายเงิน',     'name_en' => 'Approve payouts',  'description' => null],
             ['key' => 'payouts.mark_paid',  'module' => 'payouts', 'name_th' => 'ยืนยันการจ่ายเงินแล้ว',  'name_en' => 'Mark payout paid', 'description' => null],
+            ['key' => 'payouts.self_approve', 'module' => 'payouts', 'name_th' => 'อนุมัติรอบที่ตัวเองสร้าง (ข้าม maker-checker)', 'name_en' => 'Self-approve own payout batch', 'description' => 'ยกเว้นกฎผู้สร้าง≠ผู้อนุมัติ — ควรให้เฉพาะหน่วยงานเล็กที่ไม่มีการแบ่งหน้าที่'],
 
             // ── Finance ──────────────────────────────────────────────────
             ['key' => 'finance.view_ledger', 'module' => 'finance', 'name_th' => 'ดูบัญชีแยกประเภท',    'name_en' => 'View ledger',       'description' => null],

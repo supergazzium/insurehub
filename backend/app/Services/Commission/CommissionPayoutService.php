@@ -241,13 +241,61 @@ class CommissionPayoutService
     }
 
     /**
+     * Split resolved rows into payable (commission > 0) vs needs-review
+     * (commission ≤ 0 — unrated policies whose rate isn't set yet). The latter
+     * are DATA ERRORS, not debt, so they must never enter a payout batch or a
+     * ฿0 PDF; they're surfaced separately for the fix-up workflow (1C).
+     *
+     * @return array{payable: \Illuminate\Support\Collection, needsReview: \Illuminate\Support\Collection}
+     */
+    private function partitionPayable(\Illuminate\Support\Collection $rows, ?int $tenantId = null): array
+    {
+        // 1E: carrier-received / freelook / customer-paid gates. The tenant
+        // toggles (payout_require_*) decide which gates apply; an active
+        // PolicyPayoutOverride bypasses them. Gated policies are not paid — they
+        // drop to needsReview with the gate reason.
+        $gates = [];
+        if ($tenantId !== null) {
+            $ids = $rows->pluck('policy_id')->map(fn ($v) => (int) $v)->all();
+            $gates = $ids === [] ? [] : app(PayoutEligibility::class)->evaluate($tenantId, $ids);
+        }
+
+        $payable = [];
+        $needsReview = [];
+        foreach ($rows as $row) {
+            $amt = $this->resolveAmount($row);
+            $gate = $gates[(int) $row->policy_id] ?? null;
+            $gateBlocked = $gate !== null
+                && ($gate['override'] ?? null) === null
+                && (! empty($gate['gates']) || ($gate['customerReason'] ?? null) !== null);
+
+            if ($gateBlocked) {
+                $reason = $gate['gates'][0]['label'] ?? ($gate['customerReason']['label'] ?? 'ยังไม่พร้อมจ่าย');
+                $row->review_reason = $reason;
+                $needsReview[] = $row;
+            } elseif (round($amt['main'] + $amt['rider'], 2) > 0) {
+                $payable[] = $row;
+            } else {
+                $row->review_reason = 'ยังไม่ตั้งอัตราค่าคอม (ค่าคอม ฿0)';
+                $needsReview[] = $row;
+            }
+        }
+
+        return [
+            'payable' => collect($payable),
+            'needsReview' => collect($needsReview),
+        ];
+    }
+
+    /**
      * Preview eligible items grouped by agent — no persistence.
      *
-     * @return array{agents: array<int, array<string, mixed>>, totals: array<string, mixed>, warnings: array<int, string>}
+     * @return array{agents: array<int, array<string, mixed>>, totals: array<string, mixed>, warnings: array<int, string>, needsReview: array<int, array<string, mixed>>}
      */
     public function preview(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null): array
     {
-        $rows = $this->rows($tenantId, $from, $to, $agentId);
+        $all = $this->rows($tenantId, $from, $to, $agentId);
+        ['payable' => $rows, 'needsReview' => $needsReviewRows] = $this->partitionPayable($all, $tenantId);
         $byAgent = [];
         $warnings = [];
         $grandTotal = 0.0;
@@ -272,18 +320,35 @@ class CommissionPayoutService
             $grandTotal += $total;
             $itemCount++;
 
-            if ($amt['source'] === 'none') {
-                $warnings[] = "กรมธรรม์ {$row->policy_no} ({$row->agent_code}) ไม่มียอดค่าคอมตัวแทน";
-            }
             if (! $row->agent_code) {
                 $warnings[] = "กรมธรรม์ {$row->policy_no} ไม่มีรหัสตัวแทน";
             }
         }
 
+        // ฿0 / unrated rows — data errors to fix, NOT payable debt.
+        $needsReview = $needsReviewRows->map(fn ($r) => [
+            'policyId' => (string) $r->policy_id,
+            'policyNo' => $r->policy_no,
+            'agentCode' => $r->agent_code,
+            'agentName' => $r->agent_name,
+            'reason' => $r->review_reason ?? 'ต้องตรวจสอบ',
+        ])->values()->all();
+
         $agents = array_values($byAgent);
+
+        // Bank presence per agent (decrypted via the model) → a missingBank flag
+        // so the UI can group "รอข้อมูล" agents and keep them out of a payout.
+        $agentIds = array_values(array_filter(array_map(fn ($a) => $a['agentId'] ? (int) $a['agentId'] : null, $agents)));
+        $bank = \App\Models\Agent::query()->whereIn('id', $agentIds)->get(['id', 'bank_account_no'])->keyBy('id');
         foreach ($agents as &$a) {
             $a['amount'] = round($a['amount'], 2);
+            $acct = $a['agentId'] ? ($bank[(int) $a['agentId']]?->bank_account_no ?? null) : null;
+            $a['missingBank'] = $acct === null || trim((string) $acct) === '';
+            if ($a['missingBank'] && $a['amount'] > 0) {
+                $warnings[] = "ตัวแทน {$a['agentCode']} ไม่มีเลขบัญชีธนาคาร — ต้องแก้ข้อมูลก่อนจ่าย";
+            }
         }
+        unset($a);
 
         return [
             'agents' => $agents,
@@ -291,8 +356,10 @@ class CommissionPayoutService
                 'totalAgents' => count($agents),
                 'totalItems' => $itemCount,
                 'totalAmount' => round($grandTotal, 2),
+                'needsReviewCount' => count($needsReview),
             ],
             'warnings' => array_values(array_unique($warnings)),
+            'needsReview' => $needsReview,
         ];
     }
 
@@ -388,10 +455,17 @@ class CommissionPayoutService
         ?string $from = null,
         ?string $to = null,
         ?string $note = null,
+        bool $allowSelfApprove = false,
     ): CommissionPayoutBatch {
+        // One user does create→approve→pay in one shot, so this path INHERENTLY
+        // self-approves — it requires the payouts.self_approve capability.
+        if (! $allowSelfApprove) {
+            throw new RuntimeException('จ่ายทันที (สร้าง+อนุมัติ+จ่ายในคนเดียว) ต้องมีสิทธิ์ "อนุมัติรอบที่ตัวเองสร้าง" — ไม่งั้นให้สร้างรอบแล้วให้คนอื่นอนุมัติ');
+        }
+
         return DB::transaction(function () use ($tenantId, $agentId, $paymentDate, $reference, $userId, $from, $to, $note): CommissionPayoutBatch {
             $batch = $this->createBatch($tenantId, $from, $to, $userId, $note, $agentId);
-            $batch = $this->approveBatch($batch, $userId);
+            $batch = $this->approveBatch($batch, $userId, allowSelfApprove: true);
 
             return $this->markPaid($batch, $paymentDate, $reference, $userId);
         });
@@ -420,7 +494,9 @@ class CommissionPayoutService
         ?array $agentIds = null,
         ?string $periodLabel = null,
     ): CommissionPayoutBatch {
-        $rows = $this->rows($tenantId, $from, $to, $agentId, $agentIds);
+        // Only payable rows (commission > 0) enter the batch; ฿0/unrated rows are
+        // data errors surfaced via preview()['needsReview'], never a ฿0 line item.
+        $rows = $this->partitionPayable($this->rows($tenantId, $from, $to, $agentId, $agentIds), $tenantId)['payable'];
         if ($rows->isEmpty()) {
             throw new RuntimeException('ไม่พบรายการค่าคอมที่เข้าเงื่อนไขในช่วงวันที่ที่ระบุ');
         }
@@ -433,12 +509,22 @@ class CommissionPayoutService
             $from ??= $dates->first() ?: $today;
             $to ??= $dates->last() ?: $today;
         }
-        // Default the printed month label from the batch end date.
-        $periodLabel ??= CarbonImmutable::parse($to, 'Asia/Bangkok')->translatedFormat('F Y');
+        // Label: single month → "มีนาคม 2026"; multi-month span → a range
+        // ("ม.ค. 2024 – ธ.ค. 2026") so it never hides a 2024–2026 span behind
+        // just the end month (1F — the "December 2026 over 2024-2026" bug).
+        if ($periodLabel === null) {
+            $fromM = CarbonImmutable::parse($from, 'Asia/Bangkok');
+            $toM = CarbonImmutable::parse($to, 'Asia/Bangkok');
+            $periodLabel = $fromM->isSameMonth($toM)
+                ? $toM->translatedFormat('F Y')
+                : $fromM->translatedFormat('M Y').' – '.$toM->translatedFormat('M Y');
+        }
+        $referenceCode = $this->nextReferenceCode($tenantId, $to);
 
-        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows, $periodLabel): CommissionPayoutBatch {
+        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows, $periodLabel, $referenceCode): CommissionPayoutBatch {
             $batch = CommissionPayoutBatch::create([
                 'tenant_id' => $tenantId,
+                'reference_code' => $referenceCode,
                 'from_date' => $from,
                 'to_date' => $to,
                 'period_label' => $periodLabel,
@@ -453,13 +539,16 @@ class CommissionPayoutService
             foreach ($rows as $row) {
                 $amt = $this->resolveAmount($row);
                 $snap = $this->snapshotColumns($row, $amt);
+                $vatType = $this->resolveVatType($row);
+                $itemVat = self::vatFor($amt['main'] + $amt['rider'], $vatType);
                 CommissionPayoutBatchItem::create(array_merge([
                     'batch_id' => $batch->id,
                     'tenant_id' => $tenantId,
                     'policy_id' => $row->policy_id,
                     'agent_id' => $row->agent_id,
                     'agent_code' => $row->agent_code,
-                    'vat_type' => $this->resolveVatType($row),
+                    'vat_type' => $vatType,
+                    'vat_amount' => $itemVat,
                     'snapshot_base_premium' => $amt['base'],
                     'snapshot_agent_commission' => $amt['main'],
                     'snapshot_rider_commission' => $amt['rider'],
@@ -474,16 +563,18 @@ class CommissionPayoutService
                         'agent_id' => $row->agent_id,
                         'agent_code' => $row->agent_code,
                         'agent_name' => $row->agent_name,
-                        'vat_type' => $this->resolveVatType($row),
+                        'vat_type' => $vatType,
                         'item_count' => 0,
                         'gross_commission' => 0.0,
                         'wht_amount' => 0.0,
+                        'vat_amount' => 0.0,
                         'payoff_card' => 0.0,
                     ];
                 }
                 $byAgent[$key]['item_count']++;
                 $byAgent[$key]['gross_commission'] += $amt['main'] + $amt['rider'];
                 $byAgent[$key]['wht_amount'] += (float) $snap['snapshot_wht_amount'];
+                $byAgent[$key]['vat_amount'] += $itemVat;
                 $byAgent[$key]['payoff_card'] += (float) $snap['snapshot_payoff_discount'] + (float) $snap['snapshot_card_fee'];
                 $total += $amt['main'] + $amt['rider'];
             }
@@ -499,8 +590,16 @@ class CommissionPayoutService
                 $gross = round($a['gross_commission'], 2);
                 $deduct = round($a['payoff_card'], 2);      // adjustments added later reduce net at pay time
                 $wht = round($a['wht_amount'], 2);
+                $vat = round($a['vat_amount'], 2);
+                // net_transfer is UNCHANGED (no VAT) — the actual paid amount.
                 $net = round($gross - $deduct - $wht, 2);
+                // What net WOULD be if VAT were included — for the discrepancy flag.
+                $vatExpectedNet = round($gross + $vat - $deduct - $wht, 2);
                 $ag = $a['agent_id'] ? ($bank[$a['agent_id']] ?? null) : null;
+                // รอข้อมูล: no bank account on file → flag so markPaid refuses to
+                // transfer to this row until the data is fixed.
+                $bankNo = $ag?->bank_account_no;
+                $needsInfo = $bankNo === null || trim((string) $bankNo) === '';
                 CommissionPayoutBatchAgent::create([
                     'batch_id' => $batch->id,
                     'tenant_id' => $tenantId,
@@ -508,13 +607,17 @@ class CommissionPayoutService
                     'agent_code' => $a['agent_code'],
                     'agent_name' => $a['agent_name'],
                     'vat_type' => $a['vat_type'],
-                    'bank_account_no' => $ag?->bank_account_no,
+                    'bank_account_no' => $bankNo,
                     'bank_account_name' => $ag?->bank_account_name,
+                    'needs_info' => $needsInfo,
+                    'needs_info_reason' => $needsInfo ? 'ไม่มีเลขบัญชีธนาคาร' : null,
                     'item_count' => $a['item_count'],
                     'gross_commission' => $gross,
                     'deduct_amount' => $deduct,
                     'wht_amount' => $wht,
+                    'vat_amount' => $vat,
                     'net_transfer' => $net,
+                    'vat_expected_net' => $vatExpectedNet,
                 ]);
             }
 
@@ -587,6 +690,12 @@ class CommissionPayoutService
         }
         if ($batch->status !== CommissionPayoutBatch::STATUS_APPROVED) {
             throw new RuntimeException('ต้องอนุมัติ batch ก่อนจึงจะยืนยันการจ่ายได้');
+        }
+
+        // 1B hard guard: never transfer to an agent with no bank account.
+        $needsInfo = $batch->agentRows()->where('needs_info', true)->where('paid', false)->where('reversed', false)->pluck('agent_code');
+        if ($needsInfo->isNotEmpty()) {
+            throw new RuntimeException('จ่ายไม่ได้ — มีตัวแทนที่ยังไม่มีเลขบัญชีธนาคาร: '.$needsInfo->implode(', ').' (แก้ข้อมูลหรือนำออกจากรอบก่อน)');
         }
 
         return DB::transaction(function () use ($batch, $paymentDate, $reference, $userId): CommissionPayoutBatch {
@@ -718,10 +827,15 @@ class CommissionPayoutService
     }
 
     /** Approve a batch so it can be paid (spec §8.1: separate approve step). */
-    public function approveBatch(CommissionPayoutBatch $batch, ?int $userId): CommissionPayoutBatch
+    public function approveBatch(CommissionPayoutBatch $batch, ?int $userId, bool $allowSelfApprove = false): CommissionPayoutBatch
     {
         if (! in_array($batch->status, [CommissionPayoutBatch::STATUS_DRAFT, CommissionPayoutBatch::STATUS_GENERATED], true)) {
             throw new RuntimeException('อนุมัติได้เฉพาะ batch สถานะร่าง/สร้างเอกสารแล้ว');
+        }
+        // 1D maker-checker: the approver must differ from the creator, unless the
+        // tenant grants payouts.self_approve (small teams with no SoD).
+        if (! $allowSelfApprove && $userId !== null && (int) $batch->created_by_user_id === (int) $userId) {
+            throw new RuntimeException('ผู้อนุมัติต้องไม่ใช่คนเดียวกับผู้สร้างรอบจ่าย — ให้คนอื่นอนุมัติ หรือขอสิทธิ์อนุมัติเอง');
         }
         $batch->update([
             'status' => CommissionPayoutBatch::STATUS_APPROVED,
@@ -749,12 +863,35 @@ class CommissionPayoutService
         return $batch->fresh();
     }
 
+    /** Next PO-YYMM-NN reference for the batch's end month (per tenant). */
+    private function nextReferenceCode(int $tenantId, string $to): string
+    {
+        $stamp = CarbonImmutable::parse($to, 'Asia/Bangkok')->format('ym');
+        $prefix = "PO-{$stamp}-";
+        $last = CommissionPayoutBatch::query()
+            ->where('tenant_id', $tenantId)
+            ->where('reference_code', 'like', $prefix.'%')
+            ->orderByDesc('reference_code')
+            ->value('reference_code');
+        $seq = $last ? ((int) substr($last, strlen($prefix)) + 1) : 1;
+
+        return sprintf('%s%02d', $prefix, $seq);
+    }
+
     public function cancelBatch(CommissionPayoutBatch $batch, ?int $userId): CommissionPayoutBatch
     {
         if ($batch->status === CommissionPayoutBatch::STATUS_PAID) {
             throw new RuntimeException('ไม่สามารถยกเลิก batch ที่จ่ายแล้ว (ต้องทำ reversal)');
         }
-        $batch->update(['status' => CommissionPayoutBatch::STATUS_CANCELLED]);
+        // 1F: a cancelled batch must never carry paid-* fields (reachable via
+        // reverseAgent leaving them set before a cancel).
+        $batch->update([
+            'status' => CommissionPayoutBatch::STATUS_CANCELLED,
+            'payment_date' => null,
+            'paid_at' => null,
+            'paid_by_user_id' => null,
+            'payment_reference' => null,
+        ]);
         $this->audit($batch->tenant_id, $userId, 'commission_payout.cancel', "batch:{$batch->id}", []);
 
         return $batch->fresh();
@@ -842,11 +979,13 @@ class CommissionPayoutService
                 'reversed' => true, 'reversed_at' => now(), 'reversal_reason' => $reason,
             ]);
 
-            // A paid batch with a reversed agent is no longer fully paid.
+            // A paid batch with a reversed agent is no longer fully paid. Clear
+            // payment_date too (1F) so it can't later become a cancelled batch
+            // that still shows a paid date.
             if ($batch->status === CommissionPayoutBatch::STATUS_PAID) {
                 $batch->update([
                     'status' => CommissionPayoutBatch::STATUS_APPROVED,
-                    'paid_at' => null, 'paid_by_user_id' => null,
+                    'paid_at' => null, 'paid_by_user_id' => null, 'payment_date' => null,
                 ]);
             }
 
@@ -939,10 +1078,12 @@ class CommissionPayoutService
 
         $gross = 0.0;
         $wht = 0.0;
+        $vat = 0.0;
         $payoffCard = 0.0;
         foreach ($items as $it) {
             $gross += $it->total();
             $wht += (float) $it->snapshot_wht_amount;
+            $vat += (float) $it->vat_amount;
             $payoffCard += (float) $it->snapshot_payoff_discount + (float) $it->snapshot_card_fee;
         }
         // Bonuses add to the payout; special_deduct / correction subtract.
@@ -954,14 +1095,18 @@ class CommissionPayoutService
             ->whereIn('type', [CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
             ->sum('amount');
         $deduct = round($payoffCard + $subtractAdj, 2);
+        // net_transfer UNCHANGED (no VAT); vat_expected_net mirrors it + VAT.
         $net = round($gross + $bonus - $deduct - $wht, 2);
+        $vat = round($vat, 2);
 
         $agentRow->update([
             'item_count' => $items->count(),
             'gross_commission' => round($gross, 2),
             'deduct_amount' => $deduct,
             'wht_amount' => round($wht, 2),
+            'vat_amount' => $vat,
             'net_transfer' => $net,
+            'vat_expected_net' => round($net + $vat, 2),
         ]);
     }
 
@@ -984,6 +1129,26 @@ class CommissionPayoutService
 
     /** VAT rate applied to agent commission when the agent carries VAT. */
     private const VAT_RATE = 0.07;
+
+    /**
+     * VAT amount for a given commission base and agent VAT type. Single source
+     * of truth shared by createBatch, recomputeAgentRollup, and the PDF builder
+     * so the stored vat_amount and the printed statement never diverge.
+     *   '2' VAT Exclude : VAT = commission × 7%
+     *   '3' VAT Include : VAT = commission − commission/1.07 (carved out)
+     *   '1' non-VAT     : 0
+     */
+    public static function vatFor(float $commission, string $vatType): float
+    {
+        if ($vatType === '2') {
+            return round($commission * self::VAT_RATE, 2);
+        }
+        if ($vatType === '3') {
+            return round($commission - round($commission / (1 + self::VAT_RATE), 2), 2);
+        }
+
+        return 0.0;
+    }
 
     /**
      * Assemble the per-agent PDF payload for a batch: the agent's items plus
@@ -1040,17 +1205,16 @@ class CommissionPayoutService
             //   '1' non-VAT      : VAT=0,            wht = C × 3%,         payable = C − wht
             //   '3' VAT Include  : VAT = C − C/1.07, wht = (C/1.07) × 3%,  payable = C − VAT − wht
             //   '2' VAT Exclude  : VAT = C × 7%,     wht = C × 3%,         payable = C + VAT − wht
+            $vat = self::vatFor($commA, $vatType);
             if ($vatType === '3') {
-                $base = round($commA / 1.07, 2);
-                $vat = round($commA - $base, 2);
-                $wht = round($base * self::WHT_RATE, 2);
+                // VAT Include: WHT is 3% of the VAT-exclusive base; VAT is carved out.
+                $wht = round(round($commA / (1 + self::VAT_RATE), 2) * self::WHT_RATE, 2);
                 $payable = round($commA - $vat - $wht, 2);
             } elseif ($vatType === '2') {
-                $vat = round($commA * 0.07, 2);
+                // VAT Exclude: VAT added on top.
                 $wht = round($commA * self::WHT_RATE, 2);
                 $payable = round($commA + $vat - $wht, 2);
             } else {
-                $vat = 0.0;
                 $wht = round($commA * self::WHT_RATE, 2);
                 $payable = round($commA - $wht, 2);
             }
