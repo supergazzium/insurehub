@@ -3,11 +3,13 @@
 import { onMounted, reactive, ref, watch, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
-import { openInNewTab } from '../../utils/openInNewTab'
 import { useAgentStore } from '../../stores/agents'
-import { fetchPendingAgents, approveAgent, rejectAgent, setAgentActive, type AgentListRow } from '../../api/agents'
+import {
+  fetchPendingAgents, fetchRankPromotions, fetchLevelProgressBoard,
+  approveAgent, setAgentActive, type AgentListRow,
+} from '../../api/agents'
 import { ApiError } from '../../api/client'
-import { fmtDate } from '../../util/dateFormat'
+import { fmtDateThai } from '../../util/dateFormat'
 import { AGENT_LEVELS, levelBadgeClass } from '../../utils/agentLevel'
 import AgentActiveDialog from './AgentActiveDialog.vue'
 import AgentsSubnav from './AgentsSubnav.vue'
@@ -15,35 +17,40 @@ import AgentsSubnav from './AgentsSubnav.vue'
 const { t } = useI18n()
 const route = useRoute()
 const router = useRouter()
-function openAgent(id: string): void { openInNewTab(router, { name: 'agent-detail', params: { id } }) }
+// Same-tab navigation to the agent detail page (unlike policy/customer lists
+// which open a new tab) — per the agents-module UX decision.
+function openAgent(id: string): void { router.push({ name: 'agent-detail', params: { id } }) }
 const agentStore = useAgentStore()
 
 // ── Management actions (create / approve / deactivate) ─────────────────────
 const pending = ref<AgentListRow[]>([])
+const promoPendingCount = ref(0)
+const nearPromotionCount = ref(0)
 const busy = ref<string | null>(null)
 const flash = ref<{ ok: boolean; text: string } | null>(null)
+const rowMenu = ref<string | null>(null)
 function setFlash(ok: boolean, text: string) { flash.value = { ok, text }; setTimeout(() => flash.value = null, 3500) }
 function aName(a: { firstName?: string; lastName?: string; agentCode: string; kind?: string; juristicName?: string }): string {
   if (a.kind === 'corporate' && a.juristicName) return a.juristicName
   return `${a.firstName ?? ''} ${a.lastName ?? ''}`.trim() || a.agentCode
 }
+// Combined approval count (applicants + pending promotions) — SAME number as
+// the subnav badge so the two never disagree.
+const pendingCount = computed(() => pending.value.length + promoPendingCount.value)
 async function loadPending(): Promise<void> {
   try { const r = await fetchPendingAgents(); pending.value = r.data } catch { pending.value = [] }
+  try { const p = await fetchRankPromotions('pending'); promoPendingCount.value = p.meta?.pendingCount ?? 0 } catch { promoPendingCount.value = 0 }
+  try {
+    const b = await fetchLevelProgressBoard()
+    // "ใกล้เลื่อนระดับ" = has a next level and is ≥80% of the way there.
+    nearPromotionCount.value = b.data.filter((r) => r.nextLevel !== null && r.progressPct >= 80).length
+  } catch { nearPromotionCount.value = 0 }
 }
 function createNew(): void { router.push({ name: 'agent-new' }) }
-function editAgent(id: string): void { router.push({ name: 'agent-edit', params: { id } }) }
 async function approve(a: AgentListRow): Promise<void> {
   busy.value = a.id
   try { await approveAgent(a.id); setFlash(true, `อนุมัติ ${aName(a)} แล้ว`); await load(); await loadPending() }
   catch (e: unknown) { setFlash(false, e instanceof ApiError ? e.message : 'อนุมัติล้มเหลว') }
-  finally { busy.value = null }
-}
-async function reject(a: AgentListRow): Promise<void> {
-  const note = window.prompt(`เหตุผลที่ปฏิเสธ ${aName(a)}:`)
-  if (note === null || note.trim() === '') return
-  busy.value = a.id
-  try { await rejectAgent(a.id, note.trim()); setFlash(true, `ปฏิเสธ ${aName(a)} แล้ว`); await load(); await loadPending() }
-  catch (e: unknown) { setFlash(false, e instanceof ApiError ? e.message : 'ปฏิเสธล้มเหลว') }
   finally { busy.value = null }
 }
 const activeTarget = ref<AgentListRow | null>(null)
@@ -132,6 +139,13 @@ const rangeText = computed(() => {
 })
 
 
+// ── Chip filters (replace the old approvals banner) ──────────────────────
+function goApprovals(): void { router.push({ name: 'agents-approvals' }) }
+function goNearPromotion(): void { router.push({ name: 'agents-level-progress' }) }
+function toggleExpiringChip(): void {
+  filters.licenseStatus = filters.licenseStatus === 'expiring60d' ? '' : 'expiring60d'
+}
+
 function licenseStatus(expiry: string | null): { cls: string; label: string } {
   if (!expiry) return { cls: 'bg-slate-100 text-slate-500', label: 'ไม่มี' }
   const now = new Date().toISOString().slice(0, 10)
@@ -164,19 +178,25 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
       <div v-if="flash" :class="['rounded px-3 py-2 text-sm', flash.ok ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700']">{{ flash.text }}</div>
     </transition>
 
-    <!-- Pending approvals -->
-    <section v-if="pending.length" class="rounded-lg border border-amber-200 bg-amber-50 p-3">
-      <div class="mb-2 text-xs font-medium text-amber-800"><i class="pi pi-clock text-[10px]" /> รออนุมัติ {{ pending.length }} ราย</div>
-      <ul class="space-y-1">
-        <li v-for="a in pending" :key="a.id" class="flex items-center justify-between gap-2 rounded bg-white px-2 py-1.5 text-xs">
-          <span class="text-slate-700">{{ aName(a) }} <span class="text-slate-400">{{ a.agentCode }}</span></span>
-          <span class="flex gap-1.5">
-            <button type="button" class="rounded bg-emerald-600 px-2 py-0.5 text-white disabled:opacity-50" :disabled="busy === a.id" @click="approve(a)">อนุมัติ</button>
-            <button type="button" class="rounded border border-rose-300 px-2 py-0.5 text-rose-600 disabled:opacity-50" :disabled="busy === a.id" @click="reject(a)">ปฏิเสธ</button>
-          </span>
-        </li>
-      </ul>
-    </section>
+    <!-- Chip filters — quick jumps to the attention queues (replaces the old
+         inline approvals banner, which double-counted vs the subnav badge). -->
+    <div class="flex flex-wrap items-center gap-2">
+      <button v-if="pendingCount > 0" type="button" data-testid="chip-pending"
+        class="inline-flex items-center gap-1.5 rounded-full border border-amber-300 bg-amber-50 px-3 py-1 text-xs font-medium text-amber-800 hover:bg-amber-100"
+        @click="goApprovals">
+        <i class="pi pi-clock text-[10px]" /> รออนุมัติ {{ pendingCount }}
+      </button>
+      <button type="button" data-testid="chip-expiring"
+        :class="['inline-flex items-center gap-1.5 rounded-full border px-3 py-1 text-xs font-medium', filters.licenseStatus === 'expiring60d' ? 'border-rose-400 bg-rose-100 text-rose-800' : 'border-rose-200 bg-rose-50 text-rose-700 hover:bg-rose-100']"
+        @click="toggleExpiringChip">
+        <i class="pi pi-id-card text-[10px]" /> ใบอนุญาตใกล้หมด
+      </button>
+      <button v-if="nearPromotionCount > 0" type="button" data-testid="chip-near-promotion"
+        class="inline-flex items-center gap-1.5 rounded-full border border-sky-300 bg-sky-50 px-3 py-1 text-xs font-medium text-sky-800 hover:bg-sky-100"
+        @click="goNearPromotion">
+        <i class="pi pi-chart-line text-[10px]" /> ใกล้เลื่อนระดับ {{ nearPromotionCount }}
+      </button>
+    </div>
 
     <section class="card p-4 grid grid-cols-1 md:grid-cols-7 gap-3 items-end">
       <div class="md:col-span-2">
@@ -296,18 +316,27 @@ function licenseStatus(expiry: string | null): { cls: string; label: string } {
               </td>
               <td class="px-4 py-2">
                 <span v-if="a.lastNoteAt" class="text-xs text-slate-600">
-                  {{ fmtDate(a.lastNoteAt) }}
+                  {{ fmtDateThai(a.lastNoteAt) }}
                   <span v-if="(a.noteCount ?? 0) > 1" class="text-[10px] text-slate-400">({{ a.noteCount }} โน้ต)</span>
                 </span>
                 <span v-else class="text-xs text-slate-300">—</span>
               </td>
               <td class="px-4 py-2 text-right" @click.stop>
-                <div class="flex justify-end gap-1.5">
+                <div class="flex items-center justify-end gap-1.5">
                   <button v-if="a.approvalStatus === 'pending'" type="button" class="rounded bg-emerald-600 px-2 py-1 text-xs text-white disabled:opacity-50" :disabled="busy === a.id" @click="approve(a)">อนุมัติ</button>
-                  <button type="button" class="rounded border border-slate-300 px-2 py-1 text-xs text-slate-600 hover:bg-slate-50" @click="editAgent(a.id)">แก้ไข</button>
-                  <button type="button"
-                    :class="['rounded px-2 py-1 text-xs disabled:opacity-50', a.active ? 'border border-rose-300 text-rose-600 hover:bg-rose-50' : 'border border-emerald-300 text-emerald-600 hover:bg-emerald-50']"
-                    :disabled="busy === a.id" @click="toggleActive(a)">{{ a.active ? 'ปิด' : 'เปิด' }}</button>
+                  <!-- Dangerous/secondary actions tucked behind ⋮ so the row-click
+                       (open agent) is the obvious primary action. -->
+                  <div class="relative">
+                    <button type="button" :data-testid="`agent-menu-${a.id}`" class="rounded border border-slate-200 px-1.5 py-1 text-slate-500 hover:bg-slate-50" @click="rowMenu = rowMenu === a.id ? null : a.id">
+                      <i class="pi pi-ellipsis-v text-xs" />
+                    </button>
+                    <div v-if="rowMenu === a.id" class="absolute right-0 z-10 mt-1 w-36 rounded-lg border border-slate-200 bg-white py-1 text-left text-xs shadow-lg" @click="rowMenu = null">
+                      <button type="button" class="block w-full px-3 py-1.5 text-left hover:bg-slate-50" @click="openAgent(a.id)"><i class="pi pi-eye text-[10px]" /> เปิดดูรายละเอียด</button>
+                      <button type="button"
+                        :class="['block w-full px-3 py-1.5 text-left hover:bg-slate-50', a.active ? 'text-rose-600' : 'text-emerald-600']"
+                        :disabled="busy === a.id" @click="toggleActive(a)">{{ a.active ? 'ปิดใช้งาน' : 'เปิดใช้งาน' }}</button>
+                    </div>
+                  </div>
                 </div>
               </td>
             </tr>

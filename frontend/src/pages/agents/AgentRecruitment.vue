@@ -7,18 +7,26 @@ import AgentsSubnav from './AgentsSubnav.vue'
 const { t } = useI18n()
 const store = useAgentStore()
 
+// When embedded in the per-agent page, the agent is FIXED via prop — no module
+// chrome, no agent dropdown. Standalone (module route) keeps the picker.
+const props = defineProps<{ agentId?: string; embedded?: boolean }>()
+
 onMounted(() => {
   void store.load()
 })
 
-const selectedAgentId = ref<string>(store.topLevelAgents[0]?.id ?? '')
+const pickedId = ref<string>(store.topLevelAgents[0]?.id ?? '')
+const selectedAgentId = computed<string>({
+  get: () => props.agentId ?? pickedId.value,
+  set: (v) => { pickedId.value = v },
+})
 
-// Set initial selection once the store loads.
+// Set initial selection once the store loads (standalone only).
 watch(
   () => store.topLevelAgents,
   (tops) => {
-    if (selectedAgentId.value === '' && tops.length > 0) {
-      selectedAgentId.value = tops[0].id
+    if (!props.agentId && pickedId.value === '' && tops.length > 0) {
+      pickedId.value = tops[0].id
     }
   },
 )
@@ -88,25 +96,27 @@ const recentClicks = computed(() => {
 
 <template>
   <div class="space-y-6">
-    <header>
-      <h1 class="text-2xl font-semibold text-slate-900">{{ t('agents.recruitment.title') }}</h1>
-      <p class="text-slate-500 text-sm mt-1">{{ t('agents.recruitment.subtitle') }}</p>
-    </header>
+    <template v-if="!embedded">
+      <header>
+        <h1 class="text-2xl font-semibold text-slate-900">{{ t('agents.recruitment.title') }}</h1>
+        <p class="text-slate-500 text-sm mt-1">{{ t('agents.recruitment.subtitle') }}</p>
+      </header>
 
-    <AgentsSubnav />
+      <AgentsSubnav />
 
-    <!-- Agent picker -->
-    <div class="card p-4">
-      <label class="block text-xs font-medium text-slate-600 mb-1.5">{{ t('agents.hierarchy.selectAgent') }}</label>
-      <select
-        v-model="selectedAgentId"
-        class="w-full md:max-w-md px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-      >
-        <option v-for="a in store.agents" :key="a.id" :value="a.id">
-          {{ a.firstName }} {{ a.lastName }} ({{ a.agentCode }}) — {{ t(`agents.levelShort.${a.level}`) }}
-        </option>
-      </select>
-    </div>
+      <!-- Agent picker — standalone module route only. -->
+      <div class="card p-4">
+        <label class="block text-xs font-medium text-slate-600 mb-1.5">{{ t('agents.hierarchy.selectAgent') }}</label>
+        <select
+          v-model="selectedAgentId"
+          class="w-full md:max-w-md px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
+        >
+          <option v-for="a in store.agents" :key="a.id" :value="a.id">
+            {{ a.firstName }} {{ a.lastName }} ({{ a.agentCode }}) — {{ t(`agents.levelShort.${a.level}`) }}
+          </option>
+        </select>
+      </div>
+    </template>
 
     <div v-if="selectedAgent">
       <!-- Current link / generate -->

@@ -32,3 +32,24 @@ export function fmtDateTime(iso: string | null | undefined): string {
   const pad = (n: number) => String(n).padStart(2, '0')
   return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`
 }
+
+/** ย่อชื่อเดือนไทย — index 0 = มกราคม. */
+const THAI_MONTHS_SHORT = [
+  'ม.ค.', 'ก.พ.', 'มี.ค.', 'เม.ย.', 'พ.ค.', 'มิ.ย.',
+  'ก.ค.', 'ส.ค.', 'ก.ย.', 'ต.ค.', 'พ.ย.', 'ธ.ค.',
+] as const
+
+/**
+ * ISO `YYYY-MM-DD` (หรือ datetime) → "23 ก.ย. 2569" — เดือนย่อไทย + ปี พ.ศ.
+ * (ค.ศ. + 543). อ่านง่ายกว่า DD/MM/YYYY สำหรับวันที่ที่มนุษย์ดู เช่น วันเข้าร่วม
+ * / วันที่สร้าง. คืน '' เมื่อ null/empty; คืน input เดิมเมื่อ parse ไม่ได้.
+ */
+export function fmtDateThai(iso: string | null | undefined): string {
+  if (!iso) return ''
+  const m = /^(\d{4})-(\d{2})-(\d{2})$/.exec(iso.slice(0, 10))
+  if (!m) return iso
+  const year = Number(m[1]) + 543
+  const month = THAI_MONTHS_SHORT[Number(m[2]) - 1] ?? m[2]
+  const day = Number(m[3])
+  return `${day} ${month} ${year}`
+}

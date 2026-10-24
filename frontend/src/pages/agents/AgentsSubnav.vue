@@ -4,12 +4,13 @@ import { fetchPendingAgents, fetchRankPromotions } from '../../api/agents'
 
 const props = defineProps<{ refreshKey?: number }>()
 
+// โมดูลตัวแทน = ข้อมูลระดับ "ทั้งระบบ" เท่านั้น 3 แท็บ. ข้อมูลรายคน (การรับสมัคร /
+// สายงานของคนนั้น) ย้ายไปหน้าตัวแทนรายคน; เกณฑ์ 10 ระดับย้ายไปตั้งค่าหน่วยงาน;
+// รายงานใกล้เลื่อนระดับเข้าถึงผ่าน chip ในหน้ารายชื่อ.
 const tabs = [
   { name: 'agents', to: '/agents', label: 'รายชื่อ', icon: 'pi pi-users' },
   { name: 'agents-approvals', to: '/agents/approvals', label: 'รออนุมัติ', icon: 'pi pi-verified', badge: true },
-  { name: 'agents-recruitment', to: '/agents/recruitment', label: 'การรับสมัคร', icon: 'pi pi-share-alt' },
-  { name: 'agents-level-progress', to: '/agents/level-progress', label: 'เลื่อนระดับ', icon: 'pi pi-chart-line' },
-  { name: 'agents-hierarchy', to: '/agents/hierarchy', label: 'สายงาน', icon: 'pi pi-sitemap' },
+  { name: 'agents-hierarchy', to: '/agents/hierarchy', label: 'ผังสายงานทั้งองค์กร', icon: 'pi pi-sitemap' },
 ]
 
 // Combined pending count (agents awaiting approval + promotions awaiting approval).

@@ -6,7 +6,6 @@ import FormField from '../../components/FormField.vue'
 import DateInput from '../../components/DateInput.vue'
 import AddressPicker from '../../components/AddressPicker.vue'
 import AgentPicker from '../../components/AgentPicker.vue'
-import AgentsSubnav from './AgentsSubnav.vue'
 import AgentDocUpload from '../../components/AgentDocUpload.vue'
 import {
   fetchAgent, createAgentFull, updateAgentFull, fetchRanks,
@@ -336,7 +335,6 @@ watch(() => route.params.id, () => { if (route.name === 'agent-edit') { void loa
 
 <template>
   <div>
-    <AgentsSubnav />
     <div class="mx-auto max-w-4xl px-4 py-5">
       <button type="button" class="mb-2 text-xs text-slate-500 hover:text-slate-700" @click="cancel">
         <i class="pi pi-arrow-left text-[10px]" /> {{ isEdit ? 'กลับไปหน้าข้อมูลตัวแทน' : 'กลับไปรายชื่อตัวแทน' }}

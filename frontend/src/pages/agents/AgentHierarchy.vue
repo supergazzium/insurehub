@@ -13,6 +13,11 @@ import { levelBadgeClass } from '../../utils/agentLevel'
 const { t } = useI18n()
 const store = useAgentStore()
 
+// Two modes:
+//   standalone (module route) → org-wide, search box instead of dropdown
+//   embedded (per-agent page) → subtree rooted at props.agentId, no chrome
+const props = defineProps<{ agentId?: string; embedded?: boolean }>()
+
 // Per-agent สายงาน rollup (team + own/subtree premium) for the tree nodes.
 const rollup = ref<Record<string, RollupEntry>>({})
 async function loadRollup(): Promise<void> {
@@ -59,13 +64,14 @@ onMounted(() => {
 // Pre-select from ?agent=<id> (e.g. the "ดูสายงาน" link on an agent's detail
 // page) so the tree opens focused on that agent.
 const route = useRoute()
+// Priority: embedded prop → ?agent= query → first top-level agent.
 const queryAgentId = typeof route.query.agent === 'string' ? route.query.agent : ''
-const selectedAgentId = ref<string>(queryAgentId || store.topLevelAgents[0]?.id || '')
+const selectedAgentId = ref<string>(props.agentId || queryAgentId || store.topLevelAgents[0]?.id || '')
 const expanded = ref<Set<string>>(new Set([selectedAgentId.value]))
 const directOnly = ref(false)
 
 // When the store finishes loading, pick the first top-level agent if nothing is
-// selected yet (unless a ?agent= query already pinned one).
+// selected yet (unless a prop/query already pinned one).
 watch(
   () => store.topLevelAgents,
   (tops) => {
@@ -75,6 +81,8 @@ watch(
     }
   },
 )
+// Keep in sync if the embedding page switches agents.
+watch(() => props.agentId, (id) => { if (id) selectAgent(id) })
 
 const selectedAgent = computed(() => store.getAgent(selectedAgentId.value))
 const uplineChain = computed(() => (selectedAgent.value ? store.getUplineChain(selectedAgent.value.id) : []))
@@ -113,32 +121,26 @@ function selectAgent(id: string) {
 
 <template>
   <div class="space-y-6">
-    <header class="flex items-start justify-between gap-3">
-      <div>
-        <h1 class="text-2xl font-semibold text-slate-900">{{ t('agents.hierarchy.title') }}</h1>
-        <p class="text-slate-500 text-sm mt-1">{{ t('agents.hierarchy.subtitle') }}</p>
+    <template v-if="!embedded">
+      <header class="flex items-start justify-between gap-3">
+        <div>
+          <h1 class="text-2xl font-semibold text-slate-900">{{ t('agents.hierarchy.title') }}</h1>
+          <p class="text-slate-500 text-sm mt-1">{{ t('agents.hierarchy.subtitle') }}</p>
+        </div>
+      </header>
+
+      <AgentsSubnav />
+
+      <!-- Search box (replaces the old dropdown) — org-wide, no re-pick needed. -->
+      <div class="card p-4">
+        <label class="block text-xs font-medium text-slate-600 mb-1.5">{{ t('agents.hierarchy.selectAgent') }}</label>
+        <AgentPicker :model-value="selectedAgentId" placeholder="ค้นหาตัวแทนเพื่อดูสายงาน" @update:model-value="(id: string) => id && selectAgent(id)" />
       </div>
-    </header>
-
-    <AgentsSubnav />
-
-    <!-- Agent picker -->
-    <div class="card p-4">
-      <label class="block text-xs font-medium text-slate-600 mb-1.5">{{ t('agents.hierarchy.selectAgent') }}</label>
-      <select
-        :value="selectedAgentId"
-        @change="selectAgent(($event.target as HTMLSelectElement).value)"
-        class="w-full md:max-w-md px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:border-brand-500 focus:ring-2 focus:ring-brand-100"
-      >
-        <option v-for="a in store.agents" :key="a.id" :value="a.id">
-          {{ a.firstName }} {{ a.lastName }} ({{ a.agentCode }}) — {{ t(`agents.levelShort.${a.level}`) }}
-        </option>
-      </select>
-    </div>
+    </template>
 
     <div v-if="selectedAgent">
-      <!-- Stats -->
-      <div class="grid grid-cols-3 gap-3 mb-6">
+      <!-- Stats — hidden in embedded mode (header already shows ลูกทีม). -->
+      <div v-if="!embedded" class="grid grid-cols-3 gap-3 mb-6">
         <div class="card p-4">
           <div class="text-xs text-slate-500">{{ t('agents.hierarchy.directCount') }}</div>
           <div class="text-2xl font-semibold text-slate-900 mt-1">{{ directDownline.length }}</div>
@@ -153,8 +155,8 @@ function selectAgent(id: string) {
         </div>
       </div>
 
-      <!-- Upline chain -->
-      <section class="card p-5 mb-6">
+      <!-- Upline chain — hidden in embedded mode (view page shows it above). -->
+      <section v-if="!embedded" class="card p-5 mb-6">
         <h3 class="text-sm font-semibold text-slate-900 mb-3 flex items-center gap-2">
           <i class="pi pi-chevron-up text-slate-400 text-xs" />
           {{ t('agents.hierarchy.uplineChain') }}
