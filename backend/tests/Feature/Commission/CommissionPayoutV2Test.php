@@ -43,16 +43,22 @@ class CommissionPayoutV2Test extends TestCase
         $this->seedMgm();
         $this->service = app(CommissionPayoutService::class);
 
-        // These tests are the SPEC for the unbuilt "3-stage / MGM" payout engine
-        // (upline override/referral line-splitting, pro-rata installment payout,
-        // CommissionLedger linkage, payee population + ภ.ง.ด. cert numbering,
-        // WHT PND3/53 reports, role permissions, clawback-split merge, portal
-        // earnings). The schema landed (migration commission_payout_v2) but the
-        // service code was never written — see backend/COMMISSION_SUITE_BREAKDOWN.md.
-        // Kept as a living spec and marked incomplete (green, not deleted) until
-        // the engine is built; un-skip each test as its feature lands.
-        $this->markTestIncomplete('3-stage/MGM payout engine not yet built — see COMMISSION_SUITE_BREAKDOWN.md');
+        // The 3-stage/MGM payout engine is built phase-by-phase (see
+        // backend/PAYOUT_3STAGE_P1_DESIGN.md + COMMISSION_SUITE_BREAKDOWN.md).
+        // A test is un-skipped once its phase lands; everything else stays
+        // incomplete (green, not deleted — still the living spec).
+        if (! in_array($this->name(), self::BUILT_TESTS, true)) {
+            $this->markTestIncomplete('3-stage payout engine: this phase not yet built — see backend/PAYOUT_3STAGE_P1_DESIGN.md');
+        }
     }
+
+    /** Tests whose feature phase has landed (un-skipped). Grows per phase. */
+    private const BUILT_TESTS = [
+        // P1 — ledger-driven collection core:
+        'test_upline_lines_are_paid_once_and_the_direct_base_is_never_paid_twice',
+        'test_engine_caps_the_commission_base_cumulatively_at_net_premium',
+        'test_a_payment_whose_commission_is_in_a_payout_cannot_be_voided',
+    ];
 
     private function conditions(bool $freelook, bool $insurer, bool $customer): void
     {
