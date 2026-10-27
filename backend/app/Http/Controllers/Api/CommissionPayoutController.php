@@ -13,6 +13,7 @@ use App\Models\CommissionPayoutBatchAgent;
 use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Gate;
 use Barryvdh\DomPDF\Facade\Pdf;
 use Illuminate\Support\Str;
 use RuntimeException;
@@ -58,6 +59,7 @@ class CommissionPayoutController extends Controller
      */
     public function byAgent(Request $request): JsonResponse
     {
+        Gate::authorize('payouts.view');
         $data = $request->validate([
             'fromDate' => ['nullable', 'date'],
             'toDate' => ['nullable', 'date', 'after_or_equal:fromDate'],
@@ -78,6 +80,7 @@ class CommissionPayoutController extends Controller
      */
     public function agentDetail(Request $request, int $agent): JsonResponse
     {
+        Gate::authorize('payouts.view');
         $data = $request->validate([
             'fromDate' => ['nullable', 'date'],
             'toDate' => ['nullable', 'date', 'after_or_equal:fromDate'],
@@ -89,6 +92,10 @@ class CommissionPayoutController extends Controller
             $data['fromDate'] ?? null,
             $data['toDate'] ?? null,
         );
+        $result['meta'] = [
+            'canPay' => (bool) $request->user()?->can('payouts.mark_paid'),
+            'canOverride' => (bool) $request->user()?->can('payouts.override'),
+        ];
 
         return response()->json($result);
     }
@@ -100,6 +107,7 @@ class CommissionPayoutController extends Controller
      */
     public function payAgent(Request $request, int $agent): JsonResponse
     {
+        Gate::authorize('payouts.mark_paid');
         $data = $request->validate([
             'paymentDate' => ['required', 'date'],
             'reference' => ['nullable', 'string', 'max:128'],
@@ -489,8 +497,12 @@ class CommissionPayoutController extends Controller
             abort(404, 'ไม่พบรายการของตัวแทนใน batch นี้');
         }
 
-        $pdf = $this->renderAgentPdf($data);
-        $filename = $this->pdfFilename($batch, $data);
+        // Version-aware: v2 batches render the rich commission-statement blade
+        // (payee/sections/totals), v1 the legacy commission-payout blade.
+        $pdf = ((int) ($data['version'] ?? 1) >= 2)
+            ? $this->docs->statement($data)
+            : $this->renderAgentPdf($data);
+        $filename = $this->docs->statementFilename($batch, $data);
 
         return $this->docs->respond($request, $pdf, $filename);
     }

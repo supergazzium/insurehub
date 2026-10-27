@@ -247,6 +247,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::patch('policies/{policy}/freelook', [PolicyFollowUpActionController::class, 'freelook']);
     Route::get('policies/{policy}/cancellation-review', [PolicyFollowUpActionController::class, 'showCancellationReview']);
     Route::patch('policies/{policy}/cancellation-review', [PolicyFollowUpActionController::class, 'cancellationReview']);
+    Route::post('policies/{policy}/payout-override', [PolicyFollowUpActionController::class, 'createPayoutOverride']);
+    Route::delete('policies/{policy}/payout-override', [PolicyFollowUpActionController::class, 'revokePayoutOverride']);
     Route::get('verifications', [VerificationController::class, 'index']);
     Route::get('verifications/{verification}', [VerificationController::class, 'show']);
     Route::post('verifications/{verification}/approve', [VerificationController::class, 'approve']);

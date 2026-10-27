@@ -66,6 +66,14 @@ class CommissionPayoutV2Test extends TestCase
         // P4 — pro-rata installment payment + waiting bucket (freelook/customer):
         'test_installment_policy_is_paid_pro_rata_and_the_rest_survives_a_date_filter',
         'test_freelook_blocks_a_life_policy_until_the_period_ends',
+        // P5 — measuring gap (may not all pass yet):
+        'test_insurer_condition_holds_lines_until_received_and_override_needs_a_reason_and_audit',
+        'test_permissions_are_enforced_and_the_finance_role_can_pay',
+        'test_a_policy_cancelled_after_batching_is_excluded_on_pay_and_its_ledger_released',
+        'test_cancelling_a_batch_releases_ledger_rows_and_merges_split_clawbacks',
+        'test_legacy_batches_keep_their_old_behaviour_and_block_a_repay',
+        'test_upline_clawback_follows_the_seller_ratio_and_is_zero_when_not_applicable',
+        'test_portal_earnings_show_ready_waiting_and_paid_history_with_own_documents',
     ];
 
     private function conditions(bool $freelook, bool $insurer, bool $customer): void

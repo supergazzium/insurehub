@@ -10,6 +10,9 @@ use App\Models\AuditEntry;
 use App\Models\CommissionPayoutAdjustment;
 use App\Models\Policy;
 use App\Models\PolicyEvent;
+use App\Models\PolicyPayoutOverride;
+use App\Services\Commission\PayoutEligibility;
+use Illuminate\Support\Facades\Gate;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\DB;
@@ -298,6 +301,80 @@ class PolicyFollowUpActionController extends Controller
             'uplines' => $uplines,
             'clawbacks' => $adjustments,
         ];
+    }
+
+    /**
+     * POST /policies/{policy}/payout-override — bypass the payout eligibility
+     * gates (freelook / insurer / customer-unpaid) for this policy. A reason is
+     * mandatory; the currently-blocking reasons are snapshotted into the audit
+     * so the override is always traceable to what it waved through.
+     */
+    public function createPayoutOverride(Request $request, Policy $policy): JsonResponse
+    {
+        $this->authorizeTenant($request, $policy);
+        Gate::authorize('payouts.override');
+        $data = $request->validate([
+            'reason' => ['required', 'string', 'min:1'],
+        ]);
+
+        // Snapshot what this override is bypassing RIGHT NOW (before it exists).
+        $gate = app(PayoutEligibility::class)->evaluate((int) $policy->tenant_id, [(int) $policy->id])[$policy->id] ?? null;
+        $bypassed = array_merge(
+            $gate['gates'] ?? [],
+            (($gate['customerReason'] ?? null) !== null) ? [$gate['customerReason']] : [],
+        );
+
+        $override = DB::transaction(function () use ($policy, $request, $data, $bypassed): PolicyPayoutOverride {
+            // One active override per policy — revoke any prior live one first.
+            PolicyPayoutOverride::query()
+                ->where('tenant_id', $policy->tenant_id)->where('policy_id', $policy->id)->whereNull('revoked_at')
+                ->update(['revoked_at' => now(), 'revoked_by_user_id' => $request->user()->id]);
+
+            $override = PolicyPayoutOverride::create([
+                'tenant_id' => $policy->tenant_id,
+                'policy_id' => $policy->id,
+                'reason' => $data['reason'],
+                'created_by_user_id' => $request->user()->id,
+            ]);
+
+            AuditEntry::create([
+                'tenant_id' => $policy->tenant_id,
+                'user_id' => $request->user()->id,
+                'occurred_at' => now(),
+                'actor' => $request->user()->name,
+                'action' => 'commission_payout.override',
+                'target' => 'policy:'.$policy->id,
+                'ip' => $request->ip(),
+                'result' => 'success',
+                'metadata' => ['reason' => $data['reason'], 'bypassed' => $bypassed],
+            ]);
+
+            return $override;
+        });
+
+        return response()->json(['data' => ['id' => (string) $override->id, 'bypassed' => $bypassed]], 201);
+    }
+
+    /** DELETE /policies/{policy}/payout-override — revoke every active override on the policy. */
+    public function revokePayoutOverride(Request $request, Policy $policy): JsonResponse
+    {
+        $this->authorizeTenant($request, $policy);
+        Gate::authorize('payouts.override');
+
+        $revoked = PolicyPayoutOverride::query()
+            ->where('tenant_id', $policy->tenant_id)->where('policy_id', $policy->id)->whereNull('revoked_at')
+            ->update(['revoked_at' => now(), 'revoked_by_user_id' => $request->user()->id]);
+
+        if ($revoked > 0) {
+            AuditEntry::create([
+                'tenant_id' => $policy->tenant_id, 'user_id' => $request->user()->id, 'occurred_at' => now(),
+                'actor' => $request->user()->name, 'action' => 'commission_payout.override_revoked',
+                'target' => 'policy:'.$policy->id, 'ip' => $request->ip(), 'result' => 'success',
+                'metadata' => ['revoked' => $revoked],
+            ]);
+        }
+
+        return response()->json(['data' => ['revoked' => $revoked]]);
     }
 
     private function authorizeTenant(Request $request, Policy $policy): void

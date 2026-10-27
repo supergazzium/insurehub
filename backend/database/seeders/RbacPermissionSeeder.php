@@ -51,6 +51,9 @@ class RbacPermissionSeeder extends Seeder
             $financeRole->permissions()->syncWithoutDetaching(
                 Permission::query()
                     ->where(fn ($q) => $q->where('key', 'like', 'payouts.%')->orWhere('key', 'like', 'receipts.%')->orWhere('key', 'like', 'payments.%'))
+                    // payouts.override forces a payout past the eligibility gates —
+                    // reserve it for wildcard (admin) roles, not finance operators.
+                    ->where('key', '!=', 'payouts.override')
                     ->pluck('id')->all()
             );
         }
