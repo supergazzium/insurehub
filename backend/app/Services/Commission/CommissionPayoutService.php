@@ -209,20 +209,14 @@ class CommissionPayoutService
             ->where('commission_ledgers.tenant_id', $tenantId)
             ->where('commission_ledgers.status', CommissionLedger::STATUS_UNSETTLED)
             ->whereNull('commission_ledgers.payout_batch_id')
-            // Exclude ledgers already snapshotted into a live batch item — covers
-            // DIRECT lines too (they're batched as `base` but never stamped
-            // payout_batch_id, so they'd otherwise reappear as "ready").
-            ->whereNotExists(function ($w) {
-                $w->select(DB::raw(1))
-                    ->from('commission_payout_batch_items as bi')
-                    ->join('commission_payout_batches as b', 'b.id', '=', 'bi.batch_id')
-                    ->whereColumn('bi.ledger_id', 'commission_ledgers.id')
-                    ->whereNotIn('b.status', [CommissionPayoutBatch::STATUS_CANCELLED, CommissionPayoutBatch::STATUS_REVERSED]);
-            })
             ->whereIn('commission_ledgers.payout_type', CommissionLedger::PAYABLE_TYPES)
             ->whereNull('p.deleted_at')
             ->where('p.status', '!=', 'cancelled')
-            ->when($from !== null, fn ($qq) => $qq->where('p.created_at', '>=', CarbonImmutable::parse($from, 'Asia/Bangkok')->startOfDay()))
+            // As-of cutoff on the policy's วันแจ้งงาน (created_at): a payout run
+            // pays every eligible commission for policies booked up to <to>.
+            // `from` is only the batch-label lower bound, NOT a selection gate —
+            // an already-earned, still-unpaid slice must survive a narrow or
+            // forward window (test "the rest survives a date filter").
             ->when($to !== null, fn ($qq) => $qq->where('p.created_at', '<', CarbonImmutable::parse($to, 'Asia/Bangkok')->addDay()->startOfDay()))
             ->when($agentId !== null, fn ($qq) => $qq->where('commission_ledgers.beneficiary_agent_id', $agentId))
             ->select([
@@ -242,13 +236,39 @@ class CommissionPayoutService
         $policyIds = $q->pluck('policy_id')->map(fn ($v) => (int) $v)->unique()->values()->all();
         $gates = $policyIds === [] ? [] : app(PayoutEligibility::class)->evaluate($tenantId, $policyIds);
 
+        // Cumulative amount already snapshotted per ledger by live (not
+        // cancelled/reversed) batches — the floor for the next increment so an
+        // installment policy is only ever paid the newly-earned slice.
+        $ledgerIds = $q->pluck('ledger_id')->map(fn ($v) => (int) $v)->unique()->values()->all();
+        $paidByLedger = $ledgerIds === [] ? collect() : CommissionPayoutBatchItem::query()
+            ->join('commission_payout_batches as b', 'b.id', '=', 'commission_payout_batch_items.batch_id')
+            ->whereIn('commission_payout_batch_items.ledger_id', $ledgerIds)
+            ->whereNotIn('b.status', [CommissionPayoutBatch::STATUS_CANCELLED, CommissionPayoutBatch::STATUS_REVERSED])
+            ->where('commission_payout_batch_items.item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)
+            ->groupBy('commission_payout_batch_items.ledger_id')
+            ->selectRaw('commission_payout_batch_items.ledger_id, SUM(commission_payout_batch_items.snapshot_agent_commission) as paid')
+            ->pluck('paid', 'commission_payout_batch_items.ledger_id');
+
         $ready = [];
         $waiting = [];
         foreach ($q as $r) {
             $gate = $gates[(int) $r->policy_id] ?? null;
-            $blocked = $gate !== null
-                && ($gate['override'] ?? null) === null
-                && (! empty($gate['gates']) || ($gate['customerReason'] ?? null) !== null);
+            $hasOverride = ($gate['override'] ?? null) !== null;
+            $gateReasons = $hasOverride ? [] : ($gate['gates'] ?? []);
+            // Hard gates (freelook / insurer) block the WHOLE line regardless of ratio.
+            $hardBlocked = $gateReasons !== [];
+
+            [$num, $den] = $gate['ratio'] ?? [1, 1];
+            $ratioLabel = $gate['ratioLabel'] ?? null;
+
+            // The engine already pro-rated by accruing ONE ledger row per
+            // payment, so the ledger amount IS the earned slice — never re-apply
+            // the ratio to it. $alreadyPaid only matters if a prior batch for the
+            // same ledger was cancelled/reversed (then this re-pays the gap).
+            $full = round((float) $r->amount, 2);
+            $alreadyPaid = round((float) ($paidByLedger[(int) $r->ledger_id] ?? 0), 2);
+            $payableNow = round($full - $alreadyPaid, 2);
+
             $line = [
                 'ledgerId' => (int) $r->ledger_id,
                 'policyId' => (int) $r->policy_id,
@@ -260,19 +280,30 @@ class CommissionPayoutService
                 'sourceAgentId' => $r->source_agent_id !== null ? (int) $r->source_agent_id : null,
                 'agentCode' => $r->agent_code,
                 'agentName' => $r->agent_name,
-                'amount' => round((float) $r->amount, 2),
+                'fullAmount' => $full,
+                'alreadyPaid' => $alreadyPaid,
+                'amount' => $payableNow,
+                'ratio' => [$num, $den],
+                'ratioLabel' => $ratioLabel,
                 'vatType' => $this->resolveVatType($r),
                 'agentKind' => $r->agent_kind,
                 'policyCreatedAt' => $r->policy_created_at,
                 'override' => $gate['override'] ?? null,
-                'reasons' => $gate['gates'] ?? [],
+                'reasons' => $gateReasons,
                 'raw' => $r,
             ];
-            if ($blocked) {
-                $line['reasons'] = array_merge($gate['gates'] ?? [], ($gate['customerReason'] ?? null) ? [$gate['customerReason']] : []);
-                $waiting[] = $line;
-            } else {
+
+            // Ready only when NOT hard-blocked AND there is a positive increment
+            // to pay this round. Everything else (freelook, customer-unpaid=0,
+            // future installments) is waiting.
+            if (! $hardBlocked && $payableNow > 0) {
                 $ready[] = $line;
+            } else {
+                $line['reasons'] = array_merge(
+                    $gateReasons,
+                    (! $hasOverride && ($gate['customerReason'] ?? null)) ? [$gate['customerReason']] : [],
+                );
+                $waiting[] = $line;
             }
         }
 
@@ -565,42 +596,77 @@ class CommissionPayoutService
      */
     public function agentDetail(int $tenantId, int $agentId, ?string $from = null, ?string $to = null): array
     {
-        $rows = $this->rows($tenantId, $from, $to, $agentId);
+        // v2 ledger-driven: ready lines are the pay-now increment (pro-rata of
+        // installments already paid); waiting lines are blocked (freelook /
+        // insurer / customer-unpaid) or the not-yet-earned installment remainder.
+        $lines = $this->collectLines($tenantId, $from, $to, $agentId);
+        $agent = null;
         $items = [];
         $total = 0.0;
-        $agent = null;
+        $waiting = [];
+        $waitingAmount = 0.0;
 
-        foreach ($rows as $row) {
-            $amt = $this->resolveAmount($row);
-            $lineTotal = round($amt['main'] + $amt['rider'], 2);
-            $total += $lineTotal;
+        $setAgent = function (array $l) use (&$agent): void {
             if ($agent === null) {
                 $agent = [
-                    'agentId' => (string) $row->agent_id,
-                    'agentCode' => $row->agent_code,
-                    'agentName' => $row->agent_name,
-                    'vatType' => $this->resolveVatType($row),
+                    'agentId' => (string) $l['beneficiaryAgentId'],
+                    'agentCode' => $l['agentCode'],
+                    'agentName' => $l['agentName'],
+                    'vatType' => $l['vatType'],
                 ];
             }
+        };
+
+        foreach ($lines['ready'] as $l) {
+            $setAgent($l);
+            $total += $l['amount'];
+            // The engine accrues one ledger slice per paid installment, so the
+            // not-yet-earned remainder for this policy line = (full expected
+            // commission) − (this earned slice). Derive the full expected from
+            // the slice and the installment ratio (e.g. 600 at 3/10 → 2000).
+            [$rn, $rd] = $l['ratio'] ?? [1, 1];
+            $fullExpected = ($rn > 0 && $rn < $rd) ? round($l['amount'] * $rd / $rn, 2) : $l['amount'];
+            $waitingAmount += max(0, round($fullExpected - $l['amount'], 2));
             $items[] = [
-                'policyId' => (int) $row->policy_id,
-                'policyNo' => $row->policy_no,
-                'applicationNo' => $row->application_no,
-                'basePremium' => round((float) ($row->main_premium ?? 0), 2),
-                'agentCommission' => round($amt['main'], 2),
-                'riderCommission' => round($amt['rider'], 2),
-                'amount' => $lineTotal,
-                'amountSource' => $amt['source'],
-                'policyDate' => $row->policy_created_at ? substr((string) $row->policy_created_at, 0, 10) : null,
+                'policyId' => $l['policyId'],
+                'policyNo' => $l['policyNo'],
+                'applicationNo' => $l['applicationNo'],
+                'lineType' => $l['lineType'],
+                'basePremium' => round((float) ($l['raw']->main_premium ?? 0), 2),
+                'agentCommission' => $l['amount'],
+                'amount' => $l['amount'],
+                'fullAmount' => $l['fullAmount'],
+                'ratioLabel' => $l['ratioLabel'],
+                'amountSource' => 'ledger',
+                'policyDate' => $l['policyCreatedAt'] ? substr((string) $l['policyCreatedAt'], 0, 10) : null,
+            ];
+        }
+
+        foreach ($lines['waiting'] as $l) {
+            $setAgent($l);
+            $remaining = round($l['fullAmount'] - $l['alreadyPaid'], 2);
+            $waitingAmount += max(0, $remaining);
+            $waiting[] = [
+                'policyId' => $l['policyId'],
+                'policyNo' => $l['policyNo'],
+                'applicationNo' => $l['applicationNo'],
+                'lineType' => $l['lineType'],
+                'amount' => $remaining,
+                'ratioLabel' => $l['ratioLabel'],
+                'reasons' => $l['reasons'],
+                'policyDate' => $l['policyCreatedAt'] ? substr((string) $l['policyCreatedAt'], 0, 10) : null,
             ];
         }
 
         return [
             'agent' => $agent,
             'items' => $items,
+            'waiting' => $waiting,
             'totals' => [
                 'itemCount' => count($items),
                 'totalAmount' => round($total, 2),
+                'waitingAmount' => round($waitingAmount, 2),
+                'waitingCount' => count($waiting),
             ],
         ];
     }
@@ -729,6 +795,10 @@ class CommissionPayoutService
                     'snapshot_rider_commission' => 0,
                     'snapshot_wht_rate' => self::WHT_RATE,
                     'snapshot_wht_amount' => $wht,
+                    'paid_ratio' => ($line['ratio'][1] ?? 0) > 0 ? round($line['ratio'][0] / $line['ratio'][1], 4) : null,
+                    'entitlement_amount' => $line['fullAmount'] ?? $amount,
+                    'ratio_label' => $line['ratioLabel'] ?? null,
+                    'condition_override' => ($line['override'] ?? null) !== null,
                     'amount_source' => 'ledger',
                     'item_status' => CommissionPayoutBatchItem::ITEM_PENDING,
                 ]);
@@ -1031,13 +1101,22 @@ class CommissionPayoutService
 
             foreach ($items as $item) {
                 // Guard: the policy must not have been paid by another live batch.
-                $paidElsewhere = CommissionPayoutBatchItem::query()
-                    ->where('policy_id', $item->policy_id)
+                // Double-pay guard. The unit paid at most once is the LEDGER
+                // SLICE (v2): one accrued row = one installment's commission. An
+                // installment policy legitimately spans several batches via
+                // different ledger_ids, so scope by ledger_id when present and
+                // fall back to policy_id for legacy (v1) items that have none.
+                $dupQuery = CommissionPayoutBatchItem::query()
                     ->where('batch_id', '!=', $batch->id)
                     ->where('item_status', CommissionPayoutBatchItem::ITEM_PAID)
-                    ->exists();
-                if ($paidElsewhere) {
-                    throw new RuntimeException("กรมธรรม์ #{$item->policy_id} ถูกจ่ายค่าคอมไปแล้วโดย batch อื่น");
+                    ->when(
+                        $item->ledger_id !== null,
+                        fn ($q) => $q->where('ledger_id', $item->ledger_id),
+                        fn ($q) => $q->whereNull('ledger_id')->where('policy_id', $item->policy_id),
+                    );
+                if ($dupQuery->exists()) {
+                    $label = $item->ledger_id !== null ? "รายการค่าคอม (ledger #{$item->ledger_id})" : "กรมธรรม์ #{$item->policy_id}";
+                    throw new RuntimeException("{$label} ถูกจ่ายค่าคอมไปแล้วโดย batch อื่น");
                 }
 
                 PolicyRebate::updateOrCreate(

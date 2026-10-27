@@ -63,6 +63,9 @@ class CommissionPayoutV2Test extends TestCase
         // ready-amount for uplines) are MIXED — they land with their later deps.
         // P3 — cert numbering + 50-ทวิ cert / statement PDFs + bank.csv + WHT report:
         'test_certificates_are_numbered_and_the_monthly_report_lists_withholding',
+        // P4 — pro-rata installment payment + waiting bucket (freelook/customer):
+        'test_installment_policy_is_paid_pro_rata_and_the_rest_survives_a_date_filter',
+        'test_freelook_blocks_a_life_policy_until_the_period_ends',
     ];
 
     private function conditions(bool $freelook, bool $insurer, bool $customer): void
