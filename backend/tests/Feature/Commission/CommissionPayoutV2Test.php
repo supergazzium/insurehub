@@ -58,6 +58,9 @@ class CommissionPayoutV2Test extends TestCase
         'test_upline_lines_are_paid_once_and_the_direct_base_is_never_paid_twice',
         'test_engine_caps_the_commission_base_cumulatively_at_net_premium',
         'test_a_payment_whose_commission_is_in_a_payout_cannot_be_voided',
+        // P2 — payee materialization: the 19 PayoutGoldenTest cases are the P2
+        // oracle (exact amounts). #7 (cancelled-on-pay exclusion) and #13 (portal
+        // ready-amount for uplines) are MIXED — they land with their later deps.
     ];
 
     private function conditions(bool $freelook, bool $insurer, bool $customer): void
@@ -88,7 +91,9 @@ class CommissionPayoutV2Test extends TestCase
 
     private function payBatch(CommissionPayoutBatch $batch, string $date = '2026-10-05'): CommissionPayoutBatch
     {
-        return $this->service->markPaid($this->service->approveBatch($batch, $this->admin->id), $date, 'TRF', $this->admin->id);
+        // Approve as a DIFFERENT user than the creator (admin) to satisfy the
+        // maker-checker guard (money-safety 1D).
+        return $this->service->markPaid($this->service->approveBatch($batch, $this->staff->id), $date, 'TRF', $this->admin->id);
     }
 
     public function test_upline_lines_are_paid_once_and_the_direct_base_is_never_paid_twice(): void
@@ -248,7 +253,7 @@ class CommissionPayoutV2Test extends TestCase
         $seller = $this->payoutAgent(1, $upline);
         $keep = $this->sellAndPay($seller);
         $drop = $this->sellAndPay($seller);
-        $batch = $this->service->approveBatch($this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id), $this->admin->id);
+        $batch = $this->service->approveBatch($this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id), $this->staff->id);
         $drop->update(['status' => 'cancelled']);
 
         try {

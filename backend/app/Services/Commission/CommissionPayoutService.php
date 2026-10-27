@@ -10,6 +10,7 @@ use App\Models\CommissionPayoutAdjustment;
 use App\Models\CommissionPayoutBatch;
 use App\Models\CommissionPayoutBatchAgent;
 use App\Models\CommissionPayoutBatchItem;
+use App\Models\CommissionPayoutPayee;
 use App\Models\PolicyRebate;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
@@ -33,6 +34,42 @@ class CommissionPayoutService
 
     /** Withholding-tax rate applied to agent commission (หัก ณ ที่จ่าย 3%). */
     public const WHT_RATE = 0.03;
+
+    /**
+     * Full payee money breakdown for one beneficiary — the exact golden-CSV rule
+     * (tests/fixtures/payout-golden.csv). `$gross` is the sum of the agent's
+     * commission lines; `$deduction` is any clawback/correction applied BEFORE
+     * tax. Returns all persisted payee amounts.
+     *
+     *   taxable = include: gross/1.07 · else: gross − deduction
+     *   vat     = include: gross − taxable · exclude: taxable × 7% · none: 0
+     *   total   = include: gross · exclude: taxable + vat · none: taxable
+     *   wht     = taxable × wht_rate
+     *   net     = total − wht
+     *
+     * @return array{taxable: float, vat: float, total: float, wht: float, net: float}
+     */
+    public static function payeeAmounts(float $gross, float $deduction, string $vatType, float $whtRate = self::WHT_RATE): array
+    {
+        $afterDeduct = round($gross - $deduction, 2);
+        if ($vatType === '3') {              // VAT Include — VAT carved out of gross
+            $taxable = round($afterDeduct / 1.07, 2);
+            $vat = round($afterDeduct - $taxable, 2);
+            $total = $afterDeduct;
+        } elseif ($vatType === '2') {        // VAT Exclude — VAT added on top
+            $taxable = $afterDeduct;
+            $vat = round($afterDeduct * 0.07, 2);
+            $total = round($afterDeduct + $vat, 2);
+        } else {                             // non-VAT
+            $taxable = $afterDeduct;
+            $vat = 0.0;
+            $total = $afterDeduct;
+        }
+        $wht = round($taxable * $whtRate, 2);
+        $net = round($total - $wht, 2);
+
+        return ['taxable' => $taxable, 'vat' => $vat, 'total' => $total, 'wht' => $wht, 'net' => $net];
+    }
 
     /**
      * Eligible-item query, shared by preview() and createBatch() so the
@@ -752,6 +789,18 @@ class CommissionPayoutService
                 'total_amount' => round($total, 2),
             ]);
 
+            // Attach pending deductions (clawback etc.) for this batch's agents
+            // so they reduce the payee's taxable base (golden G19).
+            CommissionPayoutAdjustment::query()
+                ->where('tenant_id', $tenantId)
+                ->whereNull('batch_id')
+                ->where('status', CommissionPayoutAdjustment::STATUS_PENDING)
+                ->whereIn('agent_id', array_keys($byAgent))
+                ->update(['batch_id' => $batch->id]);
+
+            // P2: materialize payee rows (base/override/referral split + VAT/WHT).
+            $this->materializePayees($batch->fresh());
+
             $this->audit($tenantId, $userId, 'commission_payout.create', "batch:{$batch->id}", [
                 'from' => $from, 'to' => $to, 'agents' => count($byAgent),
                 'items' => $lines->count(), 'amount' => round($total, 2),
@@ -759,6 +808,80 @@ class CommissionPayoutService
 
             return $batch->fresh();
         });
+    }
+
+    /**
+     * Materialize one CommissionPayoutPayee per beneficiary from the batch's
+     * line-typed items + attached deductions, applying the golden VAT/WHT rule.
+     * Idempotent (upsert by batch_id+agent_id) so it can run at create AND
+     * re-run at approve to pick up adjustments. P2 of the 3-stage engine.
+     */
+    public function materializePayees(CommissionPayoutBatch $batch): void
+    {
+        $items = $batch->items()->where('item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)->get();
+        if ($items->isEmpty()) {
+            return;
+        }
+        $agentIds = $items->pluck('agent_id')->filter()->unique()->values()->all();
+        $agents = \App\Models\Agent::query()->whereIn('id', $agentIds)
+            ->get(['id', 'agent_code', 'first_name', 'last_name', 'kind', 'juristic_name', 'tax_id', 'id_card', 'address', 'has_vat', 'vat_mode', 'vat_type', 'bank_name_text', 'bank_account_no', 'bank_account_name'])
+            ->keyBy('id');
+
+        // Deductions per agent: clawback / special_deduct / correction attached to
+        // this batch, applied before tax (golden G19).
+        $deductByAgent = $batch->adjustments()
+            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_CLAWBACK, CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
+            ->get()->groupBy('agent_id')->map(fn ($g) => round((float) $g->sum('amount'), 2));
+
+        foreach ($items->groupBy('agent_id') as $agentId => $agentItems) {
+            if (! $agentId) {
+                continue;
+            }
+            $agent = $agents->get((int) $agentId);
+            $base = 0.0; $override = 0.0; $referral = 0.0;
+            foreach ($agentItems as $it) {
+                $amt = (float) $it->snapshot_agent_commission;
+                match ($it->line_type) {
+                    'referral' => $referral += $amt,
+                    'override' => $override += $amt,
+                    default => $base += $amt,
+                };
+            }
+            $gross = round($base + $override + $referral, 2);
+            $deduction = (float) ($deductByAgent[$agentId] ?? 0);
+            $vatType = $agent ? $this->resolveVatType($agent) : '1';
+            $m = self::payeeAmounts($gross, $deduction, $vatType);
+            $isCorp = ($agent?->kind ?? 'individual') === 'corporate';
+
+            CommissionPayoutPayee::updateOrCreate(
+                ['batch_id' => $batch->id, 'agent_id' => (int) $agentId],
+                [
+                    'tenant_id' => $batch->tenant_id,
+                    'agent_code' => $agent?->agent_code,
+                    'payee_name' => $isCorp ? $agent?->juristic_name : trim(($agent?->first_name ?? '').' '.($agent?->last_name ?? '')),
+                    'payee_kind' => $agent?->kind ?? 'individual',
+                    'payee_tax_id' => $isCorp ? $agent?->tax_id : $agent?->id_card,
+                    'payee_address' => $agent?->address,
+                    'vat_type' => $vatType,
+                    'wht_rate' => self::WHT_RATE * 100,   // stored as percent (3.00)
+                    'wht_form' => $isCorp ? CommissionPayoutPayee::FORM_PND53 : CommissionPayoutPayee::FORM_PND3,
+                    'base_amount' => round($base, 2),
+                    'self_mgmt_amount' => 0,
+                    'referral_amount' => round($referral, 2),
+                    'override_amount' => round($override, 2),
+                    'gross_amount' => $gross,
+                    'deduction_amount' => $deduction,
+                    'taxable_amount' => $m['taxable'],
+                    'vat_amount' => $m['vat'],
+                    'total_amount' => $m['total'],
+                    'wht_amount' => $m['wht'],
+                    'net_amount' => $m['net'],
+                    'bank_name' => $agent?->bank_name_text,
+                    'bank_account_no' => $agent?->bank_account_no,
+                    'bank_account_name' => $agent?->bank_account_name,
+                ],
+            );
+        }
     }
 
     public function addAdjustment(
@@ -972,6 +1095,10 @@ class CommissionPayoutService
             'approved_by_user_id' => $userId,
             'approved_at' => now(),
         ]);
+        // Re-freeze payees at approval so they reflect any exclude/adjust since create.
+        if ((int) $batch->calc_version === self::CALC_VERSION) {
+            $this->materializePayees($batch->fresh());
+        }
         $this->audit($batch->tenant_id, $userId, 'commission_payout.approve', "batch:{$batch->id}", []);
 
         return $batch->fresh();

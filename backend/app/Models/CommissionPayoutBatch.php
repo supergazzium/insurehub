@@ -55,6 +55,12 @@ class CommissionPayoutBatch extends Model
         return $this->hasMany(CommissionPayoutBatchAgent::class, 'batch_id');
     }
 
+    /** Tax-payee rows (one per beneficiary) — the 50-ทวิ / PND source. */
+    public function payees(): HasMany
+    {
+        return $this->hasMany(CommissionPayoutPayee::class, 'batch_id');
+    }
+
     /** The batch this one was created to correct/re-pay (reversal → re-issue). */
     public function reissuedFrom(): BelongsTo
     {
