@@ -61,6 +61,8 @@ class CommissionPayoutV2Test extends TestCase
         // P2 — payee materialization: the 19 PayoutGoldenTest cases are the P2
         // oracle (exact amounts). #7 (cancelled-on-pay exclusion) and #13 (portal
         // ready-amount for uplines) are MIXED — they land with their later deps.
+        // P3 — cert numbering + 50-ทวิ cert / statement PDFs + bank.csv + WHT report:
+        'test_certificates_are_numbered_and_the_monthly_report_lists_withholding',
     ];
 
     private function conditions(bool $freelook, bool $insurer, bool $customer): void

@@ -12,6 +12,7 @@ use App\Models\CommissionPayoutBatchAgent;
 use App\Models\CommissionPayoutBatchItem;
 use App\Models\CommissionPayoutPayee;
 use App\Models\PolicyRebate;
+use App\Support\PayoutTax;
 use Carbon\CarbonImmutable;
 use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
@@ -924,6 +925,85 @@ class CommissionPayoutService
     }
 
     /**
+     * Assign sequential 50-ทวิ certificate numbers to every payee in a just-paid
+     * batch. Numbers run per tenant+Buddhist-year, row-locked so concurrent
+     * batches never collide (mirrors the REC- receipt sequence). Already-numbered
+     * payees are left untouched (idempotent on re-pay). Must run inside the
+     * markPaid transaction.
+     */
+    private function assignCertNumbers(CommissionPayoutBatch $batch, string $paymentDate): void
+    {
+        $payees = $batch->payees()->whereNull('cert_no')->orderBy('id')->get();
+        if ($payees->isEmpty()) {
+            return;
+        }
+        $certDate = CarbonImmutable::parse($paymentDate, 'Asia/Bangkok');
+        $year = (int) $certDate->year + 543; // Buddhist year (พ.ศ.) — e.g. 2026 → 2569.
+
+        // Row-lock (or create) this tenant+year sequence so the increment is atomic.
+        $seqRow = DB::table('tax_cert_sequences')
+            ->where('tenant_id', $batch->tenant_id)->where('year', $year)
+            ->lockForUpdate()->first();
+        if ($seqRow === null) {
+            DB::table('tax_cert_sequences')->insert([
+                'tenant_id' => $batch->tenant_id, 'year' => $year, 'last_no' => 0,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $seqRow = DB::table('tax_cert_sequences')
+                ->where('tenant_id', $batch->tenant_id)->where('year', $year)
+                ->lockForUpdate()->first();
+        }
+        $next = (int) $seqRow->last_no;
+
+        foreach ($payees as $payee) {
+            $next++;
+            $payee->update([
+                'cert_book' => $year,
+                'cert_no' => $next,
+                'cert_date' => $certDate->toDateString(),
+            ]);
+        }
+
+        DB::table('tax_cert_sequences')
+            ->where('tenant_id', $batch->tenant_id)->where('year', $year)
+            ->update(['last_no' => $next, 'updated_at' => now()]);
+    }
+
+    /**
+     * View-model for the 50-ทวิ withholding-tax certificate (pdf.wht-certificate).
+     * Pulls the frozen payee figures; the tax id is decrypted by the model cast.
+     */
+    public function certificateData(CommissionPayoutPayee $payee): array
+    {
+        $tenant = $payee->batch?->tenant;
+
+        return [
+            'batchId' => (int) $payee->batch_id,
+            'book' => $payee->cert_book,
+            'number' => $payee->cert_no,
+            'label' => $payee->certificateLabel(),
+            'date' => $payee->cert_date?->format('d/m/Y'),
+            'form' => $payee->wht_form,
+            'company' => [
+                'name' => $tenant?->name ?? '',
+                'taxId' => $tenant?->tax_id,
+                'address' => $tenant?->address,
+            ],
+            'payee' => [
+                'name' => $payee->payee_name,
+                'code' => $payee->agent_code,
+                'kind' => $payee->payee_kind,
+                'taxId' => $payee->payee_tax_id,
+                'address' => $payee->payee_address,
+            ],
+            'rate' => number_format((float) $payee->wht_rate, 2),
+            'paidAmount' => number_format((float) $payee->taxable_amount, 2),
+            'whtAmount' => number_format((float) $payee->wht_amount, 2),
+            'whtText' => PayoutTax::bahtText((float) $payee->wht_amount),
+        ];
+    }
+
+    /**
      * Mark the whole batch paid — atomic. Writes the paid marker + date into
      * policy_rebates for every item's policy (updateOrCreate, since the rebate
      * row may not exist yet), flips items + batch to paid, and audits.
@@ -989,6 +1069,9 @@ class CommissionPayoutService
             CommissionLedger::where('payout_batch_id', $batch->id)
                 ->where('status', CommissionLedger::STATUS_UNSETTLED)
                 ->update(['status' => CommissionLedger::STATUS_SETTLED, 'paid_at' => now()]);
+
+            // v2: stamp sequential 50-ทวิ certificate numbers on this batch's payees.
+            $this->assignCertNumbers($batch, $paymentDate);
 
             $batch->update([
                 'status' => CommissionPayoutBatch::STATUS_PAID,

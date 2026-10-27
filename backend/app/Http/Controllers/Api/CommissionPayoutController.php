@@ -6,7 +6,11 @@ namespace App\Http\Controllers\Api;
 
 use App\Http\Controllers\Controller;
 use App\Models\CommissionPayoutBatch;
+use App\Models\CommissionPayoutPayee;
 use App\Services\Commission\CommissionPayoutService;
+use App\Services\Commission\PayoutDocuments;
+use App\Models\CommissionPayoutBatchAgent;
+use Carbon\CarbonImmutable;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Barryvdh\DomPDF\Facade\Pdf;
@@ -23,8 +27,10 @@ use ZipArchive;
  */
 class CommissionPayoutController extends Controller
 {
-    public function __construct(private readonly CommissionPayoutService $service)
-    {
+    public function __construct(
+        private readonly CommissionPayoutService $service,
+        private readonly PayoutDocuments $docs,
+    ) {
     }
 
     private function tenantId(Request $request): int
@@ -486,7 +492,103 @@ class CommissionPayoutController extends Controller
         $pdf = $this->renderAgentPdf($data);
         $filename = $this->pdfFilename($batch, $data);
 
-        return $pdf->download($filename);
+        return $this->docs->respond($request, $pdf, $filename);
+    }
+
+    /** GET /commission-payout-batches/{batch}/payees/{payee}/certificate — 50-ทวิ WHT certificate. */
+    public function certificate(Request $request, CommissionPayoutBatch $batch, CommissionPayoutPayee $payee): Response|JsonResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        abort_unless((int) $payee->batch_id === (int) $batch->id, 404);
+        abort_if($payee->cert_no === null, 404, 'ยังไม่ได้ออกเลขหนังสือรับรอง (ต้องจ่าย batch ก่อน)');
+
+        return $this->docs->respond($request, $this->docs->certificate($payee), $this->docs->certificateFilename($payee));
+    }
+
+    /** GET /commission-payout-batches/{batch}/bank.csv — net-transfer import file (one row per payee). */
+    public function bankCsv(Request $request, CommissionPayoutBatch $batch): StreamedResponse
+    {
+        $this->authorizeTenant($request, $batch);
+        $payees = $batch->payees()->orderBy('agent_code')->get();
+
+        $headers = ['รหัสตัวแทน', 'ชื่อบัญชี', 'ธนาคาร', 'เลขบัญชี', 'ยอดโอนสุทธิ'];
+        $filename = "BankTransfer-{$batch->id}.csv";
+
+        return response()->streamDownload(function () use ($headers, $payees): void {
+            $out = fopen('php://output', 'w');
+            fwrite($out, "\xEF\xBB\xBF"); // UTF-8 BOM for Excel/Thai
+            fputcsv($out, $headers);
+            foreach ($payees as $p) {
+                fputcsv($out, [
+                    $p->agent_code,
+                    $p->bank_account_name,
+                    $p->bank_name,
+                    $p->bank_account_no,
+                    number_format((float) $p->net_amount, 2, '.', ''),
+                ]);
+            }
+            fclose($out);
+        }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+    }
+
+    /**
+     * GET /commission-payout-batches/wht-report?month=YYYY-MM&form=pnd3|pnd53[&format=csv]
+     * Monthly withholding-tax filing report sourced from paid payees — one row
+     * per payee of the requested form, plus totals (count + Σ wht). A standalone
+     * route (not {batch}-scoped) so finance can pull the whole month at once.
+     */
+    public function whtReport(Request $request): JsonResponse|StreamedResponse
+    {
+        $data = $request->validate([
+            'month' => ['required', 'date_format:Y-m'],
+            'form' => ['required', 'in:pnd3,pnd53'],
+            'format' => ['nullable', 'in:csv'],
+        ]);
+        $start = CarbonImmutable::createFromFormat('Y-m-d', $data['month'].'-01', 'Asia/Bangkok')->startOfMonth();
+        $end = $start->endOfMonth();
+
+        $payees = CommissionPayoutPayee::query()
+            ->join('commission_payout_batches as b', 'b.id', '=', 'commission_payout_payees.batch_id')
+            ->where('commission_payout_payees.tenant_id', $this->tenantId($request))
+            ->where('commission_payout_payees.wht_form', $data['form'])
+            ->where('b.status', CommissionPayoutBatch::STATUS_PAID)
+            ->whereBetween('b.payment_date', [$start->toDateString(), $end->toDateString()])
+            ->orderBy('commission_payout_payees.cert_no')
+            ->select('commission_payout_payees.*')
+            ->get();
+
+        $rows = $payees->map(fn (CommissionPayoutPayee $p): array => [
+            'certNo' => $p->certificateLabel(),
+            'agentCode' => $p->agent_code,
+            'payeeName' => $p->payee_name,
+            'taxId' => $p->payee_tax_id,
+            'amount' => (float) $p->taxable_amount,
+            'wht' => (float) $p->wht_amount,
+            'certDate' => $p->cert_date?->toDateString(),
+        ])->values();
+
+        $totals = [
+            'count' => $rows->count(),
+            'amount' => round((float) $payees->sum('taxable_amount'), 2),
+            'wht' => round((float) $payees->sum('wht_amount'), 2),
+        ];
+
+        if (($data['format'] ?? null) === 'csv') {
+            $label = CommissionPayoutPayee::FORM_LABELS[$data['form']] ?? $data['form'];
+            $filename = "WHT-{$label}-{$data['month']}.csv";
+
+            return response()->streamDownload(function () use ($rows): void {
+                $out = fopen('php://output', 'w');
+                fwrite($out, "\xEF\xBB\xBF");
+                fputcsv($out, ['เลขที่หนังสือ', 'รหัสตัวแทน', 'ชื่อผู้ถูกหักภาษี', 'เลขผู้เสียภาษี', 'ยอดก่อนหัก', 'ภาษีหัก ณ ที่จ่าย', 'วันที่']);
+                foreach ($rows as $r) {
+                    fputcsv($out, [$r['certNo'], $r['agentCode'], $r['payeeName'], $r['taxId'], number_format($r['amount'], 2, '.', ''), number_format($r['wht'], 2, '.', ''), $r['certDate']]);
+                }
+                fclose($out);
+            }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
+        }
+
+        return response()->json(['data' => ['form' => $data['form'], 'month' => $data['month'], 'rows' => $rows, 'totals' => $totals]]);
     }
 
     /** POST /commission-payout-batches/{batch}/generate-pdfs — ZIP of all (or selected) agents. */

@@ -165,6 +165,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('commission-payout-batches/history', [CommissionPayoutController::class, 'history']);
     Route::get('commission-payout-batches/summary', [CommissionPayoutController::class, 'summary']);
     Route::get('commission-payout-batches/find-by-reference', [CommissionPayoutController::class, 'findByReference']);
+    Route::get('commission-payout-batches/wht-report', [CommissionPayoutController::class, 'whtReport']);
     Route::get('commission-payout-batches', [CommissionPayoutController::class, 'index']);
     Route::post('commission-payout-batches', [CommissionPayoutController::class, 'store']);
     Route::get('commission-payout-batches/{batch}', [CommissionPayoutController::class, 'show']);
