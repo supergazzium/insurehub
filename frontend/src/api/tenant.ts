@@ -1,7 +1,7 @@
 import { api, type Single } from './client'
 
 export interface CustomerTierSetting {
-  key: 'vip' | 'gold' | 'silver'
+  key: 'black_diamond' | 'diamond' | 'platinum' | 'gold' | 'silver'
   label: string
   min: number | null
 }

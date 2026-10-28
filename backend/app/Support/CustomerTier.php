@@ -10,12 +10,16 @@ final class CustomerTier
 {
     public const SALES_STATUSES = ['issued', 'active', 'expired', 'lapsed'];
 
-    public const KEYS = ['vip', 'gold', 'silver'];
+    public const KEYS = ['black_diamond', 'diamond', 'platinum', 'gold', 'silver'];
 
+    // Customer wealth tiers (internal) — by rolling 1-year accumulated premium.
+    // Source: "การกำหนด Tier ลูกค้า" spec (Sheet1). I_Silver is the floor (min 0).
     public const DEFAULTS = [
-        ['key' => 'vip', 'label' => 'VIP', 'min' => 100000],
-        ['key' => 'gold', 'label' => 'Gold', 'min' => 50000],
-        ['key' => 'silver', 'label' => 'Silver', 'min' => 20000],
+        ['key' => 'black_diamond', 'label' => 'I_Black Diamond', 'min' => 700001],
+        ['key' => 'diamond', 'label' => 'I_Diamond', 'min' => 300001],
+        ['key' => 'platinum', 'label' => 'I_Platinum', 'min' => 100001],
+        ['key' => 'gold', 'label' => 'I_Gold', 'min' => 15001],
+        ['key' => 'silver', 'label' => 'I_Silver', 'min' => 0],
     ];
 
     public static function forTenant(?Tenant $tenant): array
