@@ -498,22 +498,36 @@ class CommissionPayoutController extends Controller
     }
 
     /** GET /commission-payout-batches/{batch}/agents/{code}/pdf — one agent. */
-    public function agentPdf(Request $request, CommissionPayoutBatch $batch, string $code): Response
+    public function agentPdf(Request $request, CommissionPayoutBatch $batch, string $code, ?string $doc = null): Response
     {
         $this->authorizeTenant($request, $batch);
-        $data = $this->service->buildAgentPdfData($batch, null, $code);
+        $data = $this->service->buildAgentPdfData($batch, null, $code, $doc);
         if ($data === null) {
             abort(404, 'ไม่พบรายการของตัวแทนใน batch นี้');
         }
 
         // Version-aware: v2 batches render the rich commission-statement blade
-        // (payee/sections/totals), v1 the legacy commission-payout blade.
+        // (payee/sections/totals), v1 the legacy commission-payout blade. The
+        // optional $doc (direct|referral) splits the v2 statement into the two
+        // separate documents.
         $pdf = ((int) ($data['version'] ?? 1) >= 2)
             ? $this->docs->statement($data)
             : $this->renderAgentPdf($data);
         $filename = $this->docs->statementFilename($batch, $data);
 
         return $this->docs->respond($request, $pdf, $filename);
+    }
+
+    /** Own-sale (direct) commission PDF only. */
+    public function agentPdfDirect(Request $request, CommissionPayoutBatch $batch, string $code): Response
+    {
+        return $this->agentPdf($request, $batch, $code, 'direct');
+    }
+
+    /** Referral + position commission PDF only. */
+    public function agentPdfReferral(Request $request, CommissionPayoutBatch $batch, string $code): Response
+    {
+        return $this->agentPdf($request, $batch, $code, 'referral');
     }
 
     /** GET /commission-payout-batches/{batch}/payees/{payee}/certificate — 50-ทวิ WHT certificate. */

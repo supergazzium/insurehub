@@ -66,6 +66,8 @@ class CommissionPayoutV2Test extends TestCase
         // P4 — pro-rata installment payment + waiting bucket (freelook/customer):
         'test_installment_policy_is_paid_pro_rata_and_the_rest_survives_a_date_filter',
         'test_freelook_blocks_a_life_policy_until_the_period_ends',
+        // 6-PDF split — direct-sale vs referral statements, per-doc tax:
+        'test_statement_splits_into_direct_and_referral_with_independent_totals',
         // P5 — measuring gap (may not all pass yet):
         'test_insurer_condition_holds_lines_until_received_and_override_needs_a_reason_and_audit',
         'test_permissions_are_enforced_and_the_finance_role_can_pay',
@@ -394,4 +396,39 @@ class CommissionPayoutV2Test extends TestCase
         $this->assertStringStartsWith('JVBER', $this->getJson("/api/v1/me/agent/payouts/{$batch->id}/statement?as=base64")->assertOk()->json('data.base64'));
         $this->getJson("/api/v1/me/agent/payouts/{$batch->id}/certificate?as=base64")->assertOk();
     }
+
+    public function test_statement_splits_into_direct_and_referral_with_independent_totals(): void
+    {
+        $upline = $this->payoutAgent(1);
+        $seller = $this->payoutAgent(1, $upline);
+        $this->sellAndPay($seller); // seller: DIRECT(base); upline: override/referral
+        $batch = $this->payBatch($this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id));
+
+        // The upline has override + referral (no base of their own in this batch).
+        $full = $this->service->buildAgentPdfData($batch->fresh(), $upline->id, null);           // combined
+        $direct = $this->service->buildAgentPdfData($batch->fresh(), $upline->id, null, 'direct');
+        $referral = $this->service->buildAgentPdfData($batch->fresh(), $upline->id, null, 'referral');
+
+        // Direct doc: no base lines for the upline → empty sections, zero total.
+        $this->assertSame('direct', $direct['doc']);
+        $this->assertSame([], $direct['sections']); // upline has no own-sale lines
+        $this->assertEquals(0, $direct['totals']['commission']);
+
+        // Referral doc: carries the override + referral, with its OWN wht/net.
+        $this->assertSame('referral', $referral['doc']);
+        $types = array_column($referral['sections'], 'type');
+        $this->assertNotContains('base', $types);
+        $this->assertGreaterThan(0, $referral['totals']['commission']);
+
+        // No double-count: direct.commission + referral.commission == combined.
+        $this->assertEqualsWithDelta(
+            (float) $full['totals']['commission'],
+            (float) $direct['totals']['commission'] + (float) $referral['totals']['commission'],
+            0.01,
+        );
+        // Each doc's WHT is computed on its own base (sum == the combined WHT here
+        // since direct is zero for the upline).
+        $this->assertEqualsWithDelta((float) $full['totals']['wht'], (float) $referral['totals']['wht'], 0.01);
+    }
+
 }

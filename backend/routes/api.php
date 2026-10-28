@@ -116,6 +116,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('me/agent/downline', [MeAgentController::class, 'downline']);
     Route::get('me/agent/relations', [MeAgentController::class, 'relations']);
     Route::get('me/agent/earnings', [MeAgentController::class, 'earnings']);
+    Route::get('me/agent/payouts/{batch}/statement/direct', [MeAgentController::class, 'payoutStatementDirect']);
+    Route::get('me/agent/payouts/{batch}/statement/referral', [MeAgentController::class, 'payoutStatementReferral']);
     Route::get('me/agent/payouts/{batch}/statement', [MeAgentController::class, 'payoutStatement']);
     Route::get('me/agent/payouts/{batch}/certificate', [MeAgentController::class, 'payoutCertificate']);
 
@@ -176,6 +178,8 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('commission-payout-batches/{batch}/approve', [CommissionPayoutController::class, 'approve']);
     Route::post('commission-payout-batches/{batch}/unapprove', [CommissionPayoutController::class, 'unapprove']);
     Route::post('commission-payout-batches/{batch}/generate-pdfs', [CommissionPayoutController::class, 'generatePdfs']);
+    Route::get('commission-payout-batches/{batch}/agents/{code}/pdf/direct', [CommissionPayoutController::class, 'agentPdfDirect']);
+    Route::get('commission-payout-batches/{batch}/agents/{code}/pdf/referral', [CommissionPayoutController::class, 'agentPdfReferral']);
     Route::get('commission-payout-batches/{batch}/agents/{code}/pdf', [CommissionPayoutController::class, 'agentPdf']);
     Route::get('commission-payout-batches/{batch}/export.csv', [CommissionPayoutController::class, 'exportCsv']);
     Route::get('commission-payout-batches/{batch}/bank.csv', [CommissionPayoutController::class, 'bankCsv']);

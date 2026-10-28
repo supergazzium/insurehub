@@ -237,8 +237,8 @@ export function fetchEarnings() {
   return api.get<EarningsResponse>('me/agent/earnings')
 }
 
-export function myStatementPath(batchId: string): string {
-  return `me/agent/payouts/${batchId}/statement`
+export function myStatementPath(batchId: string, doc?: 'direct' | 'referral'): string {
+  return `me/agent/payouts/${batchId}/statement${doc ? '/' + doc : ''}`
 }
 
 export function myCertificatePath(batchId: string): string {

@@ -19,6 +19,8 @@
   };
   $vatLabel = ['1' => 'ไม่จดทะเบียน VAT', '2' => 'จด VAT — บวก VAT 7% เพิ่ม', '3' => 'จด VAT — VAT 7% รวมอยู่ในยอด'][$vatType] ?? 'ไม่จดทะเบียน VAT';
   $vatTag = ['1' => 'Non VAT', '2' => 'VAT-EX', '3' => 'VAT-IN'][$vatType] ?? 'Non VAT';
+  $doc = $doc ?? null;
+  $docName = ['direct' => 'ค่าคอมมิชชั่นขายเอง', 'referral' => 'ค่าแนะนำ / ค่าตำแหน่ง'][$doc ?? ''] ?? 'ใบแจ้งการจ่ายค่าคอมมิชชั่น';
   $statusLabel = ['DRAFT' => 'ร่าง', 'APPROVED' => 'อนุมัติแล้ว', 'PAID' => 'จ่ายแล้ว', 'CANCELLED' => 'ยกเลิก'][$batch['status']] ?? $batch['status'];
 @endphp
 
@@ -30,7 +32,7 @@
 </div>
 
 @include('pdf.partials.letterhead', [
-  'docTitle' => 'ใบแจ้งการจ่ายค่าคอมมิชชั่น (วินาศภัย '.$vatTag.')',
+  'docTitle' => $docName.' (วินาศภัย '.$vatTag.')',
   'docTitleEn' => 'COMMISSION PAYMENT STATEMENT',
   'docMeta' => [
     'เลขที่' => $batch['docNo'],

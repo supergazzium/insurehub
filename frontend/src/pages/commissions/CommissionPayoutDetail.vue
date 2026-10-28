@@ -217,13 +217,13 @@ async function generateAll(): Promise<void> {
     genBusy.value = false
   }
 }
-async function openAgentPdf(agentCode: string | null): Promise<void> {
+async function openAgentPdf(agentCode: string | null, doc?: 'direct' | 'referral'): Promise<void> {
   if (!agentCode) return
   error.value = null
   try {
     // Authed blob download — the PDF route needs a Bearer token, so window.open
     // (which can't attach it) 500s.
-    const blob = await downloadAgentPdf(id, agentCode)
+    const blob = await downloadAgentPdf(id, agentCode, doc)
     const url = URL.createObjectURL(blob)
     window.open(url, '_blank')
     // Revoke after the new tab has had a chance to load it.
@@ -422,7 +422,8 @@ onMounted(load)
                   <span v-else class="rounded-full bg-slate-100 px-2 py-0.5 text-xs text-slate-500">รอจ่าย</span>
                 </td>
                 <td class="px-4 py-3 text-right whitespace-nowrap">
-                  <button type="button" class="mr-2 text-xs text-slate-500 hover:text-brand-700" @click.stop="openAgentPdf(a.agentCode)"><i class="pi pi-file-pdf" /> PDF</button>
+                  <button type="button" class="mr-2 text-xs text-slate-500 hover:text-brand-700" @click.stop="openAgentPdf(a.agentCode, 'direct')"><i class="pi pi-file-pdf" /> PDF ขายเอง</button>
+                  <button type="button" class="mr-2 text-xs text-slate-500 hover:text-brand-700" @click.stop="openAgentPdf(a.agentCode, 'referral')"><i class="pi pi-file-pdf" /> PDF แนะนำ</button>
                   <button v-if="isEditable && !a.paid" type="button" class="mr-2 text-xs text-brand-600 hover:text-brand-700" @click="openAdj(a)">ปรับปรุง</button>
                   <button v-if="isApproved && !a.paid" type="button" class="text-xs font-medium text-emerald-700 hover:text-emerald-800" @click="openPayAgent(a)"><i class="pi pi-check" /> จ่าย</button>
                   <button v-if="a.paid && !a.reversed" type="button" class="text-xs text-amber-700 hover:text-amber-800" @click="openReverseAgent(a)"><i class="pi pi-undo" /> ย้อนกลับ</button>

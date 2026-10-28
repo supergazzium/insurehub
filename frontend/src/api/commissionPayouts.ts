@@ -280,8 +280,9 @@ export function agentPdfUrl(batchId: string, agentCode: string): string {
  * a Bearer token, so a plain window.open navigation (which can't attach the
  * header) 500s. Callers save the returned blob.
  */
-export async function downloadAgentPdf(batchId: string, agentCode: string): Promise<Blob> {
-  const res = await fetch(agentPdfUrl(batchId, agentCode), {
+export async function downloadAgentPdf(batchId: string, agentCode: string, doc?: 'direct' | 'referral'): Promise<Blob> {
+  const url = agentPdfUrl(batchId, agentCode) + (doc ? '/' + doc : '')
+  const res = await fetch(url, {
     headers: { Authorization: `Bearer ${getToken() ?? ''}`, Accept: 'application/pdf' },
   })
   if (!res.ok) {
