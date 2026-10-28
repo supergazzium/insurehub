@@ -559,7 +559,8 @@ class CommissionPayoutService
     {
         // v2: group READY ledger lines by beneficiary so uplines (override /
         // referral) appear alongside the seller's direct commission.
-        $ready = $this->collectLines($tenantId, $from, $to)['ready'];
+        $lines = $this->collectLines($tenantId, $from, $to);
+        $ready = $lines['ready'];
         $byAgent = [];
         foreach ($ready as $line) {
             $key = $line['beneficiaryAgentId'];
@@ -586,12 +587,32 @@ class CommissionPayoutService
         $agents = array_values($byAgent);
         usort($agents, fn ($a, $b) => ($b['amount'] <=> $a['amount']));
 
+        // Waiting summary: commission that exists but is gated (freelook / รอรับ
+        // ค่าคอมจากบริษัท / ลูกค้ายังไม่ชำระ). Surfaced so the list can explain an
+        // otherwise-empty page instead of looking like there is no money at all.
+        $waiting = $lines['waiting'];
+        $reasonCounts = [];
+        foreach ($waiting as $w) {
+            foreach (($w['reasons'] ?? []) as $r) {
+                $code = $r['code'] ?? 'unknown';
+                if (! isset($reasonCounts[$code])) {
+                    $reasonCounts[$code] = ['code' => $code, 'label' => $r['label'] ?? $code, 'count' => 0];
+                }
+                $reasonCounts[$code]['count']++;
+            }
+        }
+
         return [
             'agents' => $agents,
             'totals' => [
                 'totalAgents' => count($agents),
                 'totalItems' => array_sum(array_column($agents, 'itemCount')),
                 'totalAmount' => round(array_sum(array_column($agents, 'amount')), 2),
+            ],
+            'waiting' => [
+                'itemCount' => count($waiting),
+                'amount' => round(array_sum(array_map(fn ($w) => max(0, (float) ($w['fullAmount'] ?? 0) - (float) ($w['alreadyPaid'] ?? 0)), $waiting)), 2),
+                'reasons' => array_values($reasonCounts),
             ],
         ];
     }

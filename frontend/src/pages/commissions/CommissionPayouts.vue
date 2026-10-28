@@ -12,6 +12,7 @@ const router = useRouter()
 
 const agents = ref<AgentOutstandingRow[]>([])
 const totals = ref({ totalAgents: 0, totalItems: 0, totalAmount: 0 })
+const waiting = ref<{ itemCount: number; amount: number; reasons: { code: string; label: string; count: number }[] } | null>(null)
 const loading = ref(true)
 const error = ref<string | null>(null)
 
@@ -42,6 +43,7 @@ async function load(): Promise<void> {
     const res = await fetchOutstandingByAgent(fromDate.value || undefined, toDate.value || undefined)
     agents.value = res.agents
     totals.value = res.totals
+    waiting.value = res.waiting ?? null
   } catch (e: unknown) {
     error.value = e instanceof ApiError ? e.message : 'โหลดข้อมูลไม่สำเร็จ'
   } finally {
@@ -206,6 +208,11 @@ onMounted(load)
       <p v-if="!fromDate && !toDate" class="mt-2 text-xs text-slate-400">
         <i class="pi pi-info-circle" /> แสดงค่าคอมค้างจ่ายทั้งหมด (ยังไม่จ่าย) — ใช้ตัวกรองเพื่อจำกัดช่วงวันแจ้งงาน
       </p>
+      <div v-if="waiting && waiting.itemCount > 0" class="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+        <i class="pi pi-clock" />
+        <span><b>{{ waiting.itemCount }}</b> รายการค่าคอมยังจ่ายไม่ได้ (รอเงื่อนไข) · ฿{{ money(waiting.amount) }}</span>
+        <span v-for="r in waiting.reasons" :key="r.code" class="rounded bg-amber-100 px-1.5 py-0.5 text-xs">{{ r.label }} ({{ r.count }})</span>
+      </div>
     </section>
 
     <div v-if="error" class="mb-3 rounded-lg bg-rose-50 px-4 py-3 text-sm text-rose-700">{{ error }}</div>
