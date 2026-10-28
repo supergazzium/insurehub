@@ -151,6 +151,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     // fixed. See CommissionTierController.
     // Per-agent commission detail (ledger rows + upline chain + totals).
     Route::get('agents/{agentCode}/commission-detail', [AgentCommissionController::class, 'show']);
+    Route::get('agents/{agentCode}/payout-batches', [AgentCommissionController::class, 'payoutBatches']);
 
     Route::get('commission-tiers', [CommissionTierController::class, 'index']);
     Route::patch('commission-tiers/{commissionTier}', [CommissionTierController::class, 'update']);

@@ -176,6 +176,21 @@ export interface AgentDownlineNode {
   children: AgentDownlineNode[]
 }
 
+export interface AgentPayoutBatchRow {
+  batchId: string
+  version: number
+  paymentDate: string | null
+  periodLabel: string | null
+  base: number
+  referral: number
+  gross: number
+  net: number
+  certificate: string | null
+}
+export function fetchAgentPayoutBatches(agentCode: string) {
+  return api.get<{ data: AgentPayoutBatchRow[]; agentCode: string }>(`agents/${encodeURIComponent(agentCode)}/payout-batches`)
+}
+
 export interface AgentCommissionResponse {
   agent: AgentCommissionAgent
   uplineChain: AgentCommissionUplineLink[]

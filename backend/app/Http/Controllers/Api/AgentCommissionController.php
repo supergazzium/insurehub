@@ -5,6 +5,8 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Models\Agent;
+use App\Models\CommissionPayoutBatch;
+use App\Models\CommissionPayoutPayee;
 use App\Support\AgentLicense;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
@@ -169,4 +171,62 @@ class AgentCommissionController extends ApiController
 
         return $out;
     }
+    /**
+     * GET /agents/{agentCode}/payout-batches — PAID payout batches this agent is
+     * in, so an internal user can download the per-batch ใบจ่าย PDFs (ขายเอง /
+     * แนะนำ) from the agent page. Mirrors the agent-portal earnings history, keyed
+     * by agent code instead of the signed-in agent.
+     */
+    public function payoutBatches(Request $request, string $agentCode): JsonResponse
+    {
+        $tenantId = $this->tenantId($request);
+        $agent = Agent::query()->where('tenant_id', $tenantId)->where('agent_code', $agentCode)->first();
+        if ($agent === null) {
+            return response()->json(['data' => []]);
+        }
+
+        $v2 = CommissionPayoutPayee::query()
+            ->join('commission_payout_batches as b', 'b.id', '=', 'commission_payout_payees.batch_id')
+            ->where('commission_payout_payees.agent_id', $agent->id)
+            ->where('b.status', CommissionPayoutBatch::STATUS_PAID)
+            ->orderByDesc('b.payment_date')->orderByDesc('b.id')->limit(60)
+            ->get(['commission_payout_payees.*', 'b.payment_date as pay_date', 'b.period_label as period'])
+            ->map(fn ($p): array => [
+                'batchId' => (string) $p->batch_id,
+                'version' => 2,
+                'paymentDate' => $p->pay_date ? substr((string) $p->pay_date, 0, 10) : null,
+                'periodLabel' => $p->period,
+                'base' => (float) $p->base_amount,
+                'referral' => round((float) $p->referral_amount + (float) $p->override_amount + (float) $p->self_mgmt_amount, 2),
+                'gross' => (float) $p->gross_amount,
+                'net' => (float) $p->net_amount,
+                'certificate' => $p->certificateLabel(),
+            ]);
+
+        $v1 = DB::table('commission_payout_batch_items as bi')
+            ->join('commission_payout_batches as b', 'b.id', '=', 'bi.batch_id')
+            ->where('bi.agent_id', $agent->id)
+            ->where('b.status', CommissionPayoutBatch::STATUS_PAID)
+            ->where('b.calc_version', CommissionPayoutBatch::CALC_V1)
+            ->groupBy('b.id', 'b.payment_date', 'b.period_label')
+            ->orderByDesc('b.payment_date')->limit(60)
+            ->selectRaw('b.id, b.payment_date, b.period_label, SUM(bi.snapshot_agent_commission + bi.snapshot_rider_commission) as gross')
+            ->get()
+            ->map(fn ($r): array => [
+                'batchId' => (string) $r->id,
+                'version' => 1,
+                'paymentDate' => $r->payment_date ? substr((string) $r->payment_date, 0, 10) : null,
+                'periodLabel' => $r->period_label,
+                'base' => round((float) $r->gross, 2),
+                'referral' => 0.0,
+                'gross' => round((float) $r->gross, 2),
+                'net' => round((float) $r->gross, 2),
+                'certificate' => null,
+            ]);
+
+        $batches = $v2->concat($v1)->sortByDesc('paymentDate')->values();
+
+        return response()->json(['data' => $batches, 'agentCode' => $agent->agent_code]);
+    }
 }
+
