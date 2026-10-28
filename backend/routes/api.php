@@ -88,6 +88,7 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::post('auth/logout', [AuthController::class, 'logout']);
     Route::get('auth/me', [AuthController::class, 'me']);
     Route::post('auth/change-password', [MeAgentController::class, 'changePassword']);
+    Route::post('me/agent/change-email', [MeAgentController::class, 'changeEmail']);
     // #1 — LINE connect/disconnect (link the signed-in user's account).
     Route::get('auth/line/connect-url', [AuthController::class, 'lineRedirect']);
     Route::post('auth/line/disconnect', [AuthController::class, 'lineDisconnect']);

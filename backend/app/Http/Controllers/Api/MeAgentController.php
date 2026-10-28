@@ -7,6 +7,8 @@ namespace App\Http\Controllers\Api;
 use App\Http\Resources\MyAgentResource;
 use App\Models\Agent;
 use App\Models\AuditEntry;
+use App\Models\EmailVerificationToken;
+use App\Models\User;
 use App\Models\CommissionPayoutBatch;
 use App\Models\CommissionPayoutPayee;
 use App\Models\RecruitmentLink;
@@ -18,8 +20,10 @@ use Illuminate\Http\Resources\Json\AnonymousResourceCollection;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Illuminate\Support\Facades\Hash;
 use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
+use Illuminate\Validation\ValidationException;
 
 /**
  * "Me as an agent" — profile, referral link, downline, and PII upload
@@ -484,6 +488,49 @@ class MeAgentController extends ApiController
         ]);
 
         return response()->json(['message' => 'Password updated.']);
+    }
+
+    /**
+     * Set / change the agent's login email. Needed especially for agents created
+     * via LINE (they start with a synthetic line_<id>@line.local placeholder) so
+     * they can put in their real email — but any agent can change it. The new
+     * email must be verified via the same email-OTP flow as registration, and
+     * must be unique. Updates BOTH the login user and the agent record.
+     */
+    public function changeEmail(Request $request): JsonResponse
+    {
+        $user = $request->user();
+        $data = $request->validate([
+            'email' => ['required', 'email', 'max:255', 'unique:users,email,'.$user->id, 'unique:agents,email,'.($user->agent_id ?? 0)],
+            'emailOtpToken' => ['required', 'string', 'size:64'],
+        ]);
+
+        // The OTP token must exist, be unconsumed + unexpired, and be bound to
+        // the SAME email being set (mirrors AgentRegisterRequest).
+        $email = strtolower(trim($data['email']));
+        $row = EmailVerificationToken::query()->where('token', $data['emailOtpToken'])->first();
+        if ($row === null || $row->consumed_at !== null || $row->expires_at->isPast() || strtolower($row->email) !== $email) {
+            throw ValidationException::withMessages([
+                'emailOtpToken' => ['ยืนยันอีเมลไม่สำเร็จหรือหมดอายุ กรุณายืนยันอีเมลอีกครั้ง'],
+            ]);
+        }
+
+        DB::transaction(function () use ($user, $data, $row, $request): void {
+            $user->forceFill(['email' => $data['email'], 'email_verified_at' => now()])->save();
+            if ($user->agent_id !== null) {
+                Agent::query()->whereKey($user->agent_id)->update(['email' => $data['email']]);
+            }
+            $row->update(['consumed_at' => now()]);
+
+            AuditEntry::create([
+                'tenant_id' => $user->tenant_id, 'user_id' => $user->id, 'occurred_at' => now(),
+                'actor' => $user->name, 'action' => 'user.email_changed',
+                'target' => 'user:'.$user->id, 'ip' => $request->ip(), 'result' => 'success',
+                'metadata' => ['self' => true, 'email' => $data['email']],
+            ]);
+        });
+
+        return response()->json(['message' => 'อัปเดตอีเมลเรียบร้อยแล้ว', 'email' => $data['email']]);
     }
 
     // ── Internal helpers ─────────────────────────────────────────────────
