@@ -67,6 +67,12 @@ function toggle(key: string): void {
   expanded.value = s
 }
 const rowKey = (a: BatchAgentRow) => a.agentId ?? a.agentCode ?? 'none'
+const policyTypeClass = (t?: string | null) =>
+  t === 'life'
+    ? 'bg-violet-50 text-violet-700'
+    : t === 'cmi'
+      ? 'bg-amber-50 text-amber-700'
+      : 'bg-sky-50 text-sky-700'
 
 // ── Adjustment dialog ───────────────────────────────────────────────────
 const adjFor = ref<BatchAgentRow | null>(null)
@@ -427,12 +433,16 @@ onMounted(load)
                 <td colspan="8" class="px-6 py-2">
                   <table class="min-w-full text-xs">
                     <thead class="text-left text-slate-400">
-                      <tr><th class="py-1 pr-4">เลขกรมธรรม์</th><th class="py-1 pr-4">ใบคำขอ</th><th class="py-1 pr-4 text-right">ยอด</th><th class="py-1 pr-4">ที่มา</th><th class="py-1"></th></tr>
+                      <tr><th class="py-1 pr-4">เลขกรมธรรม์</th><th class="py-1 pr-4">ใบคำขอ</th><th class="py-1 pr-4">ประเภทประกัน</th><th class="py-1 pr-4 text-right">ยอด</th><th class="py-1 pr-4">ที่มา</th><th class="py-1"></th></tr>
                     </thead>
                     <tbody>
                       <tr v-for="it in a.items" :key="it.id ?? it.policyId" :class="it.status === 'excluded' ? 'opacity-50' : ''">
                         <td class="py-1 pr-4 text-slate-600">{{ it.policyNo || '—' }}<span v-if="it.status === 'excluded'" class="ml-1 text-rose-500">(ตัดออก)</span></td>
                         <td class="py-1 pr-4 text-slate-500">{{ it.applicationNo || '—' }}</td>
+                        <td class="py-1 pr-4">
+                          <span v-if="it.policyTypeLabel" class="inline-block rounded px-1.5 py-0.5 text-[11px] font-medium" :class="policyTypeClass(it.policyType)">{{ it.policyTypeLabel }}</span>
+                          <span v-else class="text-slate-400">—</span>
+                        </td>
                         <td class="py-1 pr-4 text-right text-slate-700">฿{{ money(it.amount) }}</td>
                         <td class="py-1 pr-4 text-slate-400">{{ it.source }}</td>
                         <td class="py-1 text-right">

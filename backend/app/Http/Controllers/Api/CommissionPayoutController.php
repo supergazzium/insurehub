@@ -8,6 +8,7 @@ use App\Http\Controllers\Controller;
 use App\Models\CommissionPayoutBatch;
 use App\Models\CommissionPayoutPayee;
 use App\Services\Commission\CommissionPayoutService;
+use App\Support\PolicyTypeLabel;
 use App\Services\Commission\PayoutDocuments;
 use App\Models\CommissionPayoutBatchAgent;
 use Carbon\CarbonImmutable;
@@ -216,7 +217,7 @@ class CommissionPayoutController extends Controller
     public function show(Request $request, CommissionPayoutBatch $batch): JsonResponse
     {
         $this->authorizeTenant($request, $batch);
-        $batch->load(['items.policy:id,policy_no,application_no', 'items.agent:id,agent_code,first_name,last_name', 'adjustments', 'agentRows']);
+        $batch->load(['items.policy:id,policy_no,application_no,product_id,main_premium,compulsory_premium', 'items.policy.product:id,product_type_id,type,category,sub_category,sub_category_2', 'items.policy.product.productType:id,code,kind', 'items.agent:id,agent_code,first_name,last_name', 'adjustments', 'agentRows']);
         // Per-agent payment state keyed by agent id (0 = no-agent bucket).
         $payByAgent = $batch->agentRows->keyBy(fn ($ar) => $ar->agent_id ?? 0);
 
@@ -242,6 +243,8 @@ class CommissionPayoutController extends Controller
                 'policyId' => (string) $item->policy_id,
                 'policyNo' => $item->policy->policy_no ?? null,
                 'applicationNo' => $item->policy->application_no ?? null,
+                'policyType' => $item->policy ? PolicyTypeLabel::classify($item->policy) : null,
+                'policyTypeLabel' => $item->policy ? PolicyTypeLabel::label($item->policy) : null,
                 'amount' => round($item->total(), 2),
                 'source' => $item->amount_source,
                 'status' => $item->item_status,
