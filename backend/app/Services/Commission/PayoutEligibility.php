@@ -27,8 +27,10 @@ final class PayoutEligibility
     public static function settings(?Tenant $tenant): array
     {
         return [
-            'freelook' => (bool) ($tenant?->payout_require_freelook ?? true),
-            'insurer' => (bool) ($tenant?->payout_require_insurer_received ?? true),
+            // Policy: pay once the CUSTOMER has paid; freelook + insurer are off
+            // by default (see migration ..._payout_gate_defaults_customer_only).
+            'freelook' => (bool) ($tenant?->payout_require_freelook ?? false),
+            'insurer' => (bool) ($tenant?->payout_require_insurer_received ?? false),
             'customer' => (bool) ($tenant?->payout_require_customer_paid ?? true),
         ];
     }
