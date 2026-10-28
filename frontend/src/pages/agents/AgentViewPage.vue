@@ -16,7 +16,8 @@ import {
   type AgentDocumentPresence,
 } from '../../api/agents'
 import { fetchAgentAudit, type AuditEntry } from '../../api/adminAgents'
-import { fetchAgentCommissionDetail, type AgentCommissionResponse } from '../../api/mgm'
+import { fetchAgentCommissionDetail, fetchAgentPayoutBatches, type AgentCommissionResponse, type AgentPayoutBatchRow } from '../../api/mgm'
+import { downloadAgentPdf } from '../../api/commissionPayouts'
 import { fmtDateThai } from '../../util/dateFormat'
 import { ApiError } from '../../api/client'
 
@@ -36,6 +37,8 @@ const progress = ref<LevelProgress | null>(null)
 const promotions = ref<RankPromotionRow[]>([])
 const relations = ref<AgentRelations | null>(null)
 const commission = ref<AgentCommissionResponse | null>(null)
+const payoutBatches = ref<AgentPayoutBatchRow[]>([])
+const pdfBusy = ref<string | null>(null)
 const notes = ref<AgentNoteRow[]>([])
 const audit = ref<AuditEntry[]>([])
 
@@ -156,6 +159,7 @@ async function load(): Promise<void> {
     relations.value = rel
     notes.value = nt.data
     commission.value = str('agentCode') ? await fetchAgentCommissionDetail(str('agentCode')).catch(() => null) : null
+    payoutBatches.value = str('agentCode') ? ((await fetchAgentPayoutBatches(str('agentCode')).catch(() => ({ data: [] }))).data) : []
     audit.value = canSeeAudit.value ? (await fetchAgentAudit(agentId.value).catch(() => ({ data: [] as AuditEntry[] }))).data : []
   } catch (e: unknown) {
     error.value = e instanceof ApiError ? e.message : 'โหลดข้อมูลไม่สำเร็จ'
@@ -248,6 +252,23 @@ async function addNote(): Promise<void> {
 }
 function noteKindLabel(k: string): string {
   return { general: 'ทั่วไป', call: 'โทรติดตาม', followup: 'ติดตาม', document: 'เอกสาร' }[k] ?? k
+}
+
+async function downloadPayoutPdf(batchId: string, doc: 'direct' | 'referral'): Promise<void> {
+  const code = commission.value?.agent?.code ?? str('agentCode')
+  if (!code) return
+  pdfBusy.value = `${doc}-${batchId}`
+  error.value = null
+  try {
+    const blob = await downloadAgentPdf(batchId, code, doc)
+    const url = URL.createObjectURL(blob)
+    window.open(url, '_blank')
+    setTimeout(() => URL.revokeObjectURL(url), 60_000)
+  } catch (e: unknown) {
+    error.value = e instanceof Error ? e.message : 'ดาวน์โหลด PDF ไม่สำเร็จ'
+  } finally {
+    pdfBusy.value = null
+  }
 }
 
 const PAYOUT_LABEL: Record<string, string> = { DIRECT_COMMISSION: 'ค่าคอมผู้ขาย', REFERRAL_FEE: 'ค่าแนะนำ', MANAGEMENT_DIFFERENTIAL: 'ส่วนต่างบริหาร' }
@@ -639,6 +660,33 @@ watch(() => route.params.id, () => { if (route.name === 'agent-detail') { editCa
           </table>
         </section>
         <p v-else class="rounded-lg border border-slate-200 bg-white p-4 text-xs text-slate-400">— ยังไม่มีข้อมูลค่าคอม —</p>
+
+        <!-- ประวัติการจ่าย + ดาวน์โหลดใบจ่าย PDF (ขายเอง / แนะนำ) -->
+        <section class="mt-4 rounded-lg border border-slate-200 bg-white p-4" data-testid="agent-payout-batches">
+          <h2 class="mb-3 text-sm font-semibold text-slate-700">ประวัติการจ่ายค่าคอม · ดาวน์โหลดใบจ่าย</h2>
+          <div v-if="payoutBatches.length === 0" class="text-xs text-slate-400">— ยังไม่มีรอบจ่ายที่จ่ายแล้ว —</div>
+          <table v-else class="min-w-full divide-y divide-slate-200 text-sm">
+            <thead class="text-left text-[11px] uppercase tracking-wide text-slate-400">
+              <tr><th class="py-1.5 pr-3">วันที่จ่าย</th><th class="py-1.5 pr-3">รอบ</th><th class="py-1.5 pr-3 text-right">ยอดโอนสุทธิ</th><th class="py-1.5">ใบจ่าย</th></tr>
+            </thead>
+            <tbody class="divide-y divide-slate-100">
+              <tr v-for="b in payoutBatches" :key="b.batchId">
+                <td class="py-1.5 pr-3 text-xs text-slate-500">{{ b.paymentDate ? fmtDateThai(b.paymentDate) : '—' }}</td>
+                <td class="py-1.5 pr-3 text-xs text-slate-600">{{ b.periodLabel || ('#' + b.batchId) }}</td>
+                <td class="py-1.5 pr-3 text-right font-medium text-slate-800">฿{{ money2(b.net) }}</td>
+                <td class="py-1.5">
+                  <button v-if="b.base > 0" type="button" class="mr-2 text-xs text-brand-600 hover:underline" @click="downloadPayoutPdf(b.batchId, 'direct')">
+                    <i :class="['pi text-[10px]', pdfBusy === `direct-${b.batchId}` ? 'pi-spin pi-spinner' : 'pi-file-pdf']" /> ขายเอง
+                  </button>
+                  <button v-if="b.referral > 0" type="button" class="text-xs text-brand-600 hover:underline" @click="downloadPayoutPdf(b.batchId, 'referral')">
+                    <i :class="['pi text-[10px]', pdfBusy === `referral-${b.batchId}` ? 'pi-spin pi-spinner' : 'pi-file-pdf']" /> แนะนำ
+                  </button>
+                  <span v-if="b.base <= 0 && b.referral <= 0" class="text-xs text-slate-400">—</span>
+                </td>
+              </tr>
+            </tbody>
+          </table>
+        </section>
       </div>
 
       <!-- ── บันทึก (notes + audit merged timeline) ── -->
