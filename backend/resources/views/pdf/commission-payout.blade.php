@@ -64,6 +64,9 @@
   $vatLabel = $vatType === '3' ? 'Vat Include' : ($vatType === '2' ? 'VAT Exclude' : '');
   // ค่านายหน้าสุทธิ column note — VAT-include prints "(Include Vat)" like the reference.
   $commANote = $vatType === '3' ? '<br/><span style="font-weight:400;font-size:7px;">(Include Vat)</span>' : '';
+  $doc = $doc ?? null;
+  // หัวเอกสารตามชนิด: ขายเอง (direct) / ค่าแนะนำ-ตำแหน่ง (referral) / รวม (null)
+  $docTitle = ['direct' => 'ค่าคอมมิชชั่นขายเอง', 'referral' => 'ค่าแนะนำ / ค่าตำแหน่ง'][$doc] ?? 'ค่านายหน้า / ค่าแนะนำ';
 @endphp
 <body>
   <!-- Header -->
@@ -73,7 +76,7 @@
     </div>
     <div class="head-c">
       <div class="company">บริษัท อินชัวร์ฮับ จำกัด</div>
-      <div class="subtitle">ค่านายหน้า / ค่าแนะนำประจำเดือน : {{ $batch['periodLabel'] ?: ($batch['from'] . ' – ' . $batch['to']) }}@if ($showVat) <b style="color:#b91c1c;">· {{ $vatLabel }}</b>@endif</div>
+      <div class="subtitle">{{ $docTitle }} ประจำเดือน : {{ $batch['periodLabel'] ?: ($batch['from'] . ' – ' . $batch['to']) }}@if ($showVat) <b style="color:#b91c1c;">· {{ $vatLabel }}</b>@endif</div>
     </div>
     <div class="head-r">
       <div class="qr">@if (!empty($qrData))<img src="{{ $qrData }}" alt="LINE QR" />@endif</div>

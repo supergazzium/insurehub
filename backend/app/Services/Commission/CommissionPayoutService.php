@@ -1908,6 +1908,7 @@ class CommissionPayoutService
                 'address' => $payee->payee_address,
                 'bankName' => $payee->bank_name,
                 'bankAccountNo' => $payee->bank_account_no,
+                'bankAccountName' => $payee->bank_account_name,
             ],
             'payee' => [
                 'whtFormLabel' => CommissionPayoutPayee::FORM_LABELS[$payee->wht_form] ?? null,
@@ -1926,6 +1927,8 @@ class CommissionPayoutService
             ->where('item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)
             ->when($agentId !== null, fn ($q) => $q->where('agent_id', $agentId))
             ->when($agentId === null && $agentCode !== null, fn ($q) => $q->where('agent_code', $agentCode))
+            ->when($doc === 'direct', fn ($q) => $q->where('line_type', 'base'))
+            ->when($doc === 'referral', fn ($q) => $q->whereIn('line_type', ['override', 'referral']))
             ->orderBy('id')
             ->get();
 
