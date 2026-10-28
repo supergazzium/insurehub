@@ -3,11 +3,32 @@
 import { onMounted, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { RouterLink } from 'vue-router'
-import { fetchMyAgent, fetchMyRelations, fetchEarnings, type MyAgent, type AgentRelations, type EarningsResponse } from '../../api/portal'
+import { fetchMyAgent, fetchMyRelations, fetchEarnings, fetchLineConnectUrl, type MyAgent, type AgentRelations, type EarningsResponse } from '../../api/portal'
+import { useAuthStore } from '../../stores/auth'
+import { ApiError } from '../../api/client'
+import { computed } from 'vue'
 
 const { t } = useI18n()
 const me = ref<MyAgent | null>(null)
 const loading = ref(false)
+
+// LINE connect — reuses the same connect flow as Portal Settings so an agent
+// can link LINE from the dashboard and next time sign in without a password.
+const auth = useAuthStore()
+const lineLinked = computed(() => auth.user?.lineLinked ?? false)
+const lineBusy = ref(false)
+const lineError = ref('')
+async function connectLine(): Promise<void> {
+  lineError.value = ''
+  lineBusy.value = true
+  try {
+    const { url } = await fetchLineConnectUrl()
+    window.location.href = url
+  } catch (e: unknown) {
+    lineError.value = e instanceof ApiError && e.status === 503 ? 'LINE Login ยังไม่ได้ตั้งค่า' : 'เริ่มเชื่อม LINE ไม่สำเร็จ'
+    lineBusy.value = false
+  }
+}
 
 // สายงาน — ต้นสาย (upline) + ลูกทีม (downline) of the signed-in agent.
 const relations = ref<AgentRelations | null>(null)
@@ -67,6 +88,26 @@ const quickLinks = [
         class="mt-4 inline-block px-3 py-1.5 rounded-md bg-amber-100 text-amber-900 text-xs">
         <i class="pi pi-clock mr-1" /> {{ t('portal.dashboard.pendingApproval') }}
       </div>
+    </section>
+
+    <!-- #1 — Connect LINE: let an agent link LINE for password-free login next time. -->
+    <section v-if="!lineLinked" class="card p-5 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between border-l-4 border-l-[#06C755]">
+      <div class="flex items-start gap-3">
+        <i class="pi pi-comment text-2xl text-[#06C755]" />
+        <div>
+          <div class="font-semibold text-slate-800">เชื่อมบัญชี LINE</div>
+          <div class="text-sm text-slate-500">เชื่อม LINE ครั้งเดียว ครั้งถัดไปเข้าสู่ระบบด้วย LINE ได้ทันทีโดยไม่ต้องกรอกรหัสผ่าน</div>
+          <div v-if="lineError" class="mt-1 text-xs text-rose-600">{{ lineError }}</div>
+        </div>
+      </div>
+      <button type="button" :disabled="lineBusy" @click="connectLine"
+        class="shrink-0 rounded-lg bg-[#06C755] px-4 py-2 font-medium text-white transition hover:bg-[#05b34c] disabled:opacity-50 flex items-center justify-center gap-2">
+        <i v-if="lineBusy" class="pi pi-spin pi-spinner" /><i v-else class="pi pi-link" /> เชื่อม LINE
+      </button>
+    </section>
+    <section v-else class="card px-5 py-3 flex items-center gap-2 text-sm text-emerald-700 border-l-4 border-l-emerald-500">
+      <i class="pi pi-check-circle" /> เชื่อมบัญชี LINE แล้ว — เข้าสู่ระบบด้วย LINE ได้เลย
+      <RouterLink :to="{ name: 'portal-settings' }" class="ml-auto text-xs text-slate-400 hover:text-slate-600">จัดการ</RouterLink>
     </section>
 
     <!-- Commission earnings — ready / waiting / paid-this-year at a glance -->
