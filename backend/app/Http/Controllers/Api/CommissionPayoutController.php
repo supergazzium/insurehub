@@ -506,13 +506,10 @@ class CommissionPayoutController extends Controller
             abort(404, 'ไม่พบรายการของตัวแทนใน batch นี้');
         }
 
-        // Version-aware: v2 batches render the rich commission-statement blade
-        // (payee/sections/totals), v1 the legacy commission-payout blade. The
-        // optional $doc (direct|referral) splits the v2 statement into the two
-        // separate documents.
-        $pdf = ((int) ($data['version'] ?? 1) >= 2)
-            ? $this->docs->statement($data)
-            : $this->renderAgentPdf($data);
+        // ทุกเอกสาร (ทั้ง v1/v2, direct/referral) ใช้ layout ใบจ่ายสวยตัวเดียว
+        // (pdf.commission-payout): โลโก้/QR, กล่องตัวแทน, ตาราง, ยอดเหลือง, ลายเซ็น.
+        // $doc กรองบรรทัดไว้แล้วใน buildAgentPdfData (direct=ขายเอง, referral=แนะนำ).
+        $pdf = $this->renderAgentPdf($data, $doc);
         $filename = $this->docs->statementFilename($batch, $data);
 
         return $this->docs->respond($request, $pdf, $filename);
@@ -697,7 +694,7 @@ class CommissionPayoutController extends Controller
         }, $filename, ['Content-Type' => 'text/csv; charset=UTF-8']);
     }
 
-    private function renderAgentPdf(array $data)
+    private function renderAgentPdf(array $data, ?string $doc = null)
     {
         // Brand logo + LINE QR embedded as data URIs (dompdf has enable_remote=false).
         $logoData = null;
@@ -718,6 +715,7 @@ class CommissionPayoutController extends Controller
             'columnTotals' => $data['columnTotals'],
             'summary' => $data['summary'],
             'batch' => $data['batch'],
+            'doc' => $doc ?? ($data['doc'] ?? null),
             'logoData' => $logoData,
             'qrData' => $qrData,
             'generatedAt' => now()->format('Y-m-d H:i'),

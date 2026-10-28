@@ -399,36 +399,41 @@ class CommissionPayoutV2Test extends TestCase
 
     public function test_statement_splits_into_direct_and_referral_with_independent_totals(): void
     {
+        // buildAgentPdfData($doc) filters the batch items to just that document's
+        // line types (direct = base / own-sale; referral = override + referral)
+        // and recomputes the printed totals + WHT on only those lines, so the two
+        // PDFs never double-count tax. All of them render on the one polished
+        // ใบจ่าย layout (pdf.commission-payout).
         $upline = $this->payoutAgent(1);
         $seller = $this->payoutAgent(1, $upline);
         $this->sellAndPay($seller); // seller: DIRECT(base); upline: override/referral
         $batch = $this->payBatch($this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id));
 
-        // The upline has override + referral (no base of their own in this batch).
-        $full = $this->service->buildAgentPdfData($batch->fresh(), $upline->id, null);           // combined
-        $direct = $this->service->buildAgentPdfData($batch->fresh(), $upline->id, null, 'direct');
-        $referral = $this->service->buildAgentPdfData($batch->fresh(), $upline->id, null, 'referral');
+        // Seller: own-sale (direct) exists; a referral doc for them is empty → null.
+        $sellerDirect = $this->service->buildAgentPdfData($batch->fresh(), $seller->id, null, 'direct');
+        $this->assertSame('direct', $sellerDirect['doc']);
+        $this->assertGreaterThan(0, $sellerDirect['columnTotals']['payable']);
+        $this->assertNull($this->service->buildAgentPdfData($batch->fresh(), $seller->id, null, 'referral'));
 
-        // Direct doc: no base lines for the upline → empty sections, zero total.
-        $this->assertSame('direct', $direct['doc']);
-        $this->assertSame([], $direct['sections']); // upline has no own-sale lines
-        $this->assertEquals(0, $direct['totals']['commission']);
+        // Upline: referral + override exist; a direct doc for them is empty → null.
+        $uplineAll = $this->service->buildAgentPdfData($batch->fresh(), $upline->id, null);
+        $uplineReferral = $this->service->buildAgentPdfData($batch->fresh(), $upline->id, null, 'referral');
+        $this->assertNull($this->service->buildAgentPdfData($batch->fresh(), $upline->id, null, 'direct'));
+        $this->assertSame('referral', $uplineReferral['doc']);
+        $this->assertGreaterThan(0, $uplineReferral['columnTotals']['payable']);
 
-        // Referral doc: carries the override + referral, with its OWN wht/net.
-        $this->assertSame('referral', $referral['doc']);
-        $types = array_column($referral['sections'], 'type');
-        $this->assertNotContains('base', $types);
-        $this->assertGreaterThan(0, $referral['totals']['commission']);
-
-        // No double-count: direct.commission + referral.commission == combined.
+        // For the upline, the referral doc equals the combined doc (they have no
+        // own-sale lines) — same commission + WHT, no double-count.
         $this->assertEqualsWithDelta(
-            (float) $full['totals']['commission'],
-            (float) $direct['totals']['commission'] + (float) $referral['totals']['commission'],
+            (float) $uplineAll['columnTotals']['commissionA'],
+            (float) $uplineReferral['columnTotals']['commissionA'],
             0.01,
         );
-        // Each doc's WHT is computed on its own base (sum == the combined WHT here
-        // since direct is zero for the upline).
-        $this->assertEqualsWithDelta((float) $full['totals']['wht'], (float) $referral['totals']['wht'], 0.01);
+        $this->assertEqualsWithDelta(
+            (float) $uplineAll['columnTotals']['wht'],
+            (float) $uplineReferral['columnTotals']['wht'],
+            0.01,
+        );
     }
 
 }

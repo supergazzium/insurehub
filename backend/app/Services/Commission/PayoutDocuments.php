@@ -20,9 +20,18 @@ final class PayoutDocuments
 
     public function statement(array $data)
     {
-        $view = ($data['version'] ?? 1) >= 2 ? 'pdf.commission-statement' : 'pdf.commission-payout';
+        // ทุกเอกสาร (v1/v2, ขายเอง/แนะนำ, ทุก VAT) ใช้ layout ใบจ่ายสวยตัวเดียว
+        // (pdf.commission-payout): โลโก้/QR, กล่องตัวแทน, ตาราง, ยอดเหลือง, ลายเซ็น.
+        $brand = fn (string $file): ?string => is_file(public_path("brand/{$file}"))
+            ? 'data:image/png;base64,'.base64_encode((string) file_get_contents(public_path("brand/{$file}")))
+            : null;
 
-        return Pdf::loadView($view, array_merge($data, ['generatedAt' => now('Asia/Bangkok')->format('d/m/Y H:i')]))->setPaper('a4', 'portrait');
+        return Pdf::loadView('pdf.commission-payout', array_merge($data, [
+            'doc' => $data['doc'] ?? null,
+            'logoData' => $brand('logo.png'),
+            'qrData' => $brand('line-qr.png'),
+            'generatedAt' => now('Asia/Bangkok')->format('d/m/Y H:i'),
+        ]))->setPaper('a4', 'landscape');
     }
 
     public function certificate(CommissionPayoutPayee $payee)
