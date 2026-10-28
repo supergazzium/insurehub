@@ -478,8 +478,8 @@ onMounted(load)
           <li v-for="adj in batch.adjustments" :key="adj.id" class="flex justify-between">
             <span class="text-slate-600">
               {{ adj.agentCode }}
-              <span class="ml-1 rounded bg-slate-100 px-1.5 py-0.5 text-xs text-slate-500">
-                {{ adj.type === 'bonus' ? 'โบนัส' : adj.type === 'correction' ? 'แก้ไข' : 'หักพิเศษ' }}
+              <span class="ml-1 rounded px-1.5 py-0.5 text-xs" :class="adj.kind === 'bonus' ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-600'">
+                {{ adj.typeLabel ?? (adj.type === 'bonus' ? 'โบนัส' : adj.type === 'correction' ? 'แก้ไข' : 'หักพิเศษ') }}
               </span>
               — {{ adj.reason }}
             </span>

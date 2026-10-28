@@ -666,28 +666,20 @@ class CommissionPayoutService
             ];
         }
 
-        // Pending (unattached) deductions for this agent — clawback / special
-        // deduct / correction that will reduce a future payout. netAmount is the
-        // ready total after those deductions (floored at 0).
-        $pendingDeduction = round((float) CommissionPayoutAdjustment::query()
-            ->where('tenant_id', $tenantId)
-            ->where('agent_id', $agentId)
-            ->whereNull('batch_id')
-            ->where('status', CommissionPayoutAdjustment::STATUS_PENDING)
-            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_CLAWBACK, CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
-            ->sum('amount'), 2);
+        $deductions = $this->pendingDeductions($tenantId, $agentId);
 
         return [
             'agent' => $agent,
             'items' => $items,
             'waiting' => $waiting,
+            'pendingDeductions' => $deductions,
             'totals' => [
                 'itemCount' => count($items),
                 'totalAmount' => round($total, 2),
                 'waitingAmount' => round($waitingAmount, 2),
                 'waitingCount' => count($waiting),
-                'pendingDeduction' => $pendingDeduction,
-                'netAmount' => round(max(0, $total - $pendingDeduction), 2),
+                'pendingDeduction' => round((float) array_sum(array_column($deductions, 'amount')), 2),
+                'netAmount' => round(max(0, $total - (float) array_sum(array_column($deductions, 'amount'))), 2),
             ],
         ];
     }
@@ -881,6 +873,13 @@ class CommissionPayoutService
                 'total_amount' => round($total, 2),
             ]);
 
+            // Materialize deduction ledgers (commission-deducted-at-source /
+            // installment-cost the agent already absorbed) into pending batch
+            // adjustments for this batch's agents, then settle those ledgers so
+            // they are counted exactly once. The adjustments then flow through
+            // the same split/attach + payee path as a clawback below.
+            $this->materializeDeductionAdjustments($batch, array_keys($byAgent));
+
             // Attach pending deductions (clawback etc.) for this batch's agents so
             // they reduce the payee's taxable base (golden G19). A deduction can
             // only consume up to the agent's gross in this round — if it exceeds
@@ -945,7 +944,7 @@ class CommissionPayoutService
         // Deductions per agent: clawback / special_deduct / correction attached to
         // this batch, applied before tax (golden G19).
         $deductByAgent = $batch->adjustments()
-            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_CLAWBACK, CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
+            ->whereIn('type', CommissionPayoutAdjustment::DEDUCTION_TYPES)
             ->get()->groupBy('agent_id')->map(fn ($g) => round((float) $g->sum('amount'), 2));
 
         foreach ($items->groupBy('agent_id') as $agentId => $agentItems) {
@@ -1036,6 +1035,102 @@ class CommissionPayoutService
         ]);
 
         return $adj;
+    }
+
+    /**
+     * Convert each agent's unsettled deduction ledgers (commission-paid-at-source
+     * and installment-agent-cost — amounts stored negative) into pending batch
+     * adjustments, then stamp those ledgers into this batch so they are consumed
+     * once. The adjustment type is mapped from the ledger type (see
+     * CommissionPayoutAdjustment::LEDGER_TYPES).
+     *
+     * @param list<int|string> $agentIds beneficiary ids in this batch
+     */
+    private function materializeDeductionAdjustments(CommissionPayoutBatch $batch, array $agentIds): void
+    {
+        $agentIds = array_values(array_filter(array_map('intval', $agentIds)));
+        if ($agentIds === []) {
+            return;
+        }
+        $ledgers = CommissionLedger::query()
+            ->where('tenant_id', $batch->tenant_id)
+            ->whereIn('beneficiary_agent_id', $agentIds)
+            ->whereIn('payout_type', CommissionLedger::DEDUCTION_TYPES)
+            ->where('status', CommissionLedger::STATUS_UNSETTLED)
+            ->whereNull('payout_batch_id')
+            ->get();
+        if ($ledgers->isEmpty()) {
+            return;
+        }
+
+        $codes = \App\Models\Agent::query()->whereIn('id', $agentIds)->pluck('agent_code', 'id');
+        foreach ($ledgers as $ledger) {
+            $type = CommissionPayoutAdjustment::LEDGER_TYPES[$ledger->payout_type] ?? CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT;
+            CommissionPayoutAdjustment::create([
+                'batch_id' => $batch->id,
+                'tenant_id' => $batch->tenant_id,
+                'agent_id' => $ledger->beneficiary_agent_id,
+                'agent_code' => $codes[$ledger->beneficiary_agent_id] ?? null,
+                'type' => $type,
+                'status' => CommissionPayoutAdjustment::STATUS_APPLIED,
+                'amount' => abs(round((float) $ledger->amount, 2)), // ledger stores it negative
+                'reason' => CommissionPayoutAdjustment::TYPE_LABELS[$type] ?? $type,
+                'ledger_id' => $ledger->id,
+            ]);
+        }
+        CommissionLedger::whereIn('id', $ledgers->pluck('id'))
+            ->update(['payout_batch_id' => $batch->id]);
+    }
+
+    /**
+     * Pending (not-yet-paid) deductions for one agent — the ส่วนลด that will be
+     * netted out of the agent's next payout. Sources:
+     *   - unsettled, unbatched deduction LEDGERS (commission-deducted-at-source /
+     *     installment-cost the agent already absorbed), amount surfaced positive;
+     *   - standalone pending ADJUSTMENT rows (clawback / special_deduct / …).
+     *
+     * @return list<array{type:string,label:string,amount:float,source:string,reason:?string}>
+     */
+    public function pendingDeductions(int $tenantId, int $agentId): array
+    {
+        $out = [];
+
+        $ledgers = CommissionLedger::query()
+            ->where('tenant_id', $tenantId)
+            ->where('beneficiary_agent_id', $agentId)
+            ->whereIn('payout_type', CommissionLedger::DEDUCTION_TYPES)
+            ->where('status', CommissionLedger::STATUS_UNSETTLED)
+            ->whereNull('payout_batch_id')
+            ->get();
+        foreach ($ledgers as $ledger) {
+            $type = CommissionPayoutAdjustment::LEDGER_TYPES[$ledger->payout_type] ?? CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT;
+            $out[] = [
+                'type' => $type,
+                'label' => CommissionPayoutAdjustment::TYPE_LABELS[$type] ?? $type,
+                'amount' => abs(round((float) $ledger->amount, 2)),
+                'source' => 'ledger',
+                'reason' => null,
+            ];
+        }
+
+        $adjustments = CommissionPayoutAdjustment::query()
+            ->where('tenant_id', $tenantId)
+            ->where('agent_id', $agentId)
+            ->whereNull('batch_id')
+            ->where('status', CommissionPayoutAdjustment::STATUS_PENDING)
+            ->whereIn('type', CommissionPayoutAdjustment::DEDUCTION_TYPES)
+            ->get();
+        foreach ($adjustments as $adj) {
+            $out[] = [
+                'type' => $adj->type,
+                'label' => CommissionPayoutAdjustment::TYPE_LABELS[$adj->type] ?? $adj->type,
+                'amount' => round((float) $adj->amount, 2),
+                'source' => 'adjustment',
+                'reason' => $adj->reason,
+            ];
+        }
+
+        return $out;
     }
 
     /**
@@ -1733,7 +1828,7 @@ class CommissionPayoutService
         }
 
         $deductions = $batch->adjustments()->where('agent_id', $payee->agent_id)
-            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_CLAWBACK, CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
+            ->whereIn('type', CommissionPayoutAdjustment::DEDUCTION_TYPES)
             ->get()->map(fn ($a) => [
                 'label' => CommissionPayoutAdjustment::TYPE_LABELS[$a->type] ?? $a->type,
                 'policyNo' => null, 'reason' => $a->reason, 'amount' => round((float) $a->amount, 2),

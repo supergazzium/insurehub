@@ -254,7 +254,11 @@ class CommissionPayoutController extends Controller
         // Apply adjustments (deducts) per agent for the display net.
         $adjByAgent = [];
         foreach ($batch->adjustments as $adj) {
-            $adjByAgent[$adj->agent_id ?? 0] = ($adjByAgent[$adj->agent_id ?? 0] ?? 0) + (float) $adj->amount;
+            // Bonus adds to the payout; every other adjustment type is a deduction.
+            $signed = $adj->type === \App\Models\CommissionPayoutAdjustment::TYPE_BONUS
+                ? -1 * (float) $adj->amount
+                : (float) $adj->amount;
+            $adjByAgent[$adj->agent_id ?? 0] = ($adjByAgent[$adj->agent_id ?? 0] ?? 0) + $signed;
         }
         $agents = [];
         foreach ($byAgent as $key => $a) {
@@ -292,6 +296,8 @@ class CommissionPayoutController extends Controller
                     'agentId' => $a->agent_id ? (string) $a->agent_id : null,
                     'agentCode' => $a->agent_code,
                     'type' => $a->type,
+                    'typeLabel' => \App\Models\CommissionPayoutAdjustment::TYPE_LABELS[$a->type] ?? $a->type,
+                    'kind' => $a->type === \App\Models\CommissionPayoutAdjustment::TYPE_BONUS ? 'bonus' : 'deduction',
                     'amount' => round((float) $a->amount, 2),
                     'reason' => $a->reason,
                     'createdAt' => $a->created_at?->toIso8601String(),
