@@ -238,7 +238,9 @@ export default {
       useBackup: 'ใช้รหัสสำรองแทน',
       backToLogin: 'กลับสู่หน้าเข้าสู่ระบบ',
       invalidCreds: 'อีเมลหรือรหัสผ่านไม่ถูกต้อง',
-      emailNotFound: 'ไม่พบอีเมลนี้ในระบบ',
+      emailNotFound: 'อีเมลนี้ยังไม่ได้ลงทะเบียน',
+      accountPendingApproval: 'บัญชีของคุณลงทะเบียนแล้ว แต่กำลังรอผู้ดูแลอนุมัติ — จะเข้าสู่ระบบได้เมื่อได้รับการอนุมัติ',
+      accountInactive: 'บัญชีนี้ถูกปิดใช้งาน กรุณาติดต่อ InsureHub',
       invalidPassword: 'รหัสผ่านไม่ถูกต้อง',
       // #2 — separate staff / agent login pages.
       staffBadge: 'พนักงานภายใน',

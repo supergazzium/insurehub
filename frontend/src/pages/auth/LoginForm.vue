@@ -76,6 +76,8 @@ async function submitCredentials() {
       errorMsg.value =
         code === 'email_not_found' ? t('auth.login.emailNotFound')
         : code === 'invalid_password' ? t('auth.login.invalidPassword')
+        : code === 'account_pending_approval' ? t('auth.login.accountPendingApproval')
+        : code === 'account_inactive' ? t('auth.login.accountInactive')
         : t('auth.login.invalidCreds')
     } else {
       errorMsg.value = t('auth.login.invalidCreds')

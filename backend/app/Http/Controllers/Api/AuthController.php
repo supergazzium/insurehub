@@ -35,9 +35,13 @@ class AuthController extends Controller
     public function login(LoginRequest $request): JsonResponse
     {
         $data = $request->validated();
+        // Look up by email WITHOUT the active filter so we can tell a genuinely
+        // unknown email apart from a known-but-inactive account. A pending agent
+        // (active=false until admin approval) can request a password reset, so
+        // reporting "email not registered" at login was misleading — the email
+        // IS registered, the account just isn't active yet.
         $user = User::query()
             ->where('email', $data['email'])
-            ->where('active', true)
             ->whereNull('deleted_at')
             ->first();
 
@@ -57,10 +61,20 @@ class AuthController extends Controller
             ]);
         }
 
+        // Email + password are correct; now gate on account state with a
+        // specific message instead of the misleading "email_not_found".
+        $agentApproval = $user->agent_id !== null
+            ? Agent::query()->whereKey($user->agent_id)->value('approval_status')
+            : null;
+        if (! (bool) $user->active) {
+            // Pending admin approval vs deactivated → different copy.
+            $code = $agentApproval === 'pending' ? 'account_pending_approval' : 'account_inactive';
+            throw ValidationException::withMessages(['email' => [$code]]);
+        }
         $agentActive = $user->agent_id !== null ? Agent::query()->whereKey($user->agent_id)->value('active') : null;
         if ($agentActive !== null && ! (bool) $agentActive) {
             throw ValidationException::withMessages([
-                'email' => ['บัญชีตัวแทนนี้ถูกปิดใช้งาน กรุณาติดต่อ InsureHub'],
+                'email' => ['account_inactive'],
             ]);
         }
 
