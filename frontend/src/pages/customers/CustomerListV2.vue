@@ -43,9 +43,11 @@ const filters = reactive({
 })
 
 const tierOptions = ref<CustomerTierSetting[]>([
-  { key: 'vip', label: 'VIP', min: 100000 },
-  { key: 'gold', label: 'Gold', min: 50000 },
-  { key: 'silver', label: 'Silver', min: 20000 },
+  { key: 'black_diamond', label: 'I_Black Diamond', min: 700001 },
+  { key: 'diamond', label: 'I_Diamond', min: 300001 },
+  { key: 'platinum', label: 'I_Platinum', min: 100001 },
+  { key: 'gold', label: 'I_Gold', min: 15001 },
+  { key: 'silver', label: 'I_Silver', min: 0 },
 ])
 
 async function loadTiers(): Promise<void> {
@@ -59,7 +61,9 @@ async function loadTiers(): Promise<void> {
 }
 
 const TIER_CLASS: Record<string, string> = {
-  vip: 'bg-violet-50 text-violet-700 ring-1 ring-violet-200',
+  black_diamond: 'bg-slate-800 text-white ring-1 ring-slate-900',
+  diamond: 'bg-sky-50 text-sky-700 ring-1 ring-sky-200',
+  platinum: 'bg-violet-50 text-violet-700 ring-1 ring-violet-200',
   gold: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200',
   silver: 'bg-slate-100 text-slate-700 ring-1 ring-slate-200',
 }

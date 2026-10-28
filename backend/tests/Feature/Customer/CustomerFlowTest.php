@@ -234,16 +234,18 @@ class CustomerFlowTest extends TestCase
             ->assertJsonPath('data.salesSummary.policyCount', 2)
             ->assertJsonPath('data.salesSummary.tier.key', 'gold');
 
+        // Custom thresholds: make platinum the special tier at 50k so our 55k
+        // customer lands there, and disable gold (null min).
         $this->patchJson('/api/v1/tenant', ['customerTiers' => [
-            ['key' => 'vip', 'label' => 'ลูกค้าพิเศษ', 'min' => 50000],
+            ['key' => 'platinum', 'label' => 'ลูกค้าพิเศษ', 'min' => 50000],
             ['key' => 'gold', 'min' => null],
             ['key' => 'silver', 'min' => 10000],
-        ]])->assertOk()->assertJsonPath('data.customerTiers.0.label', 'ลูกค้าพิเศษ');
+        ]])->assertOk();
 
         $this->getJson("/api/v1/customers/{$this->customer->id}")->assertJsonPath('data.salesSummary.tier.label', 'ลูกค้าพิเศษ');
-        $vip = collect($this->getJson('/api/v1/customers?tier=vip&perPage=50')->assertOk()->json('data'));
-        $this->assertSame((string) $this->customer->id, $vip->first()['id']);
-        $this->assertEquals(55000, $vip->first()['totalPremium']);
+        $platinum = collect($this->getJson('/api/v1/customers?tier=platinum&perPage=50')->assertOk()->json('data'));
+        $this->assertSame((string) $this->customer->id, $platinum->first()['id']);
+        $this->assertEquals(55000, $platinum->first()['totalPremium']);
         $this->assertSame([], $this->getJson('/api/v1/customers?tier=gold&perPage=50')->json('data'));
     }
 
