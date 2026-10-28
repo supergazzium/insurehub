@@ -26,11 +26,8 @@ class PayoutGoldenTest extends TestCase
         $this->buildFixtures();
         $this->seedMgm();
 
-        // Golden cases assert per-payee gross/deduction/taxable/vat/wht/net/form
-        // for the unbuilt 3-stage/MGM payout engine (commission_payout_payees is
-        // never populated by the current service). Kept as the spec, marked
-        // incomplete until the engine is built — see COMMISSION_SUITE_BREAKDOWN.md.
-        $this->markTestIncomplete('3-stage/MGM payout engine not yet built — see COMMISSION_SUITE_BREAKDOWN.md');
+        // P2 (payee materialization) is built — these golden cases are the
+        // exact-amount oracle for per-payee gross/deduction/taxable/vat/wht/net/form.
     }
 
     public static function cases(): array
@@ -60,7 +57,7 @@ class PayoutGoldenTest extends TestCase
             : $this->runStructureCase($first);
 
         $batch = CommissionPayoutBatch::query()->latest('id')->firstOrFail();
-        $batch = $service->approveBatch($batch, $this->admin->id);
+        $batch = $service->approveBatch($batch, $this->staff->id);
 
         foreach ($expected as $row) {
             $agent = $roles[$row['role']];
@@ -103,7 +100,7 @@ class PayoutGoldenTest extends TestCase
         $seller = $this->payoutAgent(1, $upline);
         $old = $this->sellAndPay($seller);
         $first = $service->createBatch((int) $this->tenant->id, null, null, $this->admin->id);
-        $service->markPaid($service->approveBatch($first, $this->admin->id), now()->toDateString(), 'TRF-1', $this->admin->id);
+        $service->markPaid($service->approveBatch($first, $this->staff->id), now()->toDateString(), 'TRF-1', $this->admin->id);
 
         $old->update(['status' => 'cancelled', 'cancel_date' => now()->toDateString()]);
         $this->actingAsAdmin();

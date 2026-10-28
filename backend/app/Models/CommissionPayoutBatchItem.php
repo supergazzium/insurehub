@@ -45,6 +45,12 @@ class CommissionPayoutBatchItem extends Model
         return $this->belongsTo(Agent::class);
     }
 
+    /** The agent whose SALE produced this line (seller for override/referral lines). */
+    public function sourceAgent(): BelongsTo
+    {
+        return $this->belongsTo(Agent::class, 'source_agent_id');
+    }
+
     /** Frozen total for this item = main + rider agent commission. */
     public function total(): float
     {

@@ -43,16 +43,38 @@ class CommissionPayoutV2Test extends TestCase
         $this->seedMgm();
         $this->service = app(CommissionPayoutService::class);
 
-        // These tests are the SPEC for the unbuilt "3-stage / MGM" payout engine
-        // (upline override/referral line-splitting, pro-rata installment payout,
-        // CommissionLedger linkage, payee population + ภ.ง.ด. cert numbering,
-        // WHT PND3/53 reports, role permissions, clawback-split merge, portal
-        // earnings). The schema landed (migration commission_payout_v2) but the
-        // service code was never written — see backend/COMMISSION_SUITE_BREAKDOWN.md.
-        // Kept as a living spec and marked incomplete (green, not deleted) until
-        // the engine is built; un-skip each test as its feature lands.
-        $this->markTestIncomplete('3-stage/MGM payout engine not yet built — see COMMISSION_SUITE_BREAKDOWN.md');
+        // The 3-stage/MGM payout engine is built phase-by-phase (see
+        // backend/PAYOUT_3STAGE_P1_DESIGN.md + COMMISSION_SUITE_BREAKDOWN.md).
+        // A test is un-skipped once its phase lands; everything else stays
+        // incomplete (green, not deleted — still the living spec).
+        if (! in_array($this->name(), self::BUILT_TESTS, true)) {
+            $this->markTestIncomplete('3-stage payout engine: this phase not yet built — see backend/PAYOUT_3STAGE_P1_DESIGN.md');
+        }
     }
+
+    /** Tests whose feature phase has landed (un-skipped). Grows per phase. */
+    private const BUILT_TESTS = [
+        // P1 — ledger-driven collection core:
+        'test_upline_lines_are_paid_once_and_the_direct_base_is_never_paid_twice',
+        'test_engine_caps_the_commission_base_cumulatively_at_net_premium',
+        'test_a_payment_whose_commission_is_in_a_payout_cannot_be_voided',
+        // P2 — payee materialization: the 19 PayoutGoldenTest cases are the P2
+        // oracle (exact amounts). #7 (cancelled-on-pay exclusion) and #13 (portal
+        // ready-amount for uplines) are MIXED — they land with their later deps.
+        // P3 — cert numbering + 50-ทวิ cert / statement PDFs + bank.csv + WHT report:
+        'test_certificates_are_numbered_and_the_monthly_report_lists_withholding',
+        // P4 — pro-rata installment payment + waiting bucket (freelook/customer):
+        'test_installment_policy_is_paid_pro_rata_and_the_rest_survives_a_date_filter',
+        'test_freelook_blocks_a_life_policy_until_the_period_ends',
+        // P5 — measuring gap (may not all pass yet):
+        'test_insurer_condition_holds_lines_until_received_and_override_needs_a_reason_and_audit',
+        'test_permissions_are_enforced_and_the_finance_role_can_pay',
+        'test_a_policy_cancelled_after_batching_is_excluded_on_pay_and_its_ledger_released',
+        'test_cancelling_a_batch_releases_ledger_rows_and_merges_split_clawbacks',
+        'test_legacy_batches_keep_their_old_behaviour_and_block_a_repay',
+        'test_upline_clawback_follows_the_seller_ratio_and_is_zero_when_not_applicable',
+        'test_portal_earnings_show_ready_waiting_and_paid_history_with_own_documents',
+    ];
 
     private function conditions(bool $freelook, bool $insurer, bool $customer): void
     {
@@ -82,7 +104,9 @@ class CommissionPayoutV2Test extends TestCase
 
     private function payBatch(CommissionPayoutBatch $batch, string $date = '2026-10-05'): CommissionPayoutBatch
     {
-        return $this->service->markPaid($this->service->approveBatch($batch, $this->admin->id), $date, 'TRF', $this->admin->id);
+        // Approve as a DIFFERENT user than the creator (admin) to satisfy the
+        // maker-checker guard (money-safety 1D).
+        return $this->service->markPaid($this->service->approveBatch($batch, $this->staff->id), $date, 'TRF', $this->admin->id);
     }
 
     public function test_upline_lines_are_paid_once_and_the_direct_base_is_never_paid_twice(): void
@@ -242,7 +266,7 @@ class CommissionPayoutV2Test extends TestCase
         $seller = $this->payoutAgent(1, $upline);
         $keep = $this->sellAndPay($seller);
         $drop = $this->sellAndPay($seller);
-        $batch = $this->service->approveBatch($this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id), $this->admin->id);
+        $batch = $this->service->approveBatch($this->service->createBatch((int) $this->tenant->id, null, null, $this->admin->id), $this->staff->id);
         $drop->update(['status' => 'cancelled']);
 
         try {

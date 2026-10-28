@@ -43,6 +43,8 @@ export interface BatchItemRow {
   policyId: string
   policyNo: string | null
   applicationNo: string | null
+  policyType?: 'life' | 'cmi' | 'non_life' | null
+  policyTypeLabel?: string | null
   amount: number
   source: string | null
   status: string

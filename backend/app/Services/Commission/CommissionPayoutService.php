@@ -5,12 +5,17 @@ declare(strict_types=1);
 namespace App\Services\Commission;
 
 use App\Models\AuditEntry;
+use App\Models\CommissionLedger;
 use App\Models\CommissionPayoutAdjustment;
 use App\Models\CommissionPayoutBatch;
 use App\Models\CommissionPayoutBatchAgent;
 use App\Models\CommissionPayoutBatchItem;
+use App\Models\CommissionPayoutPayee;
+use App\Models\Policy;
 use App\Models\PolicyRebate;
+use App\Support\PayoutTax;
 use Carbon\CarbonImmutable;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
 use RuntimeException;
 
@@ -31,6 +36,42 @@ class CommissionPayoutService
 
     /** Withholding-tax rate applied to agent commission (หัก ณ ที่จ่าย 3%). */
     public const WHT_RATE = 0.03;
+
+    /**
+     * Full payee money breakdown for one beneficiary — the exact golden-CSV rule
+     * (tests/fixtures/payout-golden.csv). `$gross` is the sum of the agent's
+     * commission lines; `$deduction` is any clawback/correction applied BEFORE
+     * tax. Returns all persisted payee amounts.
+     *
+     *   taxable = include: gross/1.07 · else: gross − deduction
+     *   vat     = include: gross − taxable · exclude: taxable × 7% · none: 0
+     *   total   = include: gross · exclude: taxable + vat · none: taxable
+     *   wht     = taxable × wht_rate
+     *   net     = total − wht
+     *
+     * @return array{taxable: float, vat: float, total: float, wht: float, net: float}
+     */
+    public static function payeeAmounts(float $gross, float $deduction, string $vatType, float $whtRate = self::WHT_RATE): array
+    {
+        $afterDeduct = round($gross - $deduction, 2);
+        if ($vatType === '3') {              // VAT Include — VAT carved out of gross
+            $taxable = round($afterDeduct / 1.07, 2);
+            $vat = round($afterDeduct - $taxable, 2);
+            $total = $afterDeduct;
+        } elseif ($vatType === '2') {        // VAT Exclude — VAT added on top
+            $taxable = $afterDeduct;
+            $vat = round($afterDeduct * 0.07, 2);
+            $total = round($afterDeduct + $vat, 2);
+        } else {                             // non-VAT
+            $taxable = $afterDeduct;
+            $vat = 0.0;
+            $total = $afterDeduct;
+        }
+        $wht = round($taxable * $whtRate, 2);
+        $net = round($total - $wht, 2);
+
+        return ['taxable' => $taxable, 'vat' => $vat, 'total' => $total, 'wht' => $wht, 'net' => $net];
+    }
 
     /**
      * Eligible-item query, shared by preview() and createBatch() so the
@@ -124,6 +165,150 @@ class CommissionPayoutService
         }
 
         return '1';
+    }
+
+    // ── 3-stage ledger-driven payout (calc_version 2) ───────────────────────
+    // The v2 path consumes the CommissionLedger rows MgmCommissionEngine already
+    // accrues (DIRECT_COMMISSION / MANAGEMENT_DIFFERENTIAL / REFERRAL_FEE) rather
+    // than re-deriving from policies.comm_hub_to_agent_amount. Grouping is by
+    // BENEFICIARY (so uplines get paid), one batch item per ledger line.
+    //
+    // DECISION (confirmed): the seller's DIRECT_COMMISSION stays on the existing
+    // per-policy path — its ledger is NOT stamped payout_batch_id and is not
+    // "consumed" here. The batch only ADDS the previously-unpaid upline override
+    // + referral. A `base` item is still snapshotted for the statement, but it
+    // carries no ledger linkage (ledger_id set, payout_batch_id left NULL).
+
+    public const CALC_VERSION = 2;
+
+    /** payout_type → batch-item line_type. */
+    private const LINE_TYPE = [
+        CommissionLedger::TYPE_DIRECT_COMMISSION => 'base',
+        CommissionLedger::TYPE_MANAGEMENT_DIFFERENTIAL => 'override',
+        CommissionLedger::TYPE_REFERRAL_FEE => 'referral',
+    ];
+
+    /** Ledger line types that the batch actually consumes (stamps + settles).
+     *  DIRECT is excluded — it pays via the per-policy path. */
+    private const CONSUMED_TYPES = [
+        CommissionLedger::TYPE_MANAGEMENT_DIFFERENTIAL,
+        CommissionLedger::TYPE_REFERRAL_FEE,
+    ];
+
+    /**
+     * Unpaid payable ledger lines for a tenant, partitioned ready/waiting by the
+     * PayoutEligibility gate. Each line is one CommissionLedger row not yet in a
+     * live batch.
+     *
+     * @return array{ready: list<array<string,mixed>>, waiting: list<array<string,mixed>>}
+     */
+    public function collectLines(int $tenantId, ?string $from = null, ?string $to = null, ?int $agentId = null): array
+    {
+        $q = CommissionLedger::query()
+            ->join('policies as p', 'p.id', '=', 'commission_ledgers.policy_id')
+            ->join('agents as a', 'a.id', '=', 'commission_ledgers.beneficiary_agent_id')
+            ->where('commission_ledgers.tenant_id', $tenantId)
+            ->where('commission_ledgers.status', CommissionLedger::STATUS_UNSETTLED)
+            ->whereNull('commission_ledgers.payout_batch_id')
+            ->whereIn('commission_ledgers.payout_type', CommissionLedger::PAYABLE_TYPES)
+            ->whereNull('p.deleted_at')
+            ->where('p.status', '!=', 'cancelled')
+            // As-of cutoff on the policy's วันแจ้งงาน (created_at): a payout run
+            // pays every eligible commission for policies booked up to <to>.
+            // `from` is only the batch-label lower bound, NOT a selection gate —
+            // an already-earned, still-unpaid slice must survive a narrow or
+            // forward window (test "the rest survives a date filter").
+            ->when($to !== null, fn ($qq) => $qq->where('p.created_at', '<', CarbonImmutable::parse($to, 'Asia/Bangkok')->addDay()->startOfDay()))
+            ->when($agentId !== null, fn ($qq) => $qq->where('commission_ledgers.beneficiary_agent_id', $agentId))
+            ->select([
+                'commission_ledgers.id as ledger_id',
+                'commission_ledgers.policy_id',
+                'commission_ledgers.payout_type',
+                'commission_ledgers.beneficiary_agent_id',
+                'commission_ledgers.source_agent_id',
+                'commission_ledgers.amount',
+                'p.policy_no', 'p.application_no', 'p.created_at as policy_created_at',
+                'p.main_premium', 'p.discount_amount', 'p.credit_card_fee',
+                'a.agent_code', 'a.has_vat', 'a.vat_mode', 'a.vat_type', 'a.kind as agent_kind',
+                DB::raw("CONCAT_WS(' ', a.first_name, a.last_name) as agent_name"),
+            ])
+            ->get();
+
+        $policyIds = $q->pluck('policy_id')->map(fn ($v) => (int) $v)->unique()->values()->all();
+        $gates = $policyIds === [] ? [] : app(PayoutEligibility::class)->evaluate($tenantId, $policyIds);
+
+        // Cumulative amount already snapshotted per ledger by live (not
+        // cancelled/reversed) batches — the floor for the next increment so an
+        // installment policy is only ever paid the newly-earned slice.
+        $ledgerIds = $q->pluck('ledger_id')->map(fn ($v) => (int) $v)->unique()->values()->all();
+        $paidByLedger = $ledgerIds === [] ? collect() : CommissionPayoutBatchItem::query()
+            ->join('commission_payout_batches as b', 'b.id', '=', 'commission_payout_batch_items.batch_id')
+            ->whereIn('commission_payout_batch_items.ledger_id', $ledgerIds)
+            ->whereNotIn('b.status', [CommissionPayoutBatch::STATUS_CANCELLED, CommissionPayoutBatch::STATUS_REVERSED])
+            ->where('commission_payout_batch_items.item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)
+            ->groupBy('commission_payout_batch_items.ledger_id')
+            ->selectRaw('commission_payout_batch_items.ledger_id, SUM(commission_payout_batch_items.snapshot_agent_commission) as paid')
+            ->pluck('paid', 'commission_payout_batch_items.ledger_id');
+
+        $ready = [];
+        $waiting = [];
+        foreach ($q as $r) {
+            $gate = $gates[(int) $r->policy_id] ?? null;
+            $hasOverride = ($gate['override'] ?? null) !== null;
+            $gateReasons = $hasOverride ? [] : ($gate['gates'] ?? []);
+            // Hard gates (freelook / insurer) block the WHOLE line regardless of ratio.
+            $hardBlocked = $gateReasons !== [];
+
+            [$num, $den] = $gate['ratio'] ?? [1, 1];
+            $ratioLabel = $gate['ratioLabel'] ?? null;
+
+            // The engine already pro-rated by accruing ONE ledger row per
+            // payment, so the ledger amount IS the earned slice — never re-apply
+            // the ratio to it. $alreadyPaid only matters if a prior batch for the
+            // same ledger was cancelled/reversed (then this re-pays the gap).
+            $full = round((float) $r->amount, 2);
+            $alreadyPaid = round((float) ($paidByLedger[(int) $r->ledger_id] ?? 0), 2);
+            $payableNow = round($full - $alreadyPaid, 2);
+
+            $line = [
+                'ledgerId' => (int) $r->ledger_id,
+                'policyId' => (int) $r->policy_id,
+                'policyNo' => $r->policy_no,
+                'applicationNo' => $r->application_no,
+                'payoutType' => $r->payout_type,
+                'lineType' => self::LINE_TYPE[$r->payout_type] ?? 'base',
+                'beneficiaryAgentId' => (int) $r->beneficiary_agent_id,
+                'sourceAgentId' => $r->source_agent_id !== null ? (int) $r->source_agent_id : null,
+                'agentCode' => $r->agent_code,
+                'agentName' => $r->agent_name,
+                'fullAmount' => $full,
+                'alreadyPaid' => $alreadyPaid,
+                'amount' => $payableNow,
+                'ratio' => [$num, $den],
+                'ratioLabel' => $ratioLabel,
+                'vatType' => $this->resolveVatType($r),
+                'agentKind' => $r->agent_kind,
+                'policyCreatedAt' => $r->policy_created_at,
+                'override' => $gate['override'] ?? null,
+                'reasons' => $gateReasons,
+                'raw' => $r,
+            ];
+
+            // Ready only when NOT hard-blocked AND there is a positive increment
+            // to pay this round. Everything else (freelook, customer-unpaid=0,
+            // future installments) is waiting.
+            if (! $hardBlocked && $payableNow > 0) {
+                $ready[] = $line;
+            } else {
+                $line['reasons'] = array_merge(
+                    $gateReasons,
+                    (! $hasOverride && ($gate['customerReason'] ?? null)) ? [$gate['customerReason']] : [],
+                );
+                $waiting[] = $line;
+            }
+        }
+
+        return ['ready' => $ready, 'waiting' => $waiting];
     }
 
     /**
@@ -372,14 +557,33 @@ class CommissionPayoutService
      */
     public function byAgent(int $tenantId, ?string $from = null, ?string $to = null): array
     {
-        $preview = $this->preview($tenantId, $from, $to);
-        // preview() already groups by agent with agentCode/agentName/vatType/
-        // itemCount/amount — exactly the shape the landing page needs. Filter
-        // out any null-agent bucket and sort by amount owed (desc).
-        $agents = array_values(array_filter(
-            $preview['agents'],
-            fn ($a) => ! empty($a['agentId']),
-        ));
+        // v2: group READY ledger lines by beneficiary so uplines (override /
+        // referral) appear alongside the seller's direct commission.
+        $ready = $this->collectLines($tenantId, $from, $to)['ready'];
+        $byAgent = [];
+        foreach ($ready as $line) {
+            $key = $line['beneficiaryAgentId'];
+            if (! isset($byAgent[$key])) {
+                $byAgent[$key] = [
+                    'agentId' => (string) $key,
+                    'agentCode' => $line['agentCode'],
+                    'agentName' => $line['agentName'],
+                    'vatType' => $line['vatType'],
+                    'itemCount' => 0,
+                    'amount' => 0.0,
+                ];
+            }
+            $byAgent[$key]['itemCount']++;
+            $byAgent[$key]['amount'] = round($byAgent[$key]['amount'] + $line['amount'], 2);
+        }
+        // Net transfer per beneficiary = gross − WHT (VAT handled per vat_type;
+        // net_transfer excludes VAT, matching money-safety 1A / createBatch).
+        foreach ($byAgent as $key => $a) {
+            $m = self::payeeAmounts($a['amount'], 0.0, $a['vatType']);
+            $byAgent[$key]['netAmount'] = round($a['amount'] - $m['wht'], 2);
+            $byAgent[$key]['whtAmount'] = $m['wht'];
+        }
+        $agents = array_values($byAgent);
         usort($agents, fn ($a, $b) => ($b['amount'] <=> $a['amount']));
 
         return [
@@ -400,42 +604,90 @@ class CommissionPayoutService
      */
     public function agentDetail(int $tenantId, int $agentId, ?string $from = null, ?string $to = null): array
     {
-        $rows = $this->rows($tenantId, $from, $to, $agentId);
+        // v2 ledger-driven: ready lines are the pay-now increment (pro-rata of
+        // installments already paid); waiting lines are blocked (freelook /
+        // insurer / customer-unpaid) or the not-yet-earned installment remainder.
+        $lines = $this->collectLines($tenantId, $from, $to, $agentId);
+        $agent = null;
         $items = [];
         $total = 0.0;
-        $agent = null;
+        $waiting = [];
+        $waitingAmount = 0.0;
 
-        foreach ($rows as $row) {
-            $amt = $this->resolveAmount($row);
-            $lineTotal = round($amt['main'] + $amt['rider'], 2);
-            $total += $lineTotal;
+        $setAgent = function (array $l) use (&$agent): void {
             if ($agent === null) {
                 $agent = [
-                    'agentId' => (string) $row->agent_id,
-                    'agentCode' => $row->agent_code,
-                    'agentName' => $row->agent_name,
-                    'vatType' => $this->resolveVatType($row),
+                    'agentId' => (string) $l['beneficiaryAgentId'],
+                    'agentCode' => $l['agentCode'],
+                    'agentName' => $l['agentName'],
+                    'vatType' => $l['vatType'],
                 ];
             }
+        };
+
+        foreach ($lines['ready'] as $l) {
+            $setAgent($l);
+            $total += $l['amount'];
+            // The engine accrues one ledger slice per paid installment, so the
+            // not-yet-earned remainder for this policy line = (full expected
+            // commission) − (this earned slice). Derive the full expected from
+            // the slice and the installment ratio (e.g. 600 at 3/10 → 2000).
+            [$rn, $rd] = $l['ratio'] ?? [1, 1];
+            $fullExpected = ($rn > 0 && $rn < $rd) ? round($l['amount'] * $rd / $rn, 2) : $l['amount'];
+            $waitingAmount += max(0, round($fullExpected - $l['amount'], 2));
             $items[] = [
-                'policyId' => (int) $row->policy_id,
-                'policyNo' => $row->policy_no,
-                'applicationNo' => $row->application_no,
-                'basePremium' => round((float) ($row->main_premium ?? 0), 2),
-                'agentCommission' => round($amt['main'], 2),
-                'riderCommission' => round($amt['rider'], 2),
-                'amount' => $lineTotal,
-                'amountSource' => $amt['source'],
-                'policyDate' => $row->policy_created_at ? substr((string) $row->policy_created_at, 0, 10) : null,
+                'policyId' => $l['policyId'],
+                'policyNo' => $l['policyNo'],
+                'applicationNo' => $l['applicationNo'],
+                'lineType' => $l['lineType'],
+                'basePremium' => round((float) ($l['raw']->main_premium ?? 0), 2),
+                'agentCommission' => $l['amount'],
+                'amount' => $l['amount'],
+                'fullAmount' => $l['fullAmount'],
+                'ratioLabel' => $l['ratioLabel'],
+                'amountSource' => 'ledger',
+                'policyDate' => $l['policyCreatedAt'] ? substr((string) $l['policyCreatedAt'], 0, 10) : null,
             ];
         }
+
+        foreach ($lines['waiting'] as $l) {
+            $setAgent($l);
+            $remaining = round($l['fullAmount'] - $l['alreadyPaid'], 2);
+            $waitingAmount += max(0, $remaining);
+            $waiting[] = [
+                'policyId' => $l['policyId'],
+                'policyNo' => $l['policyNo'],
+                'applicationNo' => $l['applicationNo'],
+                'lineType' => $l['lineType'],
+                'amount' => $remaining,
+                'ratioLabel' => $l['ratioLabel'],
+                'reasons' => $l['reasons'],
+                'policyDate' => $l['policyCreatedAt'] ? substr((string) $l['policyCreatedAt'], 0, 10) : null,
+            ];
+        }
+
+        // Pending (unattached) deductions for this agent — clawback / special
+        // deduct / correction that will reduce a future payout. netAmount is the
+        // ready total after those deductions (floored at 0).
+        $pendingDeduction = round((float) CommissionPayoutAdjustment::query()
+            ->where('tenant_id', $tenantId)
+            ->where('agent_id', $agentId)
+            ->whereNull('batch_id')
+            ->where('status', CommissionPayoutAdjustment::STATUS_PENDING)
+            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_CLAWBACK, CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
+            ->sum('amount'), 2);
 
         return [
             'agent' => $agent,
             'items' => $items,
+            'waiting' => $waiting,
             'totals' => [
                 'itemCount' => count($items),
                 'totalAmount' => round($total, 2),
+                'waitingAmount' => round($waitingAmount, 2),
+                'waitingCount' => count($waiting),
+                'pendingDeduction' => $pendingDeduction,
+                'netAmount' => round(max(0, $total - $pendingDeduction), 2),
             ],
         ];
     }
@@ -494,24 +746,29 @@ class CommissionPayoutService
         ?array $agentIds = null,
         ?string $periodLabel = null,
     ): CommissionPayoutBatch {
-        // Only payable rows (commission > 0) enter the batch; ฿0/unrated rows are
-        // data errors surfaced via preview()['needsReview'], never a ฿0 line item.
-        $rows = $this->partitionPayable($this->rows($tenantId, $from, $to, $agentId, $agentIds), $tenantId)['payable'];
-        if ($rows->isEmpty()) {
+        // v2 ledger-driven: snapshot the READY payable ledger lines (one batch
+        // item per line, grouped by beneficiary). DIRECT lines become `base`
+        // items but their ledger is NOT consumed (stays on the per-policy path);
+        // override + referral ledgers ARE consumed (payout_batch_id stamped).
+        $ready = $this->collectLines($tenantId, $from, $to, $agentId);
+        $lines = collect($ready['ready']);
+        if ($agentIds !== null && $agentIds !== []) {
+            $lines = $lines->filter(fn ($l) => in_array($l['beneficiaryAgentId'], $agentIds, true))->values();
+        }
+        // ฿0 lines (e.g. zero-amount management differential) are data, not debt.
+        $lines = $lines->filter(fn ($l) => $l['amount'] > 0)->values();
+        if ($lines->isEmpty()) {
             throw new RuntimeException('ไม่พบรายการค่าคอมที่เข้าเงื่อนไขในช่วงวันที่ที่ระบุ');
         }
 
-        // When no explicit range is given (all-dates payout), record the batch
-        // span from the actual eligible rows so the NOT NULL date columns hold.
+        // When no explicit range is given, span the batch from the lines' policy
+        // dates so the NOT NULL date columns hold.
         if ($from === null || $to === null) {
-            $dates = $rows->pluck('policy_created_at')->filter()->map(fn ($d) => substr((string) $d, 0, 10))->sort()->values();
+            $dates = $lines->pluck('policyCreatedAt')->filter()->map(fn ($d) => substr((string) $d, 0, 10))->sort()->values();
             $today = CarbonImmutable::now('Asia/Bangkok')->toDateString();
             $from ??= $dates->first() ?: $today;
             $to ??= $dates->last() ?: $today;
         }
-        // Label: single month → "มีนาคม 2026"; multi-month span → a range
-        // ("ม.ค. 2024 – ธ.ค. 2026") so it never hides a 2024–2026 span behind
-        // just the end month (1F — the "December 2026 over 2024-2026" bug).
         if ($periodLabel === null) {
             $fromM = CarbonImmutable::parse($from, 'Asia/Bangkok');
             $toM = CarbonImmutable::parse($to, 'Asia/Bangkok');
@@ -521,7 +778,7 @@ class CommissionPayoutService
         }
         $referenceCode = $this->nextReferenceCode($tenantId, $to);
 
-        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $rows, $periodLabel, $referenceCode): CommissionPayoutBatch {
+        return DB::transaction(function () use ($tenantId, $from, $to, $userId, $note, $lines, $periodLabel, $referenceCode): CommissionPayoutBatch {
             $batch = CommissionPayoutBatch::create([
                 'tenant_id' => $tenantId,
                 'reference_code' => $referenceCode,
@@ -529,111 +786,217 @@ class CommissionPayoutService
                 'to_date' => $to,
                 'period_label' => $periodLabel,
                 'status' => CommissionPayoutBatch::STATUS_DRAFT,
+                'calc_version' => self::CALC_VERSION,
                 'created_by_user_id' => $userId,
                 'note' => $note,
             ]);
 
-            // Roll-ups accumulated per agent → commission_payout_batch_agents.
             $byAgent = [];
             $total = 0.0;
-            foreach ($rows as $row) {
-                $amt = $this->resolveAmount($row);
-                $snap = $this->snapshotColumns($row, $amt);
-                $vatType = $this->resolveVatType($row);
-                $itemVat = self::vatFor($amt['main'] + $amt['rider'], $vatType);
-                CommissionPayoutBatchItem::create(array_merge([
+            $consumeLedgerIds = [];
+            foreach ($lines as $line) {
+                $amount = $line['amount'];
+                $vatType = $line['vatType'];
+                $itemVat = self::vatFor($amount, $vatType);
+                $wht = round($amount * self::WHT_RATE, 2);
+
+                CommissionPayoutBatchItem::create([
                     'batch_id' => $batch->id,
                     'tenant_id' => $tenantId,
-                    'policy_id' => $row->policy_id,
-                    'agent_id' => $row->agent_id,
-                    'agent_code' => $row->agent_code,
+                    'policy_id' => $line['policyId'],
+                    'line_type' => $line['lineType'],
+                    'ledger_id' => $line['ledgerId'],
+                    'agent_id' => $line['beneficiaryAgentId'],
+                    'source_agent_id' => $line['sourceAgentId'],
+                    'agent_code' => $line['agentCode'],
                     'vat_type' => $vatType,
                     'vat_amount' => $itemVat,
-                    'snapshot_base_premium' => $amt['base'],
-                    'snapshot_agent_commission' => $amt['main'],
-                    'snapshot_rider_commission' => $amt['rider'],
-                    'amount_source' => $amt['source'],
+                    'snapshot_base_premium' => round((float) ($line['raw']->main_premium ?? 0), 2),
+                    'snapshot_agent_commission' => $amount,
+                    'snapshot_rider_commission' => 0,
+                    'snapshot_wht_rate' => self::WHT_RATE,
+                    'snapshot_wht_amount' => $wht,
+                    'paid_ratio' => ($line['ratio'][1] ?? 0) > 0 ? round($line['ratio'][0] / $line['ratio'][1], 4) : null,
+                    'entitlement_amount' => $line['fullAmount'] ?? $amount,
+                    'ratio_label' => $line['ratioLabel'] ?? null,
+                    'condition_override' => ($line['override'] ?? null) !== null,
+                    'amount_source' => 'ledger',
                     'item_status' => CommissionPayoutBatchItem::ITEM_PENDING,
-                    'original_agent_rebate_status' => $row->agent_rebate_status,
-                ], $snap));
+                ]);
 
-                $key = $row->agent_id ?? 0;
+                // Only override + referral ledgers are consumed by the batch.
+                if (in_array($line['payoutType'], self::CONSUMED_TYPES, true)) {
+                    $consumeLedgerIds[] = $line['ledgerId'];
+                }
+
+                $key = $line['beneficiaryAgentId'];
                 if (! isset($byAgent[$key])) {
                     $byAgent[$key] = [
-                        'agent_id' => $row->agent_id,
-                        'agent_code' => $row->agent_code,
-                        'agent_name' => $row->agent_name,
-                        'vat_type' => $vatType,
-                        'item_count' => 0,
-                        'gross_commission' => 0.0,
-                        'wht_amount' => 0.0,
-                        'vat_amount' => 0.0,
-                        'payoff_card' => 0.0,
+                        'agent_id' => $key, 'agent_code' => $line['agentCode'], 'agent_name' => $line['agentName'],
+                        'vat_type' => $vatType, 'item_count' => 0,
+                        'gross_commission' => 0.0, 'wht_amount' => 0.0, 'vat_amount' => 0.0,
                     ];
                 }
                 $byAgent[$key]['item_count']++;
-                $byAgent[$key]['gross_commission'] += $amt['main'] + $amt['rider'];
-                $byAgent[$key]['wht_amount'] += (float) $snap['snapshot_wht_amount'];
+                $byAgent[$key]['gross_commission'] += $amount;
+                $byAgent[$key]['wht_amount'] += $wht;
                 $byAgent[$key]['vat_amount'] += $itemVat;
-                $byAgent[$key]['payoff_card'] += (float) $snap['snapshot_payoff_discount'] + (float) $snap['snapshot_card_fee'];
-                $total += $amt['main'] + $amt['rider'];
+                $total += $amount;
             }
 
-            // Decrypt bank once per agent via the model (columns are encrypted at rest).
+            // Stamp the consumed ledgers into this batch (DIRECT stays untouched).
+            if ($consumeLedgerIds !== []) {
+                CommissionLedger::whereIn('id', $consumeLedgerIds)->update(['payout_batch_id' => $batch->id]);
+            }
+
+            // Per-beneficiary roll-up + bank (encrypted → via model) + Phase-1 guards.
             $agentIdList = array_values(array_filter(array_map(fn ($a) => $a['agent_id'], $byAgent)));
-            $bank = \App\Models\Agent::query()
-                ->whereIn('id', $agentIdList)
-                ->get(['id', 'bank_account_no', 'bank_account_name'])
-                ->keyBy('id');
+            $bank = \App\Models\Agent::query()->whereIn('id', $agentIdList)
+                ->get(['id', 'bank_account_no', 'bank_account_name'])->keyBy('id');
 
             foreach ($byAgent as $a) {
                 $gross = round($a['gross_commission'], 2);
-                $deduct = round($a['payoff_card'], 2);      // adjustments added later reduce net at pay time
                 $wht = round($a['wht_amount'], 2);
                 $vat = round($a['vat_amount'], 2);
-                // net_transfer is UNCHANGED (no VAT) — the actual paid amount.
-                $net = round($gross - $deduct - $wht, 2);
-                // What net WOULD be if VAT were included — for the discrepancy flag.
-                $vatExpectedNet = round($gross + $vat - $deduct - $wht, 2);
-                $ag = $a['agent_id'] ? ($bank[$a['agent_id']] ?? null) : null;
-                // รอข้อมูล: no bank account on file → flag so markPaid refuses to
-                // transfer to this row until the data is fixed.
+                $net = round($gross - $wht, 2);                      // net_transfer excludes VAT (money-safety 1A)
+                $vatExpectedNet = round($gross + $vat - $wht, 2);
+                $ag = $bank[$a['agent_id']] ?? null;
                 $bankNo = $ag?->bank_account_no;
                 $needsInfo = $bankNo === null || trim((string) $bankNo) === '';
                 CommissionPayoutBatchAgent::create([
-                    'batch_id' => $batch->id,
-                    'tenant_id' => $tenantId,
-                    'agent_id' => $a['agent_id'],
-                    'agent_code' => $a['agent_code'],
-                    'agent_name' => $a['agent_name'],
+                    'batch_id' => $batch->id, 'tenant_id' => $tenantId,
+                    'agent_id' => $a['agent_id'], 'agent_code' => $a['agent_code'], 'agent_name' => $a['agent_name'],
                     'vat_type' => $a['vat_type'],
-                    'bank_account_no' => $bankNo,
-                    'bank_account_name' => $ag?->bank_account_name,
-                    'needs_info' => $needsInfo,
-                    'needs_info_reason' => $needsInfo ? 'ไม่มีเลขบัญชีธนาคาร' : null,
+                    'bank_account_no' => $bankNo, 'bank_account_name' => $ag?->bank_account_name,
+                    'needs_info' => $needsInfo, 'needs_info_reason' => $needsInfo ? 'ไม่มีเลขบัญชีธนาคาร' : null,
                     'item_count' => $a['item_count'],
-                    'gross_commission' => $gross,
-                    'deduct_amount' => $deduct,
-                    'wht_amount' => $wht,
-                    'vat_amount' => $vat,
-                    'net_transfer' => $net,
-                    'vat_expected_net' => $vatExpectedNet,
+                    'gross_commission' => $gross, 'deduct_amount' => 0, 'wht_amount' => $wht,
+                    'vat_amount' => $vat, 'net_transfer' => $net, 'vat_expected_net' => $vatExpectedNet,
                 ]);
             }
 
             $batch->update([
                 'total_agents' => count($byAgent),
-                'total_items' => $rows->count(),
+                'total_items' => $lines->count(),
                 'total_amount' => round($total, 2),
             ]);
 
+            // Attach pending deductions (clawback etc.) for this batch's agents so
+            // they reduce the payee's taxable base (golden G19). A deduction can
+            // only consume up to the agent's gross in this round — if it exceeds
+            // that, attach the capped portion and SPLIT the remainder into a
+            // fresh standalone pending row so it carries to a future batch.
+            $grossByAgent = [];
+            foreach ($byAgent as $k => $a) {
+                $grossByAgent[(int) $k] = round((float) $a['gross_commission'], 2);
+            }
+            $pendingAdj = CommissionPayoutAdjustment::query()
+                ->where('tenant_id', $tenantId)
+                ->whereNull('batch_id')
+                ->where('status', CommissionPayoutAdjustment::STATUS_PENDING)
+                ->whereIn('agent_id', array_keys($byAgent))
+                ->get();
+            foreach ($pendingAdj as $adj) {
+                $gross = $grossByAgent[(int) $adj->agent_id] ?? 0.0;
+                $amount = round((float) $adj->amount, 2);
+                if ($amount > $gross && $gross > 0) {
+                    // Keep $gross on the attached row; spin the rest off as pending.
+                    $remainder = round($amount - $gross, 2);
+                    CommissionPayoutAdjustment::create([
+                        'tenant_id' => $adj->tenant_id, 'agent_id' => $adj->agent_id, 'agent_code' => $adj->agent_code,
+                        'type' => $adj->type, 'status' => CommissionPayoutAdjustment::STATUS_PENDING,
+                        'amount' => $remainder, 'reason' => $adj->reason, 'created_by_user_id' => $adj->created_by_user_id,
+                    ]);
+                    $adj->update(['batch_id' => $batch->id, 'amount' => $gross, 'status' => CommissionPayoutAdjustment::STATUS_APPLIED]);
+                } else {
+                    $adj->update(['batch_id' => $batch->id, 'status' => CommissionPayoutAdjustment::STATUS_APPLIED]);
+                }
+            }
+
+            // P2: materialize payee rows (base/override/referral split + VAT/WHT).
+            $this->materializePayees($batch->fresh());
+
             $this->audit($tenantId, $userId, 'commission_payout.create', "batch:{$batch->id}", [
                 'from' => $from, 'to' => $to, 'agents' => count($byAgent),
-                'items' => $rows->count(), 'amount' => round($total, 2),
+                'items' => $lines->count(), 'amount' => round($total, 2),
             ]);
 
             return $batch->fresh();
         });
+    }
+
+    /**
+     * Materialize one CommissionPayoutPayee per beneficiary from the batch's
+     * line-typed items + attached deductions, applying the golden VAT/WHT rule.
+     * Idempotent (upsert by batch_id+agent_id) so it can run at create AND
+     * re-run at approve to pick up adjustments. P2 of the 3-stage engine.
+     */
+    public function materializePayees(CommissionPayoutBatch $batch): void
+    {
+        $items = $batch->items()->where('item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)->get();
+        if ($items->isEmpty()) {
+            return;
+        }
+        $agentIds = $items->pluck('agent_id')->filter()->unique()->values()->all();
+        $agents = \App\Models\Agent::query()->whereIn('id', $agentIds)
+            ->get(['id', 'agent_code', 'first_name', 'last_name', 'kind', 'juristic_name', 'tax_id', 'id_card', 'address', 'has_vat', 'vat_mode', 'vat_type', 'bank_name_text', 'bank_account_no', 'bank_account_name'])
+            ->keyBy('id');
+
+        // Deductions per agent: clawback / special_deduct / correction attached to
+        // this batch, applied before tax (golden G19).
+        $deductByAgent = $batch->adjustments()
+            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_CLAWBACK, CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
+            ->get()->groupBy('agent_id')->map(fn ($g) => round((float) $g->sum('amount'), 2));
+
+        foreach ($items->groupBy('agent_id') as $agentId => $agentItems) {
+            if (! $agentId) {
+                continue;
+            }
+            $agent = $agents->get((int) $agentId);
+            $base = 0.0; $override = 0.0; $referral = 0.0;
+            foreach ($agentItems as $it) {
+                $amt = (float) $it->snapshot_agent_commission;
+                match ($it->line_type) {
+                    'referral' => $referral += $amt,
+                    'override' => $override += $amt,
+                    default => $base += $amt,
+                };
+            }
+            $gross = round($base + $override + $referral, 2);
+            $deduction = (float) ($deductByAgent[$agentId] ?? 0);
+            $vatType = $agent ? $this->resolveVatType($agent) : '1';
+            $m = self::payeeAmounts($gross, $deduction, $vatType);
+            $isCorp = ($agent?->kind ?? 'individual') === 'corporate';
+
+            CommissionPayoutPayee::updateOrCreate(
+                ['batch_id' => $batch->id, 'agent_id' => (int) $agentId],
+                [
+                    'tenant_id' => $batch->tenant_id,
+                    'agent_code' => $agent?->agent_code,
+                    'payee_name' => $isCorp ? $agent?->juristic_name : trim(($agent?->first_name ?? '').' '.($agent?->last_name ?? '')),
+                    'payee_kind' => $agent?->kind ?? 'individual',
+                    'payee_tax_id' => $isCorp ? $agent?->tax_id : $agent?->id_card,
+                    'payee_address' => $agent?->address,
+                    'vat_type' => $vatType,
+                    'wht_rate' => self::WHT_RATE * 100,   // stored as percent (3.00)
+                    'wht_form' => $isCorp ? CommissionPayoutPayee::FORM_PND53 : CommissionPayoutPayee::FORM_PND3,
+                    'base_amount' => round($base, 2),
+                    'self_mgmt_amount' => 0,
+                    'referral_amount' => round($referral, 2),
+                    'override_amount' => round($override, 2),
+                    'gross_amount' => $gross,
+                    'deduction_amount' => $deduction,
+                    'taxable_amount' => $m['taxable'],
+                    'vat_amount' => $m['vat'],
+                    'total_amount' => $m['total'],
+                    'wht_amount' => $m['wht'],
+                    'net_amount' => $m['net'],
+                    'bank_name' => $agent?->bank_name_text,
+                    'bank_account_no' => $agent?->bank_account_no,
+                    'bank_account_name' => $agent?->bank_account_name,
+                ],
+            );
+        }
     }
 
     public function addAdjustment(
@@ -676,6 +1039,85 @@ class CommissionPayoutService
     }
 
     /**
+     * Assign sequential 50-ทวิ certificate numbers to every payee in a just-paid
+     * batch. Numbers run per tenant+Buddhist-year, row-locked so concurrent
+     * batches never collide (mirrors the REC- receipt sequence). Already-numbered
+     * payees are left untouched (idempotent on re-pay). Must run inside the
+     * markPaid transaction.
+     */
+    private function assignCertNumbers(CommissionPayoutBatch $batch, string $paymentDate): void
+    {
+        $payees = $batch->payees()->whereNull('cert_no')->orderBy('id')->get();
+        if ($payees->isEmpty()) {
+            return;
+        }
+        $certDate = CarbonImmutable::parse($paymentDate, 'Asia/Bangkok');
+        $year = (int) $certDate->year + 543; // Buddhist year (พ.ศ.) — e.g. 2026 → 2569.
+
+        // Row-lock (or create) this tenant+year sequence so the increment is atomic.
+        $seqRow = DB::table('tax_cert_sequences')
+            ->where('tenant_id', $batch->tenant_id)->where('year', $year)
+            ->lockForUpdate()->first();
+        if ($seqRow === null) {
+            DB::table('tax_cert_sequences')->insert([
+                'tenant_id' => $batch->tenant_id, 'year' => $year, 'last_no' => 0,
+                'created_at' => now(), 'updated_at' => now(),
+            ]);
+            $seqRow = DB::table('tax_cert_sequences')
+                ->where('tenant_id', $batch->tenant_id)->where('year', $year)
+                ->lockForUpdate()->first();
+        }
+        $next = (int) $seqRow->last_no;
+
+        foreach ($payees as $payee) {
+            $next++;
+            $payee->update([
+                'cert_book' => $year,
+                'cert_no' => $next,
+                'cert_date' => $certDate->toDateString(),
+            ]);
+        }
+
+        DB::table('tax_cert_sequences')
+            ->where('tenant_id', $batch->tenant_id)->where('year', $year)
+            ->update(['last_no' => $next, 'updated_at' => now()]);
+    }
+
+    /**
+     * View-model for the 50-ทวิ withholding-tax certificate (pdf.wht-certificate).
+     * Pulls the frozen payee figures; the tax id is decrypted by the model cast.
+     */
+    public function certificateData(CommissionPayoutPayee $payee): array
+    {
+        $tenant = $payee->batch?->tenant;
+
+        return [
+            'batchId' => (int) $payee->batch_id,
+            'book' => $payee->cert_book,
+            'number' => $payee->cert_no,
+            'label' => $payee->certificateLabel(),
+            'date' => $payee->cert_date?->format('d/m/Y'),
+            'form' => $payee->wht_form,
+            'company' => [
+                'name' => $tenant?->name ?? '',
+                'taxId' => $tenant?->tax_id,
+                'address' => $tenant?->address,
+            ],
+            'payee' => [
+                'name' => $payee->payee_name,
+                'code' => $payee->agent_code,
+                'kind' => $payee->payee_kind,
+                'taxId' => $payee->payee_tax_id,
+                'address' => $payee->payee_address,
+            ],
+            'rate' => number_format((float) $payee->wht_rate, 2),
+            'paidAmount' => number_format((float) $payee->taxable_amount, 2),
+            'whtAmount' => number_format((float) $payee->wht_amount, 2),
+            'whtText' => PayoutTax::bahtText((float) $payee->wht_amount),
+        ];
+    }
+
+    /**
      * Mark the whole batch paid — atomic. Writes the paid marker + date into
      * policy_rebates for every item's policy (updateOrCreate, since the rebate
      * row may not exist yet), flips items + batch to paid, and audits.
@@ -692,6 +1134,43 @@ class CommissionPayoutService
             throw new RuntimeException('ต้องอนุมัติ batch ก่อนจึงจะยืนยันการจ่ายได้');
         }
 
+        // Exclude-on-pay: any item whose policy was CANCELLED after the batch was
+        // built must not be paid. Drop those items, release their consumed
+        // ledgers, re-materialize payees, send the batch back to DRAFT for
+        // re-approval, and abort so a human re-checks before money moves.
+        $cancelledPolicyIds = Policy::query()
+            ->whereIn('id', $batch->items()->where('item_status', CommissionPayoutBatchItem::ITEM_PENDING)->pluck('policy_id')->unique())
+            ->where('status', 'cancelled')
+            ->pluck('id')->all();
+        if ($cancelledPolicyIds !== []) {
+            $excludedCount = DB::transaction(function () use ($batch, $cancelledPolicyIds, $userId): int {
+                $drop = $batch->items()
+                    ->where('item_status', CommissionPayoutBatchItem::ITEM_PENDING)
+                    ->whereIn('policy_id', $cancelledPolicyIds)->get();
+                // Release the ledgers these items consumed (override + referral).
+                $ledgerIds = $drop->pluck('ledger_id')->filter()->all();
+                if ($ledgerIds !== []) {
+                    CommissionLedger::whereIn('id', $ledgerIds)->where('payout_batch_id', $batch->id)
+                        ->update(['payout_batch_id' => null]);
+                }
+                $batch->items()->whereIn('id', $drop->pluck('id'))
+                    ->update(['item_status' => CommissionPayoutBatchItem::ITEM_EXCLUDED]);
+                // Rebuild per-agent roll-ups + payees from the surviving items, and
+                // send the batch back to DRAFT so it must be re-approved.
+                $batch->update(['status' => CommissionPayoutBatch::STATUS_DRAFT, 'approved_at' => null, 'approved_by_user_id' => null]);
+                $batch->agentRows()->pluck('agent_id')->filter()->unique()
+                    ->each(fn ($aid) => $this->recomputeAgentRollup($batch, (int) $aid));
+                $this->materializePayees($batch);
+                $this->audit($batch->tenant_id, $userId, 'commission_payout.excluded_on_pay', "batch:{$batch->id}", [
+                    'policies' => array_values($cancelledPolicyIds), 'items' => $drop->count(),
+                ]);
+
+                return $drop->count();
+            });
+
+            throw new RuntimeException("มี {$excludedCount} รายการจากกรมธรรม์ที่ถูกยกเลิก — นำออกจากรอบแล้ว กรุณาตรวจสอบและอนุมัติใหม่ก่อนจ่าย");
+        }
+
         // 1B hard guard: never transfer to an agent with no bank account.
         $needsInfo = $batch->agentRows()->where('needs_info', true)->where('paid', false)->where('reversed', false)->pluck('agent_code');
         if ($needsInfo->isNotEmpty()) {
@@ -703,13 +1182,22 @@ class CommissionPayoutService
 
             foreach ($items as $item) {
                 // Guard: the policy must not have been paid by another live batch.
-                $paidElsewhere = CommissionPayoutBatchItem::query()
-                    ->where('policy_id', $item->policy_id)
+                // Double-pay guard. The unit paid at most once is the LEDGER
+                // SLICE (v2): one accrued row = one installment's commission. An
+                // installment policy legitimately spans several batches via
+                // different ledger_ids, so scope by ledger_id when present and
+                // fall back to policy_id for legacy (v1) items that have none.
+                $dupQuery = CommissionPayoutBatchItem::query()
                     ->where('batch_id', '!=', $batch->id)
                     ->where('item_status', CommissionPayoutBatchItem::ITEM_PAID)
-                    ->exists();
-                if ($paidElsewhere) {
-                    throw new RuntimeException("กรมธรรม์ #{$item->policy_id} ถูกจ่ายค่าคอมไปแล้วโดย batch อื่น");
+                    ->when(
+                        $item->ledger_id !== null,
+                        fn ($q) => $q->where('ledger_id', $item->ledger_id),
+                        fn ($q) => $q->whereNull('ledger_id')->where('policy_id', $item->policy_id),
+                    );
+                if ($dupQuery->exists()) {
+                    $label = $item->ledger_id !== null ? "รายการค่าคอม (ledger #{$item->ledger_id})" : "กรมธรรม์ #{$item->policy_id}";
+                    throw new RuntimeException("{$label} ถูกจ่ายค่าคอมไปแล้วโดย batch อื่น");
                 }
 
                 PolicyRebate::updateOrCreate(
@@ -736,6 +1224,14 @@ class CommissionPayoutService
                         'payment_reference' => $ar->payment_reference ?: $reference,
                     ]);
                 });
+
+            // v2: settle the ledger rows this batch consumed (override + referral).
+            CommissionLedger::where('payout_batch_id', $batch->id)
+                ->where('status', CommissionLedger::STATUS_UNSETTLED)
+                ->update(['status' => CommissionLedger::STATUS_SETTLED, 'paid_at' => now()]);
+
+            // v2: stamp sequential 50-ทวิ certificate numbers on this batch's payees.
+            $this->assignCertNumbers($batch, $paymentDate);
 
             $batch->update([
                 'status' => CommissionPayoutBatch::STATUS_PAID,
@@ -842,6 +1338,10 @@ class CommissionPayoutService
             'approved_by_user_id' => $userId,
             'approved_at' => now(),
         ]);
+        // Re-freeze payees at approval so they reflect any exclude/adjust since create.
+        if ((int) $batch->calc_version === self::CALC_VERSION) {
+            $this->materializePayees($batch->fresh());
+        }
         $this->audit($batch->tenant_id, $userId, 'commission_payout.approve', "batch:{$batch->id}", []);
 
         return $batch->fresh();
@@ -885,16 +1385,43 @@ class CommissionPayoutService
         }
         // 1F: a cancelled batch must never carry paid-* fields (reachable via
         // reverseAgent leaving them set before a cancel).
-        $batch->update([
-            'status' => CommissionPayoutBatch::STATUS_CANCELLED,
-            'payment_date' => null,
-            'paid_at' => null,
-            'paid_by_user_id' => null,
-            'payment_reference' => null,
-        ]);
-        $this->audit($batch->tenant_id, $userId, 'commission_payout.cancel', "batch:{$batch->id}", []);
+        return DB::transaction(function () use ($batch, $userId): CommissionPayoutBatch {
+            // Release every ledger this batch consumed back to the ready pool.
+            CommissionLedger::where('payout_batch_id', $batch->id)
+                ->update(['payout_batch_id' => null]);
 
-        return $batch->fresh();
+            // Detach this batch's deductions back to pending, then merge any split
+            // siblings (same agent + type) into a single pending row so a
+            // clawback that was capped+split for the batch becomes whole again.
+            $detached = $batch->adjustments()->get();
+            foreach ($detached as $adj) {
+                $adj->update(['batch_id' => null, 'status' => CommissionPayoutAdjustment::STATUS_PENDING]);
+            }
+            foreach ($detached->groupBy(fn ($a) => $a->agent_id.'|'.$a->type) as $group) {
+                $siblings = CommissionPayoutAdjustment::query()
+                    ->whereNull('batch_id')
+                    ->where('status', CommissionPayoutAdjustment::STATUS_PENDING)
+                    ->where('agent_id', $group->first()->agent_id)
+                    ->where('type', $group->first()->type)
+                    ->get();
+                if ($siblings->count() > 1) {
+                    $keep = $siblings->first();
+                    $keep->update(['amount' => round((float) $siblings->sum('amount'), 2)]);
+                    CommissionPayoutAdjustment::query()->whereIn('id', $siblings->slice(1)->pluck('id'))->delete();
+                }
+            }
+
+            $batch->update([
+                'status' => CommissionPayoutBatch::STATUS_CANCELLED,
+                'payment_date' => null,
+                'paid_at' => null,
+                'paid_by_user_id' => null,
+                'payment_reference' => null,
+            ]);
+            $this->audit($batch->tenant_id, $userId, 'commission_payout.cancel', "batch:{$batch->id}", []);
+
+            return $batch->fresh();
+        });
     }
 
     // ── Wrong-payment handling ───────────────────────────────────────────────
@@ -1157,6 +1684,94 @@ class CommissionPayoutService
      *
      * @return array<string, mixed>|null
      */
+    /**
+     * Rich v2 statement view-model (pdf.commission-statement) for one payee:
+     * company header, payee identity, line-typed sections, deductions, and the
+     * money totals block. Built from the materialized CommissionPayoutPayee +
+     * the batch's line-typed items. Returns [] for a v1 batch (which uses the
+     * legacy pdf.commission-payout blade and needs none of this).
+     */
+    private function v2StatementExtras(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode): array
+    {
+        if ((int) $batch->calc_version !== self::CALC_VERSION) {
+            return [];
+        }
+        $payee = $batch->payees()
+            ->when($agentId !== null, fn ($q) => $q->where('agent_id', $agentId))
+            ->when($agentId === null && $agentCode !== null, fn ($q) => $q->where('agent_code', $agentCode))
+            ->first();
+        if ($payee === null) {
+            return [];
+        }
+        $items = $batch->items()
+            ->with(['policy:id,policy_no,application_no,customer_id', 'policy.customer:id,first_name,last_name', 'sourceAgent:id,agent_code,first_name,last_name'])
+            ->where('agent_id', $payee->agent_id)
+            ->where('item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)
+            ->orderBy('id')->get();
+
+        $defs = [
+            'base' => 'ค่าคอมมิชชั่นหลัก (จากการขายของตนเอง)',
+            'override' => 'ค่าบริหารทีม (Override)',
+            'referral' => 'ค่าแนะนำ (Referral)',
+        ];
+        $sections = [];
+        foreach ($defs as $type => $label) {
+            $rows = $items->where('line_type', $type)->map(fn ($it) => [
+                'policyNo' => $it->policy?->policy_no,
+                'applicationNo' => $it->policy?->application_no,
+                'customerName' => $it->policy?->customer ? trim(($it->policy->customer->first_name ?? '').' '.($it->policy->customer->last_name ?? '')) : null,
+                'base' => round((float) $it->snapshot_base_premium, 2),
+                'commission' => round((float) $it->snapshot_agent_commission, 2),
+                'ratioLabel' => $it->ratio_label,
+                'override' => (bool) $it->condition_override,
+                'source' => $it->sourceAgent ? trim(($it->sourceAgent->first_name ?? '').' '.($it->sourceAgent->last_name ?? '')).' ('.$it->sourceAgent->agent_code.')' : null,
+            ])->values()->all();
+            if ($rows !== []) {
+                $sections[] = ['type' => $type, 'label' => $label, 'rows' => $rows,
+                    'total' => round(array_sum(array_column($rows, 'commission')), 2)];
+            }
+        }
+
+        $deductions = $batch->adjustments()->where('agent_id', $payee->agent_id)
+            ->whereIn('type', [CommissionPayoutAdjustment::TYPE_CLAWBACK, CommissionPayoutAdjustment::TYPE_SPECIAL_DEDUCT, CommissionPayoutAdjustment::TYPE_CORRECTION])
+            ->get()->map(fn ($a) => [
+                'label' => CommissionPayoutAdjustment::TYPE_LABELS[$a->type] ?? $a->type,
+                'policyNo' => null, 'reason' => $a->reason, 'amount' => round((float) $a->amount, 2),
+            ])->values()->all();
+
+        $tenant = $batch->tenant;
+
+        return [
+            'company' => ['name' => $tenant?->name ?? '', 'taxId' => $tenant?->tax_id, 'address' => $tenant?->address],
+            'agent' => [
+                'code' => $payee->agent_code,
+                'name' => $payee->payee_name,
+                'kind' => $payee->payee_kind,
+                'taxId' => $payee->payee_tax_id,
+                'address' => $payee->payee_address,
+                'bankName' => $payee->bank_name,
+                'bankAccountNo' => $payee->bank_account_no,
+            ],
+            'payee' => [
+                'whtFormLabel' => CommissionPayoutPayee::FORM_LABELS[$payee->wht_form] ?? null,
+                'certificate' => $payee->certificateLabel(),
+            ],
+            'sections' => $sections,
+            'deductions' => $deductions,
+            'totals' => [
+                'commission' => round((float) $payee->gross_amount, 2),
+                'deduct' => round((float) $payee->deduction_amount, 2),
+                'baseExVat' => round((float) $payee->taxable_amount, 2),
+                'vat' => round((float) $payee->vat_amount, 2),
+                'totalWithVat' => round((float) $payee->total_amount, 2),
+                'whtRate' => round((float) $payee->wht_rate, 2),
+                'wht' => round((float) $payee->wht_amount, 2),
+                'payable' => round((float) $payee->net_amount, 2),
+                'payableText' => PayoutTax::bahtText((float) $payee->net_amount),
+            ],
+        ];
+    }
+
     public function buildAgentPdfData(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode): ?array
     {
         $items = $batch->items()
@@ -1285,7 +1900,10 @@ class CommissionPayoutService
         $agentName = $agentRow?->agent_name
             ?: ($first->agent ? trim("{$first->agent->first_name} {$first->agent->last_name}") : '');
 
-        return [
+        $v2 = $this->v2StatementExtras($batch, $agentId, $agentCode);
+
+        return array_merge([
+            'version' => (int) $batch->calc_version,
             'vatType' => $vatType,
             'agent' => [
                 'code' => $first->agent_code ?? $agentCode,
@@ -1319,11 +1937,24 @@ class CommissionPayoutService
             ],
             'batch' => [
                 'id' => $batch->id,
+                'docNo' => $batch->reference_code,
                 'periodLabel' => $batch->period_label,
+                'status' => $batch->status,
+                'paymentDate' => $batch->payment_date?->toDateString(),
                 'from' => $batch->from_date?->toDateString(),
                 'to' => $batch->to_date?->toDateString(),
             ],
-        ];
+            'totals' => [
+                // `payable` here = gross commission owed (pre-WHT), matching the
+                // legacy v1 summary where WHT is a separate line. net-of-WHT lives
+                // in columnTotals.payable / netTransfer.
+                'payable' => round($sumCommA, 2),
+                'wht' => round($sumWht, 2),
+                'vat' => round($sumVat, 2),
+                'net' => round($sumPayable, 2),
+                'netTransfer' => $netTransfer,
+            ],
+        ], $v2);
     }
 
     /**
