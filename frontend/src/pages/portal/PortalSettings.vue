@@ -4,13 +4,52 @@
 import { computed, reactive, ref, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute } from 'vue-router'
-import { changePassword, fetchLineConnectUrl, disconnectLine } from '../../api/portal'
+import { changePassword, changeEmail, sendEmailOtp, verifyEmailOtp, fetchLineConnectUrl, disconnectLine } from '../../api/portal'
 import { ApiError } from '../../api/client'
 import { useAuthStore } from '../../stores/auth'
 
 const { t } = useI18n()
 const route = useRoute()
 const auth = useAuthStore()
+
+// ── Email: set / change the login email (esp. for LINE-created placeholder) ──
+const currentEmail = computed(() => auth.user?.email ?? '')
+const emailIsPlaceholder = computed(() => /@line\.local$/i.test(currentEmail.value))
+const emailForm = reactive({ email: '', code: '' })
+const emailOtpToken = ref<string | null>(null)
+const emailOtpSent = ref(false)
+const emailBusy = ref(false)
+const emailMsg = ref<{ ok: boolean; text: string } | null>(null)
+async function emailSendOtp(): Promise<void> {
+  emailMsg.value = null
+  emailBusy.value = true
+  try {
+    await sendEmailOtp(emailForm.email.trim())
+    emailOtpSent.value = true
+    emailMsg.value = { ok: true, text: 'ส่งรหัสยืนยันไปที่อีเมลแล้ว กรุณากรอกรหัส 6 หลัก' }
+  } catch (e: unknown) {
+    emailMsg.value = { ok: false, text: e instanceof ApiError && e.body && (e.body as { errors?: { email?: string[] } }).errors?.email?.[0] ? 'อีเมลนี้ถูกใช้แล้ว หรือไม่ถูกต้อง' : 'ส่งรหัสยืนยันไม่สำเร็จ' }
+  } finally {
+    emailBusy.value = false
+  }
+}
+async function emailSubmit(): Promise<void> {
+  emailMsg.value = null
+  emailBusy.value = true
+  try {
+    const v = await verifyEmailOtp(emailForm.email.trim(), emailForm.code.trim())
+    emailOtpToken.value = v.emailOtpToken
+    await changeEmail(emailForm.email.trim(), v.emailOtpToken)
+    await auth.restore()
+    emailMsg.value = { ok: true, text: 'อัปเดตอีเมลเรียบร้อยแล้ว' }
+    emailOtpSent.value = false
+    Object.assign(emailForm, { email: '', code: '' })
+  } catch (e: unknown) {
+    emailMsg.value = { ok: false, text: e instanceof ApiError ? 'รหัสยืนยันไม่ถูกต้องหรือหมดอายุ' : 'อัปเดตอีเมลไม่สำเร็จ' }
+  } finally {
+    emailBusy.value = false
+  }
+}
 
 // #1 — LINE connect/disconnect. lineLinked comes from the auth user payload.
 const lineLinked = computed(() => auth.user?.lineLinked ?? false)
@@ -93,6 +132,36 @@ async function submit(): Promise<void> {
       <h1 class="text-2xl font-semibold text-slate-900">{{ t('portal.settings.title') }}</h1>
       <p class="text-sm text-slate-500 mt-1">{{ t('portal.settings.subtitle') }}</p>
     </header>
+
+    <!-- Email: set / change login email (LINE-created agents start with a placeholder) -->
+    <section class="card p-5 space-y-3">
+      <h2 class="text-sm font-semibold text-slate-600">อีเมลสำหรับเข้าสู่ระบบ</h2>
+      <p class="text-xs text-slate-500">
+        <template v-if="emailIsPlaceholder">คุณสมัครด้วย LINE และยังไม่ได้ตั้งอีเมล — กรอกอีเมลจริงเพื่อใช้เข้าสู่ระบบและรับการแจ้งเตือน</template>
+        <template v-else>อีเมลปัจจุบัน: <span class="font-medium text-slate-700">{{ currentEmail }}</span></template>
+      </p>
+      <div>
+        <label class="block text-xs text-slate-500 mb-1">อีเมล{{ emailIsPlaceholder ? '' : 'ใหม่' }}</label>
+        <div class="flex gap-2">
+          <input v-model.trim="emailForm.email" type="email" placeholder="you@example.com"
+            class="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-brand-400" />
+          <button type="button" :disabled="emailBusy || !emailForm.email" @click="emailSendOtp"
+            class="shrink-0 rounded-lg border border-slate-300 px-3 py-2 text-sm text-slate-700 hover:bg-slate-50 disabled:opacity-50">
+            <i v-if="emailBusy" class="pi pi-spin pi-spinner" /> ส่งรหัสยืนยัน
+          </button>
+        </div>
+      </div>
+      <div v-if="emailOtpSent">
+        <label class="block text-xs text-slate-500 mb-1">รหัสยืนยัน 6 หลัก (ส่งไปที่อีเมล)</label>
+        <div class="flex gap-2">
+          <input v-model.trim="emailForm.code" inputmode="numeric" maxlength="6" placeholder="______"
+            class="flex-1 px-3.5 py-2.5 border border-slate-300 rounded-lg text-sm tracking-widest focus:outline-none focus:ring-2 focus:ring-brand-400" />
+          <button type="button" :disabled="emailBusy || emailForm.code.length !== 6" @click="emailSubmit"
+            class="shrink-0 rounded-lg bg-brand-600 px-4 py-2 text-sm font-medium text-white hover:bg-brand-700 disabled:opacity-50">ยืนยันและบันทึก</button>
+        </div>
+      </div>
+      <p v-if="emailMsg" :class="['text-xs', emailMsg.ok ? 'text-emerald-600' : 'text-rose-600']">{{ emailMsg.text }}</p>
+    </section>
 
     <form class="card p-5 space-y-4" @submit.prevent="submit">
       <h2 class="text-sm font-semibold text-slate-600">{{ t('portal.settings.changePassword') }}</h2>

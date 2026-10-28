@@ -245,6 +245,19 @@ export function myCertificatePath(batchId: string): string {
   return `me/agent/payouts/${batchId}/certificate`
 }
 
+// Email change (esp. for LINE-created agents with a placeholder email). Reuses
+// the public email-OTP flow: send a code to the new email, verify to get a
+// token, then submit the token to change the login email.
+export function sendEmailOtp(email: string) {
+  return api.post<{ sent: boolean; ttlMinutes: number; cooldownSeconds: number; devCode?: string }>('auth/email-otp/send', { email })
+}
+export function verifyEmailOtp(email: string, code: string) {
+  return api.post<{ verified: boolean; emailOtpToken: string }>('auth/email-otp/verify', { email, code })
+}
+export function changeEmail(email: string, emailOtpToken: string) {
+  return api.post<{ message: string; email: string }>('me/agent/change-email', { email, emailOtpToken })
+}
+
 export function changePassword(currentPassword: string, newPassword: string) {
   return api.post<{ message: string }>('auth/change-password', {
     currentPassword,
