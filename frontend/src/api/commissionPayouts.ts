@@ -99,9 +99,15 @@ export interface AgentOutstandingRow {
   itemCount: number
   amount: number
 }
+export interface OutstandingWaiting {
+  itemCount: number
+  amount: number
+  reasons: { code: string; label: string; count: number }[]
+}
 export interface AgentOutstandingResult {
   agents: AgentOutstandingRow[]
   totals: { totalAgents: number; totalItems: number; totalAmount: number }
+  waiting?: OutstandingWaiting
 }
 export interface AgentDetailItem {
   policyId: number
