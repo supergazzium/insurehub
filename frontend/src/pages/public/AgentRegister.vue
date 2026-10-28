@@ -570,7 +570,7 @@ async function submit(): Promise<void> {
       emailOtpToken: otpToken.value,
     })
     done.value = { agentCode: res.agentCode }
-    setTimeout(() => router.push('/login'), 3500)
+    setTimeout(() => router.push('/agent/login'), 3500)
   } catch (e: unknown) {
     if (e instanceof ApiError && e.body?.errors) {
       // Best-effort translation for known server messages so the field-
@@ -821,7 +821,7 @@ async function submit(): Promise<void> {
 
         <p class="text-center text-sm text-slate-500 mt-4">
           {{ t('agentRegister.haveAccount') }}
-          <RouterLink to="/login" class="text-brand-600 hover:text-brand-700 font-medium">{{ t('agentRegister.login') }}</RouterLink>
+          <RouterLink to="/agent/login" class="text-brand-600 hover:text-brand-700 font-medium">{{ t('agentRegister.login') }}</RouterLink>
         </p>
       </form>
     </div>
