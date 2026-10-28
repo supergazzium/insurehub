@@ -29,6 +29,8 @@ export default {
       backToLogin: 'Back to sign-in',
       invalidCreds: 'Invalid email or password.',
       emailNotFound: 'This email is not registered.',
+      accountPendingApproval: 'Your account is registered but awaiting admin approval — you can sign in once approved.',
+      accountInactive: 'This account is inactive. Please contact InsureHub.',
       invalidPassword: 'Incorrect password.',
       staffBadge: 'Staff',
       staffTitle: 'Staff sign in',
