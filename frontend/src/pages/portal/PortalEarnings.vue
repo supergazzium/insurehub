@@ -32,11 +32,14 @@ const TYPE_CLS: Record<string, string> = {
 }
 const byType = computed(() => data.value?.totals.byType ?? {})
 
-async function doc(kind: 'statement' | 'certificate', batchId: string): Promise<void> {
+async function doc(kind: 'direct' | 'referral' | 'certificate', batchId: string): Promise<void> {
   busy.value = `${kind}-${batchId}`
   error.value = null
   try {
-    await openPdf(kind === 'statement' ? myStatementPath(batchId) : myCertificatePath(batchId))
+    const path = kind === 'certificate'
+      ? myCertificatePath(batchId)
+      : myStatementPath(batchId, kind) // 'direct' | 'referral'
+    await openPdf(path)
   } catch (e: unknown) {
     error.value = e instanceof Error ? e.message : 'เปิดเอกสารไม่สำเร็จ'
   } finally {
@@ -139,8 +142,11 @@ async function doc(kind: 'statement' | 'certificate', batchId: string): Promise<
               <td class="py-1.5 text-right text-rose-600">{{ h.wht > 0 ? `−฿${fmt(h.wht)}` : '—' }}</td>
               <td class="py-1.5 text-right font-semibold text-emerald-700">฿{{ fmt(h.net) }}</td>
               <td class="py-1.5 text-right whitespace-nowrap">
-                <button type="button" class="text-xs text-brand-600 hover:underline mr-2" @click="doc('statement', h.batchId)">
-                  <i :class="['pi text-[10px]', busy === `statement-${h.batchId}` ? 'pi-spin pi-spinner' : 'pi-file-pdf']" /> ใบแจ้งจ่าย
+                <button type="button" class="text-xs text-brand-600 hover:underline mr-2" @click="doc('direct', h.batchId)">
+                  <i :class="['pi text-[10px]', busy === `direct-${h.batchId}` ? 'pi-spin pi-spinner' : 'pi-file-pdf']" /> ใบแจ้งจ่าย (ขายเอง)
+                </button>
+                <button type="button" class="text-xs text-brand-600 hover:underline mr-2" @click="doc('referral', h.batchId)">
+                  <i :class="['pi text-[10px]', busy === `referral-${h.batchId}` ? 'pi-spin pi-spinner' : 'pi-file-pdf']" /> ใบแจ้งจ่าย (ค่าแนะนำ)
                 </button>
                 <button v-if="h.certificate" type="button" class="text-xs text-brand-600 hover:underline" @click="doc('certificate', h.batchId)">
                   <i :class="['pi text-[10px]', busy === `certificate-${h.batchId}` ? 'pi-spin pi-spinner' : 'pi-verified']" /> 50 ทวิ

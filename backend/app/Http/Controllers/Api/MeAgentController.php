@@ -430,14 +430,26 @@ class MeAgentController extends ApiController
         ]);
     }
 
-    public function payoutStatement(Request $request, CommissionPayoutBatch $batch, CommissionPayoutService $payouts, PayoutDocuments $docs)
+    public function payoutStatement(Request $request, CommissionPayoutBatch $batch, CommissionPayoutService $payouts, PayoutDocuments $docs, ?string $doc = null)
     {
         $agent = $this->currentAgent($request);
         abort_unless((int) $batch->tenant_id === (int) $agent->tenant_id && $batch->status === CommissionPayoutBatch::STATUS_PAID, 404);
-        $data = $payouts->buildAgentPdfData($batch, (int) $agent->id, null);
+        $data = $payouts->buildAgentPdfData($batch, (int) $agent->id, null, $doc);
         abort_if($data === null, 404);
 
         return $docs->respond($request, $docs->statement($data), $docs->statementFilename($batch, $data));
+    }
+
+    /** Own-sale (direct) commission statement only. */
+    public function payoutStatementDirect(Request $request, CommissionPayoutBatch $batch, CommissionPayoutService $payouts, PayoutDocuments $docs)
+    {
+        return $this->payoutStatement($request, $batch, $payouts, $docs, 'direct');
+    }
+
+    /** Referral + position commission statement only. */
+    public function payoutStatementReferral(Request $request, CommissionPayoutBatch $batch, CommissionPayoutService $payouts, PayoutDocuments $docs)
+    {
+        return $this->payoutStatement($request, $batch, $payouts, $docs, 'referral');
     }
 
     public function payoutCertificate(Request $request, CommissionPayoutBatch $batch, PayoutDocuments $docs)

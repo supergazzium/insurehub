@@ -39,8 +39,9 @@ final class PayoutDocuments
         $tag = $this->service->vatTag($data['vatType']);
         $name = trim(($data['agent']['name'] ?? '') ?: ($data['agent']['code'] ?? 'agent'));
         $code = $data['agent']['code'] ?? 'agent';
+        $docTag = ['direct' => '_ขายเอง', 'referral' => '_แนะนำ'][$data['doc'] ?? ''] ?? '';
 
-        return $this->safe("{$code}_{$name}_{$mmyyyy}{$tag}").'.pdf';
+        return $this->safe("{$code}_{$name}_{$mmyyyy}{$tag}{$docTag}").'.pdf';
     }
 
     public function certificateFilename(CommissionPayoutPayee $payee): string

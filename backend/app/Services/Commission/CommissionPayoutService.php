@@ -1807,7 +1807,7 @@ class CommissionPayoutService
      * the batch's line-typed items. Returns [] for a v1 batch (which uses the
      * legacy pdf.commission-payout blade and needs none of this).
      */
-    private function v2StatementExtras(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode): array
+    private function v2StatementExtras(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode, ?string $doc = null): array
     {
         if ((int) $batch->calc_version !== self::CALC_VERSION) {
             return [];
@@ -1825,11 +1825,19 @@ class CommissionPayoutService
             ->where('item_status', '!=', CommissionPayoutBatchItem::ITEM_EXCLUDED)
             ->orderBy('id')->get();
 
-        $defs = [
+        // Which line types this document covers. `direct` = own-sale commission
+        // only; `referral` = team override + referral only; null = all (legacy).
+        $allDefs = [
             'base' => 'ค่าคอมมิชชั่นหลัก (จากการขายของตนเอง)',
             'override' => 'ค่าบริหารทีม (Override)',
             'referral' => 'ค่าแนะนำ (Referral)',
         ];
+        $wanted = match ($doc) {
+            'direct' => ['base'],
+            'referral' => ['override', 'referral'],
+            default => ['base', 'override', 'referral'],
+        };
+        $defs = array_intersect_key($allDefs, array_flip($wanted));
         $sections = [];
         foreach ($defs as $type => $label) {
             $rows = $items->where('line_type', $type)->map(fn ($it) => [
@@ -1848,16 +1856,49 @@ class CommissionPayoutService
             }
         }
 
-        $deductions = $batch->adjustments()->where('agent_id', $payee->agent_id)
+        $deductions = $doc === 'direct' ? collect() : $batch->adjustments()->where('agent_id', $payee->agent_id)
             ->whereIn('type', CommissionPayoutAdjustment::DEDUCTION_TYPES)
             ->get()->map(fn ($a) => [
                 'label' => CommissionPayoutAdjustment::TYPE_LABELS[$a->type] ?? $a->type,
                 'policyNo' => null, 'reason' => $a->reason, 'amount' => round((float) $a->amount, 2),
-            ])->values()->all();
+            ]);
 
         $tenant = $batch->tenant;
 
+        // Per-document totals. For a split doc (direct|referral) the payee-row
+        // totals (which cover the WHOLE payout) would double-count tax across the
+        // two PDFs, so recompute VAT/WHT/net on JUST this document's lines.
+        if ($doc === null) {
+            $totals = [
+                'commission' => round((float) $payee->gross_amount, 2),
+                'deduct' => round((float) $payee->deduction_amount, 2),
+                'baseExVat' => round((float) $payee->taxable_amount, 2),
+                'vat' => round((float) $payee->vat_amount, 2),
+                'totalWithVat' => round((float) $payee->total_amount, 2),
+                'whtRate' => round((float) $payee->wht_rate, 2),
+                'wht' => round((float) $payee->wht_amount, 2),
+                'payable' => round((float) $payee->net_amount, 2),
+                'payableText' => PayoutTax::bahtText((float) $payee->net_amount),
+            ];
+        } else {
+            $gross = round(array_sum(array_column($sections, 'total')), 2);
+            $deduction = round((float) $deductions->sum('amount'), 2);
+            $m = self::payeeAmounts($gross, $deduction, $payee->vat_type);
+            $totals = [
+                'commission' => $gross,
+                'deduct' => $deduction,
+                'baseExVat' => $m['taxable'],
+                'vat' => $m['vat'],
+                'totalWithVat' => $m['total'],
+                'whtRate' => round((float) $payee->wht_rate, 2),
+                'wht' => $m['wht'],
+                'payable' => $m['net'],
+                'payableText' => PayoutTax::bahtText($m['net']),
+            ];
+        }
+
         return [
+            'doc' => $doc,
             'company' => ['name' => $tenant?->name ?? '', 'taxId' => $tenant?->tax_id, 'address' => $tenant?->address],
             'agent' => [
                 'code' => $payee->agent_code,
@@ -1873,22 +1914,12 @@ class CommissionPayoutService
                 'certificate' => $payee->certificateLabel(),
             ],
             'sections' => $sections,
-            'deductions' => $deductions,
-            'totals' => [
-                'commission' => round((float) $payee->gross_amount, 2),
-                'deduct' => round((float) $payee->deduction_amount, 2),
-                'baseExVat' => round((float) $payee->taxable_amount, 2),
-                'vat' => round((float) $payee->vat_amount, 2),
-                'totalWithVat' => round((float) $payee->total_amount, 2),
-                'whtRate' => round((float) $payee->wht_rate, 2),
-                'wht' => round((float) $payee->wht_amount, 2),
-                'payable' => round((float) $payee->net_amount, 2),
-                'payableText' => PayoutTax::bahtText((float) $payee->net_amount),
-            ],
+            'deductions' => $deductions->values()->all(),
+            'totals' => $totals,
         ];
     }
 
-    public function buildAgentPdfData(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode): ?array
+    public function buildAgentPdfData(CommissionPayoutBatch $batch, ?int $agentId, ?string $agentCode, ?string $doc = null): ?array
     {
         $items = $batch->items()
             ->with(['policy:id,policy_no,application_no,created_at,customer_id', 'policy.customer:id,first_name,last_name', 'agent:id,agent_code,first_name,last_name,vat_type,has_vat,vat_mode'])
@@ -2016,9 +2047,10 @@ class CommissionPayoutService
         $agentName = $agentRow?->agent_name
             ?: ($first->agent ? trim("{$first->agent->first_name} {$first->agent->last_name}") : '');
 
-        $v2 = $this->v2StatementExtras($batch, $agentId, $agentCode);
+        $v2 = $this->v2StatementExtras($batch, $agentId, $agentCode, $doc);
 
         return array_merge([
+            'doc' => $doc,
             'version' => (int) $batch->calc_version,
             'vatType' => $vatType,
             'agent' => [
