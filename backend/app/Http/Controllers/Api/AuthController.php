@@ -398,7 +398,8 @@ class AuthController extends Controller
             return $fail('exchange_failed');
         }
         $idToken = (string) $tokenRes->json('id_token', '');
-        $lineUserId = $this->lineUserIdFromIdToken($idToken);
+        $profile = $this->lineProfileFromIdToken($idToken);
+        $lineUserId = $profile['sub'];
         if ($lineUserId === null) {
             return $fail('no_profile');
         }
@@ -418,15 +419,26 @@ class AuthController extends Controller
             return redirect()->away("{$front}/portal/settings?line_connected=1");
         }
 
-        // login mode — the LINE account must already be linked.
+        // login mode — find the account linked to this LINE id (any state), or
+        // AUTO-CREATE a pending one on first login (minimal account; KYC + admin
+        // approval come after).
         $user = User::query()
             ->where('line_user_id', $lineUserId)
-            ->where('active', true)
             ->whereNull('deleted_at')
             ->first();
+        $justCreated = false;
         if ($user === null) {
-            return $fail('not_linked');
+            $user = $this->autoCreateLineAgent($lineUserId, $profile['name']);
+            $justCreated = true;
         }
+
+        // Not yet approved → no token; tell the SPA to show the pending message.
+        if (! $user->active) {
+            $flag = $justCreated ? 'line_registered=pending' : 'line_pending=1';
+
+            return redirect()->away("{$front}/agent/login?{$flag}");
+        }
+
         $token = $user->createToken('line')->plainTextToken;
         // Hand the token to the SPA via the fragment so it isn't logged in query
         // strings / server logs; the login page reads it and stores it.
@@ -447,6 +459,89 @@ class AuthController extends Controller
         $payload = json_decode((string) base64_decode(strtr($parts[1], '-_', '+/'), true), true);
         $sub = is_array($payload) ? ($payload['sub'] ?? null) : null;
         return is_string($sub) && $sub !== '' ? $sub : null;
+    }
+
+    /**
+     * Decode the LINE OIDC id_token payload to [sub, name, picture]. With scope
+     * `openid profile` LINE includes the display name + picture; email is NOT
+     * available (would need the `email` scope + review), so auto-created agents
+     * carry a placeholder email and fill KYC later.
+     *
+     * @return array{sub:?string, name:?string, picture:?string}
+     */
+    private function lineProfileFromIdToken(string $idToken): array
+    {
+        $parts = explode('.', $idToken);
+        if (count($parts) < 2) {
+            return ['sub' => null, 'name' => null, 'picture' => null];
+        }
+        $p = json_decode((string) base64_decode(strtr($parts[1], '-_', '+/'), true), true);
+        $p = is_array($p) ? $p : [];
+        $sub = is_string($p['sub'] ?? null) && $p['sub'] !== '' ? $p['sub'] : null;
+
+        return [
+            'sub' => $sub,
+            'name' => is_string($p['name'] ?? null) && $p['name'] !== '' ? $p['name'] : null,
+            'picture' => is_string($p['picture'] ?? null) ? $p['picture'] : null,
+        ];
+    }
+
+    /**
+     * Auto-provision a PENDING agent from a LINE profile on first login. Creates
+     * a minimal Agent (approval_status=pending, active=false) + User with the
+     * LINE user id linked and a placeholder email; KYC is completed after
+     * approval. Mirrors the self-register account shape so admin approval and
+     * the agent portal behave identically. Returns the new (inactive) User.
+     */
+    private function autoCreateLineAgent(string $lineUserId, ?string $displayName): User
+    {
+        $tenantId = $this->defaultTenantId();
+        $name = trim((string) $displayName) !== '' ? trim((string) $displayName) : 'สมาชิก LINE';
+        // Placeholder, unique, obviously-synthetic email until the agent sets a real one.
+        $placeholderEmail = 'line_'.$lineUserId.'@line.local';
+
+        return DB::transaction(function () use ($tenantId, $lineUserId, $name, $placeholderEmail): User {
+            $agent = Agent::create([
+                'tenant_id' => $tenantId,
+                'agent_code' => $this->nextAgentCode($tenantId),
+                'agent_type' => 'IN',
+                'kind' => 'individual',
+                'first_name' => $name,
+                'last_name' => '',
+                'email' => $placeholderEmail,
+                'approval_status' => 'pending',
+                'signup_type' => 'individual',
+                'signup_source' => 'line',
+                'active' => false,
+                'joined_at' => now()->toDateString(),
+                'doc_status' => false,
+            ]);
+
+            $agentRoleId = \App\Models\Role::query()->where('key', 'agent')->value('id');
+            $user = User::create([
+                'tenant_id' => $tenantId,
+                'agent_id' => $agent->id,
+                'name' => $name,
+                'email' => $placeholderEmail,
+                // Random unusable password — this account signs in via LINE only
+                // until the agent sets a password.
+                'password' => Hash::make(Str::random(40)),
+                'role' => 'agent',
+                'role_id' => $agentRoleId,
+                'active' => false,
+                'locale' => 'th',
+                'line_user_id' => $lineUserId,
+            ]);
+
+            AuditEntry::create([
+                'tenant_id' => $tenantId, 'user_id' => null, 'occurred_at' => now(),
+                'actor' => 'line', 'action' => 'agent.self_register_line',
+                'target' => 'agent:'.$agent->id, 'ip' => request()->ip(), 'result' => 'success',
+                'metadata' => ['via' => 'line', 'line_user_id' => $lineUserId],
+            ]);
+
+            return $user;
+        });
     }
 
     /** Disconnect the signed-in user's LINE link. */
