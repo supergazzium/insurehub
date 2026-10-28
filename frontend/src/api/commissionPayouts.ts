@@ -75,6 +75,8 @@ export interface BatchAdjustment {
   agentId: string | null
   agentCode: string | null
   type: AdjustmentType | string
+  typeLabel?: string
+  kind?: 'bonus' | 'deduction'
   amount: number
   reason: string
   createdAt: string | null

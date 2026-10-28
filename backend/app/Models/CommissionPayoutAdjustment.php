@@ -27,6 +27,21 @@ class CommissionPayoutAdjustment extends Model
 
     public const TYPE_COMMISSION_DEDUCTED = 'commission_deducted';
 
+    /**
+     * Every adjustment type that REDUCES an agent's payout (vs TYPE_BONUS which
+     * adds). Single source of truth so the payee taxable base, the agent
+     * roll-up net, the statement PDF, and the CSV export all deduct the same
+     * set — including ค่าคอมที่ตัวแทนหักจากเบี้ยไปแล้ว (commission_deducted) and
+     * ค่าธรรมเนียมผ่อนที่ตัวแทนรับภาระ (installment_cost).
+     */
+    public const DEDUCTION_TYPES = [
+        self::TYPE_CLAWBACK,
+        self::TYPE_SPECIAL_DEDUCT,
+        self::TYPE_CORRECTION,
+        self::TYPE_COMMISSION_DEDUCTED,
+        self::TYPE_INSTALLMENT_COST,
+    ];
+
     public const LEDGER_TYPES = [
         CommissionLedger::TYPE_INSTALLMENT_AGENT_COST => self::TYPE_INSTALLMENT_COST,
         CommissionLedger::TYPE_COMMISSION_PAID_AT_SOURCE => self::TYPE_COMMISSION_DEDUCTED,

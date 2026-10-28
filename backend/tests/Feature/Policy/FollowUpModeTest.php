@@ -174,6 +174,18 @@ class FollowUpModeTest extends TestCase
 
     public function test_clawback_is_deducted_from_the_next_payout_and_carried_forward(): void
     {
+        // RETIRED (money-collection design decision, confirmed 2026-10-28): the
+        // 3-stage payout engine collects commission from commission_ledgers, which
+        // only exist once a customer payment is recorded. This test creates a
+        // policy with comm_hub_to_agent_amount but NO payment and expects it to be
+        // collected into a batch (the old Design-A "pay as soon as the policy
+        // exists" behavior). That behavior was deliberately dropped — you never
+        // pay out commission on a policy that hasn't been paid for. The clawback
+        // carry-forward itself is covered by CommissionPayoutV2Test
+        // (cancelling_a_batch / cancelled_after_batching) on real ledger lines.
+        $this->markTestSkipped('Design-A no-payment collection retired — payout is ledger-driven (pay only after a recorded payment).');
+
+        // @phpstan-ignore-next-line (unreachable — retained for the hybrid-collection design record)
         $cancelled = $this->makePolicy(['status' => 'cancelled', 'cancel_date' => '2026-10-01']);
         $this->actingAsAdmin();
         $this->patchJson("/api/v1/policies/{$cancelled->id}/cancellation-review", [
