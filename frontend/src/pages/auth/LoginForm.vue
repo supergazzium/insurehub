@@ -25,6 +25,7 @@ const form = reactive({ email: '', password: '', remember: true })
 const showPassword = ref(false)
 const submitting = ref(false)
 const errorMsg = ref('')
+const infoMsg = ref('')
 
 const step = ref<'creds' | 'mfa'>('creds')
 const mfaCode = ref(['', '', '', '', '', ''])
@@ -138,6 +139,15 @@ async function lineLogin(): Promise<void> {
 // On return from LINE: a token arrives in the URL fragment (#line_token=…) on
 // success, or ?line_error=… on failure. Handle both, then clean the URL.
 onMounted(async () => {
+  // First LINE login auto-creates a pending agent; a prior unapproved account
+  // returns here too. Both show an informational "waiting for approval" notice.
+  if (route.query.line_registered === 'pending' || route.query.line_pending === '1') {
+    infoMsg.value = route.query.line_registered === 'pending'
+      ? 'สร้างบัญชีตัวแทนด้วย LINE เรียบร้อยแล้ว — รอผู้ดูแลอนุมัติก่อนจึงจะเข้าสู่ระบบได้ เราจะแจ้งเตือนเมื่ออนุมัติแล้ว'
+      : 'บัญชีตัวแทนของคุณกำลังรอการอนุมัติจากผู้ดูแล กรุณารอการอนุมัติก่อนเข้าสู่ระบบ'
+    history.replaceState(null, '', route.path)
+    return
+  }
   const err = typeof route.query.line_error === 'string' ? route.query.line_error : ''
   if (err) {
     errorMsg.value = LINE_ERRORS[err] ?? 'เข้าสู่ระบบด้วย LINE ไม่สำเร็จ'
@@ -204,6 +214,9 @@ onMounted(async () => {
           <span class="text-sm text-slate-600">{{ t('auth.login.remember') }}</span>
         </label>
 
+        <div v-if="infoMsg" class="bg-emerald-50 border border-emerald-200 text-emerald-800 text-sm px-3 py-2 rounded-lg flex items-center gap-2">
+          <i class="pi pi-info-circle" />{{ infoMsg }}
+        </div>
         <div v-if="errorMsg" class="bg-rose-50 border border-rose-200 text-rose-700 text-sm px-3 py-2 rounded-lg flex items-center gap-2">
           <i class="pi pi-exclamation-circle" />{{ errorMsg }}
         </div>
