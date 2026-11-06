@@ -710,21 +710,40 @@ class InsureHubImporter
 
             $income = (float) ($row->annual_income ?? 0);
             [$moo, $mooBan] = $this->splitMoo($primaryAddr->moo ?? null, $primaryAddr->moo_ban ?? null);
+
+            // Resolve true type + correct name/id placement from the messy legacy
+            // shape (company name split across title/name/surname, tax id in the
+            // national_id column, foreigners typed "other", mis-typed rows, etc.).
+            $shape = \App\Support\CustomerShape::resolve([
+                'type_code' => (string) $row->customer_type,
+                'title_th' => $row->title_th,
+                'name_th' => $row->name_th,
+                'surname_th' => $row->surname_th,
+                'national_id' => $row->national_id,
+                'passport' => $row->passport,
+            ]);
+            // Companies don't have a gender; people keep the title-derived one.
+            $gender = $shape['customer_type'] === 'corporate'
+                ? null
+                : (\App\Support\GenderFromTitle::normalize($row->gender) ?? \App\Support\GenderFromTitle::guess($row->title_th));
+
             $payload = [
                 'tenant_id' => $this->tenantId,
                 'customer_code' => $code,
                 'legacy_id' => $row->legacy_id,
-                'customer_type' => $customerTypeMap[(string) $row->customer_type] ?? 'individual',
-                'title_th' => $row->title_th,
-                'first_name' => $row->name_th,
-                'last_name' => $row->surname_th,
-                'title_en' => $row->title_en,
-                'first_name_en' => $row->name_en,
-                'last_name_en' => $row->surname_en,
-                'gender' => \App\Support\GenderFromTitle::normalize($row->gender) ?? \App\Support\GenderFromTitle::guess($row->title_th),
-                'id_card' => $row->national_id,
+                'customer_type' => $shape['customer_type'],
+                'title_th' => $shape['customer_type'] === 'corporate' ? null : $row->title_th,
+                'juristic_name' => $shape['juristic_name'],
+                'first_name' => $shape['first_name'],
+                'last_name' => $shape['last_name'],
+                'title_en' => $shape['customer_type'] === 'corporate' ? null : $row->title_en,
+                'first_name_en' => $shape['customer_type'] === 'corporate' ? null : $row->name_en,
+                'last_name_en' => $shape['customer_type'] === 'corporate' ? null : $row->surname_en,
+                'gender' => $gender,
+                'id_card' => $shape['id_card'],
+                'tax_id' => $shape['tax_id'],
                 'national_id_expiry' => $this->parseDate($row->national_id_expiry),
-                'passport' => $row->passport,
+                'passport' => $shape['passport'],
                 'race' => $row->race,
                 'nationality' => $row->nationality,
                 'religion' => $row->religion,
@@ -755,7 +774,8 @@ class InsureHubImporter
                 'amphoe' => $primaryAddr->khet ?? null,
                 'province' => $primaryAddr->province ?? null,
                 'postcode' => $this->truncStr($primaryAddr->zip_code ?? null, 16),
-                'mailing_same_as_registered' => $mailingAddr === null,
+                'mailing_same_as_registered' => $mailingAddr === null
+                    || $this->sameAddress($primaryAddr, $mailingAddr),
                 'mailing_address' => $mailingAddr->address_no ?? null,
                 'mailing_sub_district' => $mailingAddr->kwang ?? null,
                 'mailing_district' => $mailingAddr->khet ?? null,
@@ -1441,6 +1461,22 @@ class InsureHubImporter
      *
      * @return array{0: ?string, 1: ?string}
      */
+    /** True when the mailing address equals the registered one (so the
+     *  "same as registered" flag should be set even though both rows exist). */
+    private function sameAddress(?object $a, ?object $b): bool
+    {
+        if ($a === null || $b === null) {
+            return false;
+        }
+        foreach (['address_no', 'moo', 'soi', 'road', 'kwang', 'khet', 'province', 'zip_code'] as $f) {
+            if (trim((string) ($a->$f ?? '')) !== trim((string) ($b->$f ?? ''))) {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
     private function splitMoo(mixed $moo, mixed $mooBan): array
     {
         $moo = $moo === null ? null : (string) $moo;
