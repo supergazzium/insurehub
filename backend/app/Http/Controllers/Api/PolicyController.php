@@ -47,15 +47,17 @@ class PolicyController extends ApiController
             ->leftJoin('agents as a', 'a.id', '=', 'p.writing_agent_id')
             ->leftJoin('carriers as ca', 'ca.id', '=', 'p.carrier_id')
             ->leftJoin('products as pr', 'pr.id', '=', 'p.product_id')
-            // Prefer join on the current status code (10-code enum after
-            // C-1/C-2) with a fallback to legacy_policy_status_id for the
-            // 7 pre-existing rows where the code column is NULL. Post-C-20
-            // we drop legacy_policy_status_id and simplify this to the
-            // code-only join.
-            ->leftJoin('policy_statuses as ps', function ($j) {
-                $j->on('ps.code', '=', 'p.status')
-                    ->orOn('ps.id', '=', 'p.legacy_policy_status_id');
-            })
+            // Status label resolves two ways: by the current status code
+            // (10-code enum after C-1/C-2) and by legacy_policy_status_id.
+            // These MUST be two separate joins — a single `orOn` fans out
+            // every row whose code AND legacy id both match (different) rows,
+            // double-counting the list. Harmless pre-migration (only ~7 rows
+            // had a legacy id); after the legacy import fills the legacy id on
+            // most rows it duplicated ~17.5k policies. Pick one label in the
+            // select via COALESCE. Post-C-20 drops legacy_policy_status_id and
+            // this collapses back to the code-only join.
+            ->leftJoin('policy_statuses as ps', 'ps.code', '=', 'p.status')
+            ->leftJoin('policy_statuses as psl', 'psl.id', '=', 'p.legacy_policy_status_id')
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at')
             ->select([
@@ -83,8 +85,10 @@ class PolicyController extends ApiController
                 'ca.name as carrier_name',
                 'pr.code as product_code',
                 'pr.name as product_name',
-                'ps.name_th as status_label',
-                'ps.group_name_th as status_group',
+                // Legacy label preferred for display (see PolicyListResource),
+                // falling back to the code's label when no legacy status.
+                DB::raw('COALESCE(psl.name_th, ps.name_th) as status_label'),
+                DB::raw('COALESCE(psl.group_name_th, ps.group_name_th) as status_group'),
             ]);
 
         if ($search = $request->string('q')->toString()) {
