@@ -53,7 +53,10 @@ final class CustomerShape
         // does NOT override that — the 25 mis-titled corporates), or when a
         // juristic 0-prefixed tax id is present. Only a type-1/3 record with no
         // company signal stays a person.
-        if ($looksCompany || $code === '2' || ($juristicTax && ! $looksPerson)) {
+        // A juristic (0-prefixed) number ALONE is not enough — a Burmese /
+        // foreign-worker pink-card id also starts with 0. Promote to corporate
+        // on a juristic number only when the legacy code already says corporate.
+        if ($looksCompany || $code === '2') {
             $type = 'corporate';
         } elseif ($code === '3' || ($passport !== null && $nid === null)) {
             // Type 3 = foreign; also any passport-only record with no Thai ID.
@@ -71,7 +74,7 @@ final class CustomerShape
                 $name,
                 $surname,
             ], fn ($p) => trim((string) $p) !== '');
-            $juristic = trim(preg_replace('/\s+/', ' ', implode(' ', $parts)));
+            $juristic = self::cleanJuristic(implode(' ', $parts));
 
             return [
                 'customer_type' => 'corporate',
@@ -96,14 +99,17 @@ final class CustomerShape
             ];
         }
 
-        // individual — but a company tax id on a person is kept in tax_id, not id_card
+        // individual — the person's number stays in id_card regardless of its
+        // prefix. A 0-prefixed number here is a foreign-worker / pink-card id,
+        // not a company tax id, and the individual UI has no tax field — so
+        // diverting it to tax_id would hide it entirely.
         return [
             'customer_type' => 'individual',
             'juristic_name' => null,
             'first_name' => $name ?: null,
             'last_name' => self::cleanDash($surname),
-            'tax_id' => $juristicTax ? $nid : null,
-            'id_card' => $juristicTax ? null : $nid,
+            'tax_id' => null,
+            'id_card' => $nid,
             'passport' => $passport,
         ];
     }
@@ -156,5 +162,19 @@ final class CustomerShape
         $v = trim((string) $v);
 
         return ($v === '' || $v === '-') ? null : $v;
+    }
+
+    /** Scrub the legacy junk off a reassembled company name: a leading
+     *  "อื่นๆ" (the "other" placeholder), collapsed inner whitespace, and a
+     *  trailing "-", "0", or stray "จำกัด" duplicate left by the split. */
+    private static function cleanJuristic(string $s): string
+    {
+        $s = preg_replace('/\s+/u', ' ', trim($s));
+        $s = preg_replace('/^อื่นๆ\s*/u', '', $s);          // leading placeholder
+        $s = preg_replace('/[\s\-0]+$/u', '', $s);           // trailing "-", "0", spaces
+        // a surname of "จำกัด" appended to a name already ending in "จำกัด"
+        $s = preg_replace('/(จำกัด)\s+จำกัด$/u', '$1', $s);
+
+        return trim($s);
     }
 }
