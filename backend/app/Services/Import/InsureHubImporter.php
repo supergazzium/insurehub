@@ -33,6 +33,9 @@ class InsureHubImporter
 
     private bool $dryRun = false;
 
+    /** True while the whole run shares one outer transaction (dry-run only). */
+    private bool $inOuterTxn = false;
+
     /** @var list<string>|null */
     private ?array $only = null;
 
@@ -145,6 +148,27 @@ class InsureHubImporter
         // Preload lookup label maps once — used across many steps.
         $this->preloadLegacyLookups($legacy);
 
+        // Dry-run shares ONE outer transaction so later steps can see earlier
+        // steps' inserts (FKs resolve end-to-end), then everything rolls back —
+        // nothing persists. A real run keeps per-step commits (see runStep()).
+        if ($this->dryRun) {
+            $this->inOuterTxn = true;
+            $primary->beginTransaction();
+            try {
+                foreach ($this->availableSteps as $step) {
+                    if ($this->only !== null && ! in_array($step, $this->only, true)) {
+                        continue;
+                    }
+                    $this->runStep($step, $legacy, $primary);
+                }
+            } finally {
+                $primary->rollBack();
+                $this->inOuterTxn = false;
+            }
+
+            return $this->summary;
+        }
+
         foreach ($this->availableSteps as $step) {
             if ($this->only !== null && ! in_array($step, $this->only, true)) {
                 continue;
@@ -185,6 +209,11 @@ class InsureHubImporter
 
         DB::statement('SET FOREIGN_KEY_CHECKS=0');
         foreach ($tables as $table) {
+            if (! \Illuminate\Support\Facades\Schema::hasTable($table)) {
+                $command->line("Skipped (no such table) {$table}");
+
+                continue;
+            }
             DB::table($table)->truncate();
             $command->line("Truncated {$table}");
         }
@@ -194,7 +223,9 @@ class InsureHubImporter
     private function runStep(string $step, ConnectionInterface $legacy, ConnectionInterface $primary): void
     {
         $this->command->info(">>> {$step}");
-        $primary->beginTransaction();
+        if (! $this->inOuterTxn) {
+            $primary->beginTransaction();
+        }
 
         try {
             $counts = match ($step) {
@@ -226,13 +257,18 @@ class InsureHubImporter
                 $counts['skipped'] ?? 0,
             ));
 
-            if ($this->dryRun) {
-                $primary->rollBack();
-            } else {
-                $primary->commit();
+            // In outer-txn (dry-run) mode the outer run() owns commit/rollback.
+            if (! $this->inOuterTxn) {
+                if ($this->dryRun) {
+                    $primary->rollBack();
+                } else {
+                    $primary->commit();
+                }
             }
         } catch (Throwable $e) {
-            $primary->rollBack();
+            if (! $this->inOuterTxn) {
+                $primary->rollBack();
+            }
             $this->command->error("Step {$step} failed: {$e->getMessage()}");
             Log::error('insurehub:import step failed', ['step' => $step, 'error' => $e]);
             throw $e;
