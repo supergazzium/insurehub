@@ -77,7 +77,9 @@ interface FieldDef {
 
 const NAME_FIELDS: FieldDef[] = [
   { path: 'customerType', label: 'ประเภทลูกค้า', type: 'select', options: CUSTOMER_TYPE_OPTIONS },
-  { path: 'titleTh', label: () => (isCorporate.value ? 'คำนำหน้า (นิติบุคคล)' : 'คำนำหน้า') },
+  // Companies keep their prefix (บริษัท/หจก.) inside juristicName, so the
+  // standalone title field is always empty for them — show it only for people.
+  { path: 'titleTh', label: 'คำนำหน้า', show: () => isPerson.value },
   { path: 'juristicName', label: 'ชื่อนิติบุคคล', span: 2, show: () => isCorporate.value },
   { path: 'firstName', label: () => (isForeign.value ? 'ชื่อ (First name)' : 'ชื่อ (ภาษาไทย)'), show: () => isPerson.value },
   { path: 'lastName', label: () => (isForeign.value ? 'นามสกุล (Last name)' : 'นามสกุล (ภาษาไทย)'), show: () => isPerson.value },

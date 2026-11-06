@@ -247,7 +247,7 @@ const detectedIntent = computed<SearchIntent>(() => {
 })
 const intentLabel: Record<SearchIntent, string> = {
   auto: '',
-  idCard: 'เลขบัตรประชาชน',
+  idCard: 'เลขบัตร/เลขผู้เสียภาษี',
   passport: 'Passport',
   phone: 'เบอร์โทร',
   plate: 'เลขทะเบียนรถ',
@@ -621,7 +621,7 @@ const rangeText = computed(() => {
                 </div>
               </td>
               <td class="px-4 py-2">
-                <div class="text-slate-900">{{ p.customerName || p.customerCode }}</div>
+                <div class="text-slate-900 truncate max-w-[220px]" :title="p.customerName ?? ''">{{ p.customerName || p.customerCode }}</div>
                 <div class="text-xs text-slate-500">{{ p.customerCode }}</div>
               </td>
               <td class="px-4 py-2">
