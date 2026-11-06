@@ -52,11 +52,13 @@ class BackfillCustomerCleanup extends Command
         $tenantId = (int) $this->option('tenant');
 
         $reclassified = $this->reclassifyForeignPeople($tenantId, $dry);
+        $thai = $this->reclassifyThaiForeigners($tenantId, $dry);
         $titles = $this->normaliseTitles($tenantId, $dry);
         $genders = $this->fixGenderClashes($tenantId, $dry);
 
         $this->table(['pass', 'affected'], [
             ['reclassified corporate→foreign_individual', $reclassified],
+            ['reclassified foreign(ไทย)→individual', $thai],
             ['titles normalised', $titles],
             ['title/gender clashes fixed', $genders],
         ]);
@@ -96,6 +98,21 @@ class BackfillCustomerCleanup extends Command
                     'tax_id' => null,
                 ]);
             }
+        }
+
+        return $n;
+    }
+
+    /** A foreign_individual whose nationality is ไทย is a Thai citizen typed
+     *  foreign because they were entered with a passport. Move to individual;
+     *  keep the passport on file (it's not a National ID, so id_card stays null). */
+    private function reclassifyThaiForeigners(int $tenantId, bool $dry): int
+    {
+        $q = DB::table('customers')->where('tenant_id', $tenantId)->whereNull('deleted_at')
+            ->where('customer_type', 'foreign_individual')->where('nationality', 'ไทย');
+        $n = $q->count();
+        if ($n > 0 && ! $dry) {
+            $q->update(['customer_type' => 'individual']);
         }
 
         return $n;
