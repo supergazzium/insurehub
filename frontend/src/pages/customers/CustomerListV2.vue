@@ -248,7 +248,7 @@ const rangeText = computed(() => {
                   class="pi text-[10px] ml-1" />
                 <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
               </th>
-              <th class="px-4 py-2 text-left cursor-pointer select-none hover:text-slate-800"
+              <th class="px-4 py-2 text-left cursor-pointer select-none hover:text-slate-800 min-w-[16rem]"
                 @click="toggleSort('firstName')">
                 ชื่อลูกค้า
                 <i v-if="sortBy === 'firstName'"
@@ -265,7 +265,7 @@ const rangeText = computed(() => {
                 <i v-else class="pi pi-sort text-[10px] ml-1 text-slate-300" />
               </th>
               <th class="px-4 py-2 text-left">ประเภท</th>
-              <th class="px-4 py-2 text-left">ID card</th>
+              <th class="px-4 py-2 text-left">เลขประจำตัว</th>
               <th class="px-4 py-2 text-left">โทรศัพท์</th>
               <th class="px-4 py-2 text-left">ตัวแทน</th>
               <th class="px-4 py-2 text-right">Policies</th>
@@ -288,7 +288,7 @@ const rangeText = computed(() => {
                   <div class="w-8 h-8 rounded-full bg-brand-50 text-brand-700 flex items-center justify-center text-xs font-medium shrink-0">
                     {{ customerInitials(c) }}
                   </div>
-                  <div class="text-slate-900">
+                  <div class="text-slate-900 min-w-0 truncate" :title="customerDisplayName(c)">
                     {{ customerDisplayName(c) || '—' }}
                     <span v-if="c.nickname" class="text-xs text-slate-500 ml-1">({{ c.nickname }})</span>
                   </div>

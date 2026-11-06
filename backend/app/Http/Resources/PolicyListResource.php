@@ -58,7 +58,12 @@ class PolicyListResource extends JsonResource
             'premiumCheck' => $this->premium_check ?? '',
             // Joined display columns — saves the client from N+1 lookups.
             'customerCode' => $this->customer_code,
-            'customerName' => trim(($this->customer_first_name ?? '') . ' ' . ($this->customer_last_name ?? '')),
+            // Corporate customers carry their name in juristic_name (incl. the
+            // บริษัท/ห้างหุ้นส่วน prefix); people use first+last. Mirror the
+            // frontend customerDisplayName() helper so names match everywhere.
+            'customerName' => $this->customer_type === 'corporate'
+                ? trim((string) ($this->customer_juristic_name ?? ''))
+                : trim(($this->customer_first_name ?? '') . ' ' . ($this->customer_last_name ?? '')),
             'agentCode' => $this->agent_code,
             'agentName' => trim(($this->agent_first_name ?? '') . ' ' . ($this->agent_last_name ?? '')),
             'carrierCode' => $this->carrier_code,

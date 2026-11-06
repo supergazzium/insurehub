@@ -76,8 +76,10 @@ class PolicyController extends ApiController
                 // license plate + brand/model without an N+1 detail fetch.
                 'p.motor_license_no', 'p.motor_vehicle_brand', 'p.motor_vehicle_model',
                 'c.customer_code',
+                'c.customer_type as customer_type',
                 'c.first_name as customer_first_name',
                 'c.last_name as customer_last_name',
+                'c.juristic_name as customer_juristic_name',
                 'a.agent_code',
                 'a.first_name as agent_first_name',
                 'a.last_name as agent_last_name',

@@ -12,5 +12,11 @@ import type { Router, RouteLocationRaw } from 'vue-router'
  */
 export function openInNewTab(router: Router, to: RouteLocationRaw): void {
   const href = router.resolve(to).href
-  window.open(href, '_blank', 'noopener')
+  const win = window.open(href, '_blank', 'noopener')
+  // Popup blockers silently return null when window.open isn't tied closely
+  // enough to the click gesture. Rather than leave the operator on a row that
+  // "does nothing", fall back to navigating the current tab.
+  if (!win) {
+    void router.push(to)
+  }
 }
