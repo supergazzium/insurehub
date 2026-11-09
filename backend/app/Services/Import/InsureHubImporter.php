@@ -915,7 +915,7 @@ class InsureHubImporter
                 'vat' => $row->vat,
                 'total_premium_paid' => $row->total_premium_paid,
                 'net_customer_paid' => $row->net_customer_paid,
-                'premium_mode' => 'annual',
+                'premium_mode' => $this->premiumModeFromTerm($row->installment_term),
                 'type_of_paid' => $this->luPaymentType[(string) ($row->payment_type_id ?? '')] ?? null,
                 'type_of_paid_note' => $row->payment_type_note,
                 'finance_company' => $this->luFinanceCompany[(string) ($row->finance_company_id ?? '')] ?? null,
@@ -1461,6 +1461,24 @@ class InsureHubImporter
      *
      * @return array{0: ?string, 1: ?string}
      */
+    /** Derive the policy premium_mode from the legacy Installment_Term.
+     *  Term 12 → monthly, 4 → quarterly, 2 → semiannual; any other
+     *  multi-installment term (3, 6, …) → monthly as the installment
+     *  catch-all; 1 / 0 / blank → annual. (premium_mode has no literal
+     *  "installment" value — the enum is monthly|quarterly|semiannual|annual|single.) */
+    private function premiumModeFromTerm(mixed $term): string
+    {
+        $t = (int) trim((string) ($term ?? ''));
+
+        return match ($t) {
+            12 => 'monthly',
+            4 => 'quarterly',
+            2 => 'semiannual',
+            0, 1 => 'annual',
+            default => $t > 1 ? 'monthly' : 'annual',
+        };
+    }
+
     /** True when the mailing address equals the registered one (so the
      *  "same as registered" flag should be set even though both rows exist). */
     private function sameAddress(?object $a, ?object $b): bool
