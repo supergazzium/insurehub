@@ -939,6 +939,12 @@ class InsureHubImporter
                 'internal_note' => $row->internal_note,
                 'recorded_by_username' => $row->created_by_user,
                 'com_rec_check' => $row->commission_record_status,
+                // Legacy per-policy commission figures: agent share → hub-to-agent,
+                // in-house share → carrier-to-hub (confirmed mapping).
+                'comm_hub_to_agent_amount' => $row->main_commission_ag_amount,
+                'comm_hub_to_agent_rate' => $row->main_commission_ag_pct,
+                'comm_carrier_to_hub_amount' => $row->main_commission_inh_amount,
+                'comm_carrier_to_hub_rate' => $row->main_commission_inh_pct,
                 'premium_check' => $premiumCheck,
                 'imported_from_legacy' => true,
                 'updated_at' => $this->now,
