@@ -167,6 +167,43 @@ class CollapseInstallmentPolicies extends Command
                 }
                 $stats['payments_moved'] += $moved;
 
+                // 1b. Recompute the keeper's coverage span + installment term from
+                //     the WHOLE contract. The legacy rows carry per-INSTALLMENT
+                //     coverage windows (each ~1 month) in effective_date/expiry_date,
+                //     and the keeper (last-installment row) often has degraded term
+                //     data. The true annual policy coverage is MIN(effective) ..
+                //     MAX(expiry) across all rows, and the real term is the payment
+                //     count. Only for installment collapses, not endorsement-folds.
+                if (! $isEndorsementFold) {
+                    $allIds = array_merge([$keeper->id], $memberIds);
+                    $span = DB::table('policies')->whereIn('id', $allIds)
+                        ->selectRaw('MIN(effective_date) mn, MAX(expiry_date) mx')->first();
+                    // The keeper's own app_date is this contract-year's write date and
+                    // is the reliable coverage START — the per-installment
+                    // effective_date rows often carry a stale inherited coverage_start
+                    // (e.g. year-2 installments still stamped with year-1's start), so
+                    // MIN(effective) would pull the span back a year. Prefer app_date;
+                    // fall back to MIN(effective) only when app_date is missing.
+                    $kp = DB::table('policies')->where('id', $keeper->id)->first(['app_date']);
+                    $effective = ($kp && $kp->app_date !== null) ? $kp->app_date
+                        : ($span->mn ?? null);
+                    // installment term = number of payments now on the keeper
+                    $payCount = (int) DB::table('policy_payments')->where('policy_id', $keeper->id)
+                        ->whereNull('voided_at')->count();
+                    $covUpd = ['updated_at' => $now];
+                    if ($effective !== null) {
+                        $covUpd['effective_date'] = $effective;
+                    }
+                    if ($span && $span->mx !== null) {
+                        $covUpd['expiry_date'] = $span->mx;
+                    }
+                    if ($payCount > 1) {
+                        $covUpd['installment_term'] = (string) $payCount;
+                        $covUpd['premium_mode'] = $this->premiumModeFromCount($payCount);
+                    }
+                    DB::table('policies')->where('id', $keeper->id)->update($covUpd);
+                }
+
                 // 2. remove member policies' per-policy children (they belong to a
                 //    policy that is going away; the keeper keeps its own). These
                 //    tables have no deleted_at, so soft-delete if available else
@@ -225,6 +262,28 @@ class CollapseInstallmentPolicies extends Command
             $pfApplied = $this->applyProductFixes($pfPath, $tenant, $dry, $now);
         }
 
+        // Renumber policy_year sequentially per (customer, policy_no, product) by
+        // coverage start. The legacy renewal chain (ref_app_to_id) is not linked
+        // across these yearly contracts, so the source Policy_Year was inconsistent
+        // (e.g. 1,2,1,2); collapsing the installments exposes it. A straight
+        // ordinal over the surviving contracts is correct and deterministic.
+        $yearsFixed = 0;
+        if (! $dry) {
+            $yearsFixed = DB::update(
+                'UPDATE policies p '.
+                'JOIN ( SELECT id, ROW_NUMBER() OVER ( '.
+                '  PARTITION BY customer_id, policy_no, product_id '.
+                '  ORDER BY COALESCE(effective_date, app_date), id ) AS seq '.
+                '  FROM policies '.
+                "  WHERE deleted_at IS NULL AND policy_no IS NOT NULL AND policy_no<>'' AND tenant_id = ? ".
+                ') r ON r.id = p.id '.
+                'SET p.policy_year = r.seq, p.updated_at = NOW() '.
+                "WHERE p.deleted_at IS NULL AND p.policy_no IS NOT NULL AND p.policy_no<>'' AND p.tenant_id = ? ".
+                'AND p.policy_year <> r.seq',
+                [$tenant, $tenant]
+            );
+        }
+
         // Refresh customers' cached policy counts — the soft-deletes make the
         // cached total/active counts stale. Derived recompute, safe to re-run.
         $countsFixed = 0;
@@ -251,6 +310,7 @@ class CollapseInstallmentPolicies extends Command
             ['child rows soft-deleted', $stats['child_rows_softdeleted']],
             ['members unmapped (dropped shells)', $stats['members_unmapped']],
             ['product-fixes applied', $pfApplied],
+            ['policy_year renumbered', $yearsFixed],
             ['customer counts refreshed', $countsFixed],
             ['payment $ before (universe)', number_format($before, 2)],
             ['payment $ after  (universe)', number_format($after, 2)],
@@ -303,6 +363,19 @@ class CollapseInstallmentPolicies extends Command
         $this->info($dry ? "[dry-run] orphan rows that would be deleted: $total" : "Orphan child rows deleted: $total");
 
         return self::SUCCESS;
+    }
+
+    /** Premium mode from the payment count per year (mirrors the importer's
+     *  premiumModeFromTerm): 12→monthly, 4→quarterly, 2→semiannual, other>1→monthly. */
+    private function premiumModeFromCount(int $n): string
+    {
+        return match ($n) {
+            12 => 'monthly',
+            4 => 'quarterly',
+            2 => 'semiannual',
+            0, 1 => 'annual',
+            default => $n > 1 ? 'monthly' : 'annual',
+        };
     }
 
     /** @return array<int,array{group_id:string,client_code:string,policy_no:string,keeper_app:string,member_apps:array<int,string>,action:string}> */
