@@ -537,6 +537,27 @@ class InsureHubImporter
         return ['inserted' => $ins, 'updated' => $upd, 'skipped' => $skip];
     }
 
+    /** A personal 13-digit Thai National ID (not 0-prefixed) → id_card.
+     *  0-prefixed 13-digit (company/juristic) and other lengths stay in tax_id. */
+    private function agentNationalId(mixed $taxId): ?string
+    {
+        $v = trim((string) ($taxId ?? ''));
+
+        return (preg_match('/^[1-9][0-9]{12}$/', $v) === 1) ? $v : null;
+    }
+
+    /** The company/tax number kept in tax_id: everything that is NOT a personal
+     *  National ID (i.e. not a 1-9-prefixed 13-digit number). */
+    private function agentTaxId(mixed $taxId): ?string
+    {
+        $v = trim((string) ($taxId ?? ''));
+        if ($v === '') {
+            return null;
+        }
+
+        return (preg_match('/^[1-9][0-9]{12}$/', $v) === 1) ? null : $v;
+    }
+
     /** Map the legacy agent type to the app's 'AG' (agent) / 'IN' (influencer).
      *  Legacy lu_agent_type is AG=Agent, INF/INF+=Influencer. When the legacy
      *  value is blank/unknown, fall back to the agent_code prefix (AG… = agent,
@@ -651,7 +672,13 @@ class InsureHubImporter
                 'head_start_date_raw' => $row->head_start_date,
                 'grace_period_end_raw' => $row->grace_period_end,
                 'vat_type' => (string) ($row->vat_type ?? ''),
-                'tax_id' => $row->tax_id,
+                // The legacy agent tax_id column holds a mix: a personal 13-digit
+                // National ID (goes to id_card, encrypted later) or a company tax
+                // number (0-prefixed 13-digit juristic, or other length → stays in
+                // tax_id). id_card is written plaintext here and encrypted by
+                // agents:reencrypt-pii, mirroring the bank/license fields.
+                'id_card' => $this->agentNationalId($row->tax_id),
+                'tax_id' => $this->agentTaxId($row->tax_id),
                 'address' => $addr->address_no ?? null,
                 'building_floor' => $addr->building_floor ?? null,
                 'moo' => $this->splitMoo($addr->moo ?? null, $addr->moo_ban ?? null)[0],

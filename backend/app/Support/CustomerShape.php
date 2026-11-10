@@ -56,10 +56,20 @@ final class CustomerShape
         // A juristic (0-prefixed) number ALONE is not enough — a Burmese /
         // foreign-worker pink-card id also starts with 0. Promote to corporate
         // on a juristic number only when the legacy code already says corporate.
-        if ($looksCompany || $code === '2') {
+        // A legacy code-2 (corporate) record that is really a foreign PERSON —
+        // a personal title (Mr./Mrs./…) on a Latin-only name with no company
+        // keyword — is reclassified to foreign_individual UP FRONT so its title
+        // and gender are preserved (the corporate branch nulls both). Previously
+        // these were typed corporate then flipped by customers:cleanup, which
+        // left title_th + gender permanently null.
+        $foreignPersonMistyped = $code === '2' && ! $looksCompany
+            && ($looksPerson || $title === '')
+            && self::isLatinName("$name $surname");
+
+        if (($looksCompany || $code === '2') && ! $foreignPersonMistyped) {
             $type = 'corporate';
-        } elseif ($code === '3' || ($passport !== null && $nid === null)) {
-            // Type 3 = foreign; also any passport-only record with no Thai ID.
+        } elseif ($code === '3' || $foreignPersonMistyped || ($passport !== null && $nid === null)) {
+            // Type 3 = foreign; a code-2 foreign person; or a passport-only record.
             $type = 'foreign_individual';
         } else {
             $type = 'individual';
@@ -144,6 +154,15 @@ final class CustomerShape
     private static function isJuristicTaxId(?string $digits): bool
     {
         return $digits !== null && strlen($digits) === 13 && str_starts_with($digits, '0');
+    }
+
+    /** A Latin-script personal name (letters, spaces, dots, hyphens) — the
+     *  fingerprint of a foreign individual mis-typed as corporate. Empty is false. */
+    private static function isLatinName(string $s): bool
+    {
+        $s = trim($s);
+
+        return $s !== '' && (bool) preg_match('/^[A-Za-z.\- ]+$/', $s);
     }
 
     private static function digits(?string $v): ?string
