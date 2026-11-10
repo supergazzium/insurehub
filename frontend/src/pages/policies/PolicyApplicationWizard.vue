@@ -689,6 +689,17 @@ function onCommRatePct(key: 'commCarrierToHubRate' | 'commHubToAgentRate', raw: 
   touched[touchedKey] = true
 }
 
+/** Map a carrier insure_type of any casing ("non-life", "Non-Life", "NON-LIFE")
+ *  to the canonical form the form + cascade loaders use, or '' if unrecognised. */
+function normalizeInsureType(v: unknown): 'Life' | 'Non-Life' | 'Tax' | '' {
+  switch (String(v ?? '').trim().toLowerCase()) {
+    case 'life': return 'Life'
+    case 'non-life': return 'Non-Life'
+    case 'tax': return 'Tax'
+    default: return ''
+  }
+}
+
 async function loadCarriersForInsureType(t: 'Life' | 'Non-Life' | 'Tax'): Promise<void> {
   carriersLoading.value = true
   try {
@@ -1901,8 +1912,12 @@ async function hydrateFromDraft(id: string, renewMode = false, preset?: Record<s
     if (form.productId) {
       const pd = await fetchProduct(form.productId)
       productDetail.value = pd.data
-      const it = pd.data.carrierInsureType as 'Life' | 'Non-Life' | 'Tax' | ''
-      if (it === 'Life' || it === 'Non-Life' || it === 'Tax') {
+      // carriers.insure_type is stored lower-case ("non-life" / "life" / "tax")
+      // but the form + cascade loaders use the canonical capitalised form.
+      // Normalise so hydrate matches regardless of stored casing — otherwise
+      // the carrier/product dropdowns never load and show empty on edit.
+      const it = normalizeInsureType(pd.data.carrierInsureType)
+      if (it) {
         form.insureType = it
         await loadCarriersForInsureType(it)
         await loadProductsForCarrier(form.carrierId)
