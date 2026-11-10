@@ -58,6 +58,7 @@ class InsureHubImporter
         'banks' => [],
         'locations' => [],
         'payment_methods' => [],
+        'payment_method_by_legacy_id' => [],
         'payment_inscomp_tos' => [],
         'payment_inscomp_statuses' => [],
         'policy_status_translations' => [],
@@ -385,18 +386,20 @@ class InsureHubImporter
             }
             $existing = $primary->table('payment_methods')->where('name_th', $label)->first();
             if ($existing) {
-                $this->idCache['payment_methods'][$label] = (int) $existing->id;
-
-                continue;
+                $appId = (int) $existing->id;
+            } else {
+                $appId = (int) $primary->table('payment_methods')->insertGetId([
+                    'name_th' => $label,
+                    'code' => $codeMap[$label] ?? null,
+                    'created_at' => $this->now,
+                    'updated_at' => $this->now,
+                ]);
+                $ins++;
             }
-            $id = $primary->table('payment_methods')->insertGetId([
-                'name_th' => $label,
-                'code' => $codeMap[$label] ?? null,
-                'created_at' => $this->now,
-                'updated_at' => $this->now,
-            ]);
-            $this->idCache['payment_methods'][$label] = (int) $id;
-            $ins++;
+            $this->idCache['payment_methods'][$label] = $appId;
+            // also map by the legacy numeric id so stepPolicies can resolve the
+            // application's payment_method_id (1/2/3) directly.
+            $this->idCache['payment_method_by_legacy_id'][(string) $row->id] = $appId;
         }
 
         // Preload payment_inscomp_* if seeded elsewhere.
@@ -499,7 +502,7 @@ class InsureHubImporter
                 'code' => $code,
                 'commission_code' => $row->commission_code,
                 'name' => (string) $row->name,
-                'type' => $this->mapProductType((string) ($row->insure_type ?? ''), (string) ($row->motor_flag ?? ''), (string) ($row->insure_category ?? '')),
+                'type' => $this->mapProductType((string) ($row->insure_type ?? ''), (string) ($row->motor_flag ?? ''), (string) ($row->insure_category ?? ''), (string) ($row->name ?? '')),
                 'category' => $row->insure_category,
                 'sub_category' => $row->insure_subcategory,
                 'sub_category_2' => $row->motor_flag,
@@ -534,25 +537,66 @@ class InsureHubImporter
         return ['inserted' => $ins, 'updated' => $upd, 'skipped' => $skip];
     }
 
-    private function mapProductType(string $insureType, string $motorFlag, string $category): string
+    /** Map the legacy agent type to the app's 'AG' (agent) / 'IN' (influencer).
+     *  Legacy lu_agent_type is AG=Agent, INF/INF+=Influencer. When the legacy
+     *  value is blank/unknown, fall back to the agent_code prefix (AG… = agent,
+     *  everything else = influencer). The 11 LGC stub channels become 'IN'. */
+    private function mapAgentType(string $legacyType, string $code): string
     {
-        if (str_contains(strtolower($motorFlag), 'motor')) {
+        $t = strtoupper(trim($legacyType));
+        if ($t === 'AG') {
+            return 'AG';
+        }
+        if ($t === 'INF' || $t === 'INF+' || $t === 'IN' || $t === 'IP') {
+            return 'IN';
+        }
+
+        // blank/unknown -> infer from the code prefix
+        return str_starts_with(strtoupper($code), 'AG') ? 'AG' : 'IN';
+    }
+
+    /** Normalise a legacy license_type ("Life" / "Non-Life" / "non_life" / …)
+     *  to the canonical 'life' / 'non_life', or '' if unrecognised. */
+    private function normLicenseType(string $v): string
+    {
+        $t = str_replace([' ', '-'], ['', '_'], strtolower(trim($v)));
+
+        return match ($t) {
+            'life' => 'life',
+            'nonlife', 'non_life' => 'non_life',
+            default => '',
+        };
+    }
+
+    private function mapProductType(string $insureType, string $motorFlag, string $category, string $name = ''): string
+    {
+        // Motor ONLY when the flag is exactly "Motor". The legacy flag is
+        // "Motor" / "Non-Motor"; a substring test on "non-motor" also contains
+        // "motor" and mis-tagged every non-motor product as motor.
+        if (strtolower(trim($motorFlag)) === 'motor') {
             return 'motor';
         }
-        if (strtolower($insureType) === 'life') {
+        if (strtolower(trim($insureType)) === 'life') {
             return 'life';
         }
-        $cat = mb_strtolower($category);
-        if (str_contains($cat, 'health') || str_contains($cat, 'สุขภาพ')) {
+        // Non-motor general insurance: the legacy insure_category is too coarse
+        // (เบ็ดเตล็ด / อัคคีภัย), so classify from the product name which carries
+        // the real coverage (ประกันสุขภาพ / ประกันการเดินทาง / …). Fall back to
+        // category, then 'other'.
+        $hay = mb_strtolower($name.' '.$category);
+        if (str_contains($hay, 'health') || str_contains($hay, 'สุขภาพ') || str_contains($hay, 'โรคร้าย') || str_contains($hay, 'มะเร็ง') || str_contains($hay, 'covid') || str_contains($hay, 'โควิด')) {
             return 'health';
         }
-        if (str_contains($cat, 'travel') || str_contains($cat, 'เดินทาง')) {
+        if (str_contains($hay, 'travel') || str_contains($hay, 'เดินทาง')) {
             return 'travel';
         }
-        if (str_contains($cat, 'home') || str_contains($cat, 'บ้าน') || str_contains($cat, 'อัคคี')) {
+        if (str_contains($hay, 'อุบัติเหตุ') || str_contains($hay, 'pa ') || str_contains($hay, 'accident')) {
+            return 'accident';
+        }
+        if (str_contains($hay, 'home') || str_contains($hay, 'บ้าน') || str_contains($hay, 'อัคคี') || str_contains($hay, 'ทรัพย์สิน') || str_contains($hay, 'fire') || str_contains($hay, 'iar')) {
             return 'home';
         }
-        if (str_contains($cat, 'group') || str_contains($cat, 'กลุ่ม')) {
+        if (str_contains($hay, 'group') || str_contains($hay, 'กลุ่ม')) {
             return 'group';
         }
 
@@ -579,8 +623,12 @@ class InsureHubImporter
             $addr = $addresses->get($code);
             $con = $contacts->get($code);
             $bank = optional($bankAccts->get($code))->first();
-            $lifeLicense = optional($licenses->get($code))?->firstWhere('license_type', 'life');
-            $nonLifeLicense = optional($licenses->get($code))?->firstWhere('license_type', 'non_life');
+            // Legacy license_type is stored as "Life" / "Non-Life" (mixed case,
+            // hyphen); normalise so neither "life" nor "non_life" silently
+            // no-matches and drops the license number.
+            $agentLicenses = $licenses->get($code);
+            $lifeLicense = $agentLicenses?->first(fn ($l) => $this->normLicenseType($l->license_type ?? '') === 'life');
+            $nonLifeLicense = $agentLicenses?->first(fn ($l) => $this->normLicenseType($l->license_type ?? '') === 'non_life');
 
             $bankId = null;
             if ($bank && $bank->bank_name_raw) {
@@ -590,7 +638,7 @@ class InsureHubImporter
             $payload = [
                 'tenant_id' => $this->tenantId,
                 'agent_code' => $code,
-                'agent_type' => in_array($row->agent_type, ['AG', 'IN'], true) ? $row->agent_type : 'AG',
+                'agent_type' => $this->mapAgentType((string) ($row->agent_type ?? ''), $code),
                 'first_name' => $row->name_th,
                 'last_name' => $row->surname_th,
                 'first_name_en' => $row->name_en,
@@ -1002,7 +1050,7 @@ class InsureHubImporter
             return null;
         }
 
-        return null; // TODO: wire once payment methods importer resolves label→id
+        return $this->idCache['payment_method_by_legacy_id'][(string) $legacyId] ?? null;
     }
 
     /** @return array<string, int> */
