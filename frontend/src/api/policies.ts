@@ -130,6 +130,12 @@ export function fetchPolicy(id: string) {
   return api.get<Single<Policy>>(`policies/${id}`)
 }
 
+// Agent-portal read-only policy fetch — backend returns 404 for any policy the
+// agent doesn't write (writing_agent_id). Same Policy shape as fetchPolicy.
+export function fetchMyAgentPolicy(id: string) {
+  return api.get<Single<Policy>>(`me/agent/policies/${id}`)
+}
+
 // ── C-11 Draft endpoints ─────────────────────────────────────────────────
 // Back the wizard's auto-save + resume-from-draft flow. The permissive
 // payload (any subset of PolicyRequest fields) is intentional — backend

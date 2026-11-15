@@ -18,6 +18,28 @@ class FollowUpController extends Controller
 {
     private const CATEGORIES = ['approval', 'no_policy_no', 'not_delivered', 'freelook', 'unpaid', 'premium_due', 'no_commission', 'cancelled', 'verify'];
 
+    /**
+     * When set (by the agent-scoped subclass), every policy query is additionally
+     * restricted to this agent's own policies (policies.writing_agent_id). Null =
+     * admin behaviour: all tenant data, unchanged.
+     */
+    protected ?int $agentScopeId = null;
+
+    /**
+     * The `verify` category reads the pending-changes approval queue, which is an
+     * admin workflow with no per-agent ownership column. The agent-scoped subclass
+     * sets this false to drop the category entirely.
+     */
+    protected bool $allowVerify = true;
+
+    /** Categories visible in this context (drops `verify` when not allowed). */
+    protected function categories(): array
+    {
+        return $this->allowVerify
+            ? self::CATEGORIES
+            : array_values(array_filter(self::CATEGORIES, fn ($c) => $c !== 'verify'));
+    }
+
     /** ทวงเบี้ยรายปี — days before the anniversary to start surfacing the policy. */
     private const PREMIUM_DUE_LEAD_DAYS = 30;
 
@@ -30,7 +52,7 @@ class FollowUpController extends Controller
         $tenantId = (int) $request->attributes->get('tenant_id', $request->user()->tenant_id);
         $tenant = Tenant::query()->find($tenantId);
         $category = (string) $request->input('category', 'approval');
-        if (! in_array($category, self::CATEGORIES, true)) {
+        if (! in_array($category, $this->categories(), true)) {
             $category = 'approval';
         }
         $stage = (string) $request->input('stage', '');
@@ -39,7 +61,7 @@ class FollowUpController extends Controller
         $search = trim((string) $request->input('q', ''));
 
         $counts = [];
-        foreach (self::CATEGORIES as $c) {
+        foreach ($this->categories() as $c) {
             $counts[$c] = $c === 'verify'
                 ? $this->verifyQuery($tenantId)->count()
                 : (int) $this->baseQuery($tenantId, $c, $tenant, '', false)->count();
@@ -97,7 +119,7 @@ class FollowUpController extends Controller
                 'counts' => $counts,
                 'aging' => $agingCounts,
                 'stages' => $this->stageCounts($tenantId, $category, $tenant, $reviewed),
-                'verifyEnabled' => PolicyVerification::enabled($tenantId),
+                'verifyEnabled' => $this->allowVerify && PolicyVerification::enabled($tenantId),
                 'noCommissionWindowDays' => (int) ($tenant?->no_commission_window_days ?? 180),
             ],
         ]);
@@ -317,6 +339,12 @@ class FollowUpController extends Controller
             ->leftJoinSub($this->overdueSub($tenantId), 'ov', 'ov.policy_id', '=', 'p.id')
             ->where('p.tenant_id', $tenantId)
             ->whereNull('p.deleted_at');
+
+        // Agent-scoped view: restrict to the agent's own policies. Admin path
+        // leaves $agentScopeId null and sees all tenant data (unchanged).
+        if ($this->agentScopeId !== null) {
+            $q->where('p.writing_agent_id', $this->agentScopeId);
+        }
 
         return match ($category) {
             'approval' => $q->where('p.status', 'submitted'),

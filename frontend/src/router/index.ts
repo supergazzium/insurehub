@@ -57,7 +57,7 @@ const IMPLEMENTED_MODULES = new Set([
   'import-failures',
   'agent-support', 'agent-operation-support',
   // Phase 2 (agent portal)
-  'portal-dashboard', 'portal-profile', 'portal-referral', 'portal-settings', 'portal-earnings',
+  'portal-dashboard', 'portal-profile', 'portal-referral', 'portal-settings', 'portal-earnings', 'portal-follow-ups',
   // Phase 4 (admin agent oversight) — agent approvals + downline tree moved
   // into the /agents tabs; only the access-control page remains here.
   'admin-access',
@@ -224,6 +224,8 @@ const routes: RouteRecordRaw[] = [
       { path: 'portal/referral', name: 'portal-referral', component: PortalReferral, meta: { moduleKey: 'portal-referral' } },
       { path: 'portal/settings', name: 'portal-settings', component: PortalSettings, meta: { moduleKey: 'portal-settings' } },
       { path: 'portal/earnings', name: 'portal-earnings', component: PortalEarnings, meta: { moduleKey: 'portal-earnings' } },
+      { path: 'portal/follow-ups', name: 'portal-follow-ups', component: () => import('../pages/portal/PortalFollowUps.vue'), meta: { moduleKey: 'portal-follow-ups' } },
+      { path: 'portal/policies/:id', name: 'portal-policy-view', component: () => import('../pages/portal/PortalPolicyView.vue'), meta: { moduleKey: 'portal-follow-ups' } },
     ],
   },
 ]

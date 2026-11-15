@@ -5,8 +5,10 @@ declare(strict_types=1);
 namespace App\Http\Controllers\Api;
 
 use App\Http\Resources\MyAgentResource;
+use App\Http\Resources\PolicyResource;
 use App\Models\Agent;
 use App\Models\AuditEntry;
+use App\Models\Policy;
 use App\Models\EmailVerificationToken;
 use App\Models\User;
 use App\Models\CommissionPayoutBatch;
@@ -37,6 +39,27 @@ class MeAgentController extends ApiController
     public function show(Request $request): MyAgentResource
     {
         return new MyAgentResource($this->currentAgent($request));
+    }
+
+    /**
+     * Read-only policy detail, scoped to the agent's OWN policies. Returns 404
+     * for any policy the agent doesn't write (same shape as PolicyController@show,
+     * but no mutation routes are exposed to agents). Backs the portal follow-up
+     * row → read-only policy view.
+     */
+    public function showPolicy(Request $request, Policy $policy): PolicyResource
+    {
+        $agent = $this->currentAgent($request);
+        abort_unless(
+            (int) $policy->tenant_id === (int) $agent->tenant_id
+                && (int) $policy->writing_agent_id === (int) $agent->id,
+            404,
+            'Policy not found.'
+        );
+
+        return new PolicyResource(
+            $policy->load(['riders', 'beneficiaries', 'events', 'payments', 'documents', 'rebate', 'legacyStatus', 'product.productType'])
+        );
     }
 
     // ── Sectioned updates ────────────────────────────────────────────────

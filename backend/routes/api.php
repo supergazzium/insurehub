@@ -8,6 +8,7 @@ use App\Http\Controllers\Api\AdminUserController;
 use App\Http\Controllers\Api\AgentCommissionController;
 use App\Http\Controllers\Api\AgentController;
 use App\Http\Controllers\Api\AgentDocumentController;
+use App\Http\Controllers\Api\AgentFollowUpController;
 use App\Http\Controllers\Api\AgentNoteController;
 use App\Http\Controllers\Api\CollectionsController;
 use App\Http\Controllers\Api\FollowUpController;
@@ -116,6 +117,10 @@ Route::middleware(['auth:sanctum', 'tenant'])->group(function (): void {
     Route::get('me/agent/downline', [MeAgentController::class, 'downline']);
     Route::get('me/agent/relations', [MeAgentController::class, 'relations']);
     Route::get('me/agent/earnings', [MeAgentController::class, 'earnings']);
+    // Read-only, agent-scoped follow-up (งานค้าง) tracker — own policies only.
+    Route::get('me/agent/follow-ups', [AgentFollowUpController::class, 'index']);
+    // Read-only policy detail — own policies only (404 for others).
+    Route::get('me/agent/policies/{policy}', [MeAgentController::class, 'showPolicy']);
     Route::get('me/agent/payouts/{batch}/statement/direct', [MeAgentController::class, 'payoutStatementDirect']);
     Route::get('me/agent/payouts/{batch}/statement/referral', [MeAgentController::class, 'payoutStatementReferral']);
     Route::get('me/agent/payouts/{batch}/statement', [MeAgentController::class, 'payoutStatement']);

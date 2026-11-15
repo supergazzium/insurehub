@@ -88,6 +88,15 @@ export function fetchFollowUps(params: FollowUpQuery = {}) {
   )
 }
 
+// Agent-portal, read-only variant: the backend restricts results to the signed-in
+// agent's own policies (writing_agent_id) and omits the `verify` category. Same
+// response shape — only the endpoint differs. No mutating counterpart exists.
+export function fetchAgentFollowUps(params: FollowUpQuery = {}) {
+  return api.get<{ data: FollowUpRow[]; meta: FollowUpMeta }>(
+    `me/agent/follow-ups${buildQuery({ ...params, reviewed: params.reviewed ? 1 : undefined } as Record<string, unknown>)}`,
+  )
+}
+
 export function updateFreelookDocs(policyId: string, patch: { sentAt?: string | null; signedAt?: string | null; returnedAt?: string | null }) {
   return api.patch<{ data: Record<string, unknown> }>(`policies/${policyId}/freelook`, patch)
 }

@@ -24,6 +24,7 @@ const mobileMenuOpen = ref(false)
 
 const navItems = [
   { key: 'dashboard', name: 'portal-dashboard', icon: 'pi pi-home' },
+  { key: 'followUps', name: 'portal-follow-ups', icon: 'pi pi-flag' },
   { key: 'profile',   name: 'portal-profile',   icon: 'pi pi-user' },
   { key: 'referral',  name: 'portal-referral',  icon: 'pi pi-share-alt' },
   { key: 'earnings',  name: 'portal-earnings',  icon: 'pi pi-wallet' },
