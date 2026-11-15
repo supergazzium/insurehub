@@ -78,3 +78,8 @@ Thumbs.db
 /docs/tasks/**/*.jpg
 /docs/tasks/**/*.jpeg
 /docs/tasks/**/*.webp
+
+# Local migration DB dumps — PII, never commit
+insurehub_migrated_full.sql
+insurehub_migrated_full.sql.gz
+*.sql.gz

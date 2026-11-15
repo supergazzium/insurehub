@@ -1,0 +1,412 @@
+<title>Redeployment Test Plan</title>
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,400;9..144,500;9..144,600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+  :root{
+    --ground:#f6f7f9; --paper:#ffffff; --raised:#fdfdfe;
+    --ink:#1a2230; --ink-soft:#4a5568; --ink-faint:#8a94a4;
+    --line:#e3e7ee; --line-soft:#eef1f5;
+    --accent:#2563a8; --accent-soft:#eaf1f9; --accent-ink:#1b4e85;
+    --pass:#1f8a4c; --pass-bg:#e9f6ee;
+    --fail:#c0392b; --fail-bg:#fbeceb;
+    --warn:#c77d18; --warn-bg:#fcf2e3;
+    --info:#5b6a8a; --info-bg:#eef1f6;
+    --shadow:0 1px 2px rgba(26,34,48,.04),0 2px 8px rgba(26,34,48,.05);
+    --mono:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace;
+    --sans:"IBM Plex Sans",system-ui,-apple-system,sans-serif;
+    --serif:"Fraunces",Georgia,serif;
+  }
+  @media (prefers-color-scheme:dark){
+    :root:not([data-theme="light"]){
+      --ground:#10141b; --paper:#171d27; --raised:#1c232f;
+      --ink:#e6eaf1; --ink-soft:#a7b1c2; --ink-faint:#6b7689;
+      --line:#283040; --line-soft:#202736;
+      --accent:#6ba4e6; --accent-soft:#17283f; --accent-ink:#9cc3f0;
+      --pass:#4cc17e; --pass-bg:#15271d;
+      --fail:#e8776b; --fail-bg:#2a1a18;
+      --warn:#e0a24d; --warn-bg:#2a2112;
+      --info:#9aa8c6; --info-bg:#1a2030;
+      --shadow:0 1px 2px rgba(0,0,0,.25),0 2px 10px rgba(0,0,0,.3);
+    }
+  }
+  :root[data-theme="dark"]{
+    --ground:#10141b; --paper:#171d27; --raised:#1c232f;
+    --ink:#e6eaf1; --ink-soft:#a7b1c2; --ink-faint:#6b7689;
+    --line:#283040; --line-soft:#202736;
+    --accent:#6ba4e6; --accent-soft:#17283f; --accent-ink:#9cc3f0;
+    --pass:#4cc17e; --pass-bg:#15271d;
+    --fail:#e8776b; --fail-bg:#2a1a18;
+    --warn:#e0a24d; --warn-bg:#2a2112;
+    --info:#9aa8c6; --info-bg:#1a2030;
+    --shadow:0 1px 2px rgba(0,0,0,.25),0 2px 10px rgba(0,0,0,.3);
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth;scroll-padding-top:1.5rem}
+  @media (prefers-reduced-motion:reduce){html{scroll-behavior:auto}}
+  body{
+    margin:0;background:var(--ground);color:var(--ink);
+    font-family:var(--sans);font-size:15px;line-height:1.6;
+    -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:1180px;margin:0 auto;padding:0 clamp(16px,4vw,40px)}
+  .layout{display:grid;grid-template-columns:230px 1fr;gap:40px;align-items:start}
+  @media(max-width:880px){.layout{grid-template-columns:1fr}.nav{display:none}}
+
+  /* ---- masthead ---- */
+  header.mast{padding:clamp(40px,7vw,76px) 0 36px;border-bottom:1px solid var(--line)}
+  .eyebrow{font-family:var(--mono);font-size:12px;letter-spacing:.18em;text-transform:uppercase;color:var(--accent);margin:0 0 14px}
+  h1{font-family:var(--serif);font-weight:500;font-size:clamp(34px,6vw,56px);line-height:1.02;letter-spacing:-.015em;margin:0;text-wrap:balance}
+  .lede{font-size:17px;color:var(--ink-soft);max-width:60ch;margin:18px 0 0}
+  .meta-row{display:flex;flex-wrap:wrap;gap:8px 10px;margin-top:26px}
+  .tag{font-family:var(--mono);font-size:12px;padding:5px 11px;border-radius:999px;background:var(--paper);border:1px solid var(--line);color:var(--ink-soft)}
+  .tag b{color:var(--ink);font-weight:500}
+
+  /* ---- summary grid ---- */
+  .counts{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:14px;margin:34px 0 4px}
+  .count{background:var(--paper);border:1px solid var(--line);border-radius:12px;padding:16px 18px;box-shadow:var(--shadow)}
+  .count .n{font-family:var(--mono);font-weight:500;font-size:25px;color:var(--ink);font-variant-numeric:tabular-nums;letter-spacing:-.01em}
+  .count .k{font-size:12.5px;color:var(--ink-faint);margin-top:3px}
+
+  /* ---- nav rail ---- */
+  .nav{position:sticky;top:20px}
+  .nav-title{font-family:var(--mono);font-size:11px;letter-spacing:.16em;text-transform:uppercase;color:var(--ink-faint);margin:0 0 12px;padding-left:2px}
+  .nav a{display:flex;align-items:baseline;gap:9px;padding:7px 10px;border-radius:8px;color:var(--ink-soft);text-decoration:none;font-size:13.5px;line-height:1.35;border:1px solid transparent}
+  .nav a:hover{background:var(--accent-soft);color:var(--accent-ink)}
+  .nav a .pn{font-family:var(--mono);font-size:11px;color:var(--ink-faint);min-width:1.4em}
+  .nav a:focus-visible,.card summary:focus-visible,.togglebtn:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+  main{padding:44px 0 90px;min-width:0}
+  .section{margin-bottom:52px;scroll-margin-top:20px}
+  .section-head{display:flex;align-items:center;gap:14px;margin:0 0 6px}
+  .section-head .phase{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--paper);background:var(--accent);padding:3px 9px;border-radius:6px;letter-spacing:.04em}
+  h2{font-family:var(--serif);font-weight:500;font-size:clamp(23px,3.4vw,30px);letter-spacing:-.01em;margin:0;line-height:1.1}
+  .section-note{color:var(--ink-soft);font-size:14.5px;margin:10px 0 22px;max-width:72ch}
+  .section-note code{font-family:var(--mono);font-size:12.5px;background:var(--info-bg);padding:1px 6px;border-radius:4px}
+
+  /* ---- test card ---- */
+  .card{background:var(--paper);border:1px solid var(--line);border-radius:13px;margin-bottom:14px;box-shadow:var(--shadow);overflow:hidden}
+  .card>summary{list-style:none;cursor:pointer;display:grid;grid-template-columns:auto 1fr auto;gap:14px;align-items:center;padding:15px 18px}
+  .card>summary::-webkit-details-marker{display:none}
+  .card>summary:hover{background:var(--raised)}
+  .tc-id{font-family:var(--mono);font-size:12px;font-weight:500;color:var(--accent-ink);background:var(--accent-soft);padding:4px 8px;border-radius:6px;white-space:nowrap}
+  .tc-title{font-weight:500;font-size:15px;color:var(--ink)}
+  .tc-title .sub{display:block;font-weight:400;font-size:12.5px;color:var(--ink-faint);margin-top:2px}
+  .chev{color:var(--ink-faint);font-size:13px;transition:transform .18s;font-family:var(--mono)}
+  @media(prefers-reduced-motion:reduce){.chev{transition:none}}
+  .card[open] .chev{transform:rotate(90deg)}
+  .card-body{padding:4px 18px 20px;border-top:1px solid var(--line-soft)}
+  .steps{margin:14px 0 0;padding:0;list-style:none;counter-reset:step}
+  .steps li{counter-increment:step;position:relative;padding:5px 0 5px 30px;font-size:14px;color:var(--ink-soft)}
+  .steps li::before{content:counter(step);position:absolute;left:0;top:4px;width:20px;height:20px;border-radius:5px;background:var(--info-bg);color:var(--info);font-family:var(--mono);font-size:11px;font-weight:500;display:grid;place-items:center}
+  .expect{margin-top:15px;background:var(--pass-bg);border:1px solid color-mix(in srgb,var(--pass) 24%,transparent);border-radius:9px;padding:12px 14px}
+  .expect .lbl{font-family:var(--mono);font-size:10.5px;letter-spacing:.12em;text-transform:uppercase;color:var(--pass);margin-bottom:6px;font-weight:500}
+  .expect code,.val{font-family:var(--mono);font-size:12.5px;color:var(--ink);background:color-mix(in srgb,var(--pass) 9%,transparent);padding:1px 5px;border-radius:4px;white-space:nowrap}
+  .expect ul{margin:6px 0 0;padding-left:18px}
+  .expect li{font-size:13.5px;color:var(--ink);margin:3px 0}
+  .result-row{display:flex;align-items:center;gap:16px;margin-top:16px;padding-top:14px;border-top:1px solid var(--line-soft);flex-wrap:wrap}
+  .result-row .q{font-size:12.5px;color:var(--ink-faint);font-family:var(--mono);letter-spacing:.04em;text-transform:uppercase}
+  .pf{display:inline-flex;gap:7px}
+  .pf label{display:inline-flex;align-items:center;gap:6px;font-size:13px;cursor:pointer;color:var(--ink-soft);padding:4px 10px;border:1px solid var(--line);border-radius:7px}
+  .pf input{accent-color:var(--accent);width:15px;height:15px}
+  .pf label:has(input:checked){border-color:var(--accent);background:var(--accent-soft);color:var(--accent-ink)}
+
+  .pill{font-family:var(--mono);font-size:11px;padding:2px 8px;border-radius:999px;white-space:nowrap}
+  .pill.crit{background:var(--fail-bg);color:var(--fail)}
+  .pill.core{background:var(--accent-soft);color:var(--accent-ink)}
+  .pill.disp{background:var(--info-bg);color:var(--info)}
+
+  .callout{display:grid;grid-template-columns:auto 1fr;gap:14px;background:var(--warn-bg);border:1px solid color-mix(in srgb,var(--warn) 30%,transparent);border-radius:12px;padding:16px 18px;margin:0 0 30px}
+  .callout .ic{font-family:var(--serif);font-size:20px;color:var(--warn);line-height:1}
+  .callout b{color:var(--ink)}
+  .callout p{margin:0;font-size:14px;color:var(--ink-soft)}
+  .callout code{font-family:var(--mono);font-size:12.5px;background:color-mix(in srgb,var(--warn) 12%,transparent);padding:1px 5px;border-radius:4px}
+
+  .controls{display:flex;gap:9px;flex-wrap:wrap;align-items:center;margin:0 0 30px}
+  .togglebtn{font-family:var(--sans);font-size:13px;color:var(--ink-soft);background:var(--paper);border:1px solid var(--line);border-radius:8px;padding:7px 13px;cursor:pointer}
+  .togglebtn:hover{background:var(--accent-soft);color:var(--accent-ink);border-color:var(--accent)}
+
+  footer{border-top:1px solid var(--line);padding:30px 0 60px;color:var(--ink-faint);font-size:13px}
+  footer code{font-family:var(--mono);font-size:12px;color:var(--ink-soft)}
+  a.inline{color:var(--accent-ink);text-decoration:none;border-bottom:1px solid color-mix(in srgb,var(--accent) 35%,transparent)}
+  a.inline:hover{border-bottom-color:var(--accent)}
+</style>
+
+<div class="wrap">
+<header class="mast">
+  <p class="eyebrow">InsureHub · Migration QA</p>
+  <h1>Redeployment Test Plan</h1>
+  <p class="lede">Run this after restoring the migrated database to Coolify and deploying the latest <code style="font-family:var(--mono);font-size:13px">main</code>. Every case below maps to a real migration decision or a bug fixed during review. Expected values are drawn from the verified local dataset the dump was cut from.</p>
+  <div class="meta-row">
+    <span class="tag"><b>Dump</b> insurehub_migrated_full.sql.gz</span>
+    <span class="tag"><b>sha256</b> b0791b61…cee22dbc4</span>
+    <span class="tag"><b>Code</b> PRs #35–#52 on main</span>
+    <span class="tag"><b>Admin</b> admin@insurehub.co.th</span>
+  </div>
+
+  <div class="counts" aria-label="Expected baseline counts">
+    <div class="count"><div class="n">19,301</div><div class="k">live policies</div></div>
+    <div class="count"><div class="n">11,218</div><div class="k">customers</div></div>
+    <div class="count"><div class="n">700</div><div class="k">agents (679 logins)</div></div>
+    <div class="count"><div class="n">21,326</div><div class="k">payment rows</div></div>
+    <div class="count"><div class="n">฿254.82M</div><div class="k">payment total (exact)</div></div>
+    <div class="count"><div class="n">352</div><div class="k">endorsement events</div></div>
+  </div>
+</header>
+
+<div class="layout">
+  <aside class="nav">
+    <p class="nav-title">Phases</p>
+    <nav>
+      <a href="#p0"><span class="pn">0</span>Deploy &amp; smoke</a>
+      <a href="#p1"><span class="pn">1</span>Reconciliation</a>
+      <a href="#p2"><span class="pn">2</span>Products &amp; types</a>
+      <a href="#p3"><span class="pn">3</span>Installments (ผ่อน)</a>
+      <a href="#p4"><span class="pn">4</span>Endorsements &amp; groups</a>
+      <a href="#p5"><span class="pn">5</span>Shared policy numbers</a>
+      <a href="#p6"><span class="pn">6</span>Customers</a>
+      <a href="#p7"><span class="pn">7</span>Agents &amp; security</a>
+      <a href="#p8"><span class="pn">8</span>Payments &amp; money</a>
+      <a href="#p9"><span class="pn">9</span>Known residuals</a>
+    </nav>
+  </aside>
+
+  <main>
+    <div class="controls">
+      <button class="togglebtn" id="openAll" type="button">Expand all</button>
+      <button class="togglebtn" id="closeAll" type="button">Collapse all</button>
+      <button class="togglebtn" id="themeBtn" type="button">Toggle theme</button>
+    </div>
+
+    <div class="callout">
+      <span class="ic">▲</span>
+      <p><b>Order matters.</b> Do Phase 0 first — the code must be live <em>and</em> match the dump's schema. If the policy list shows <code>38,955</code> instead of <code>19,301</code>, the backend code is stale (missing PR #36); redeploy before continuing. Confirm the prod <code>APP_KEY</code> equals the one the dump was encrypted with, or agent bank/ID fields won't decrypt (Phase 7).</p>
+    </div>
+
+    <!-- ===== PHASE 0 ===== -->
+    <section class="section" id="p0">
+      <div class="section-head"><span class="phase">P0</span><h2>Deploy &amp; smoke test</h2></div>
+      <p class="section-note">Prove the environment is healthy before testing data. Back up prod first; restore the dump; redeploy backend (and frontend if it changed since last deploy).</p>
+
+      <details class="card"><summary><span class="tc-id">0.1</span><span class="tc-title">Backend health <span class="sub">The app boots and answers</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Hit <code>/up</code> (Laravel health route) on the backend host.</li><li>Open the app URL; the login page renders.</li><li>Sign in as <code>admin@insurehub.co.th</code>.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><code>/up</code> returns 200; login succeeds; dashboard loads with no console errors.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">0.2</span><span class="tc-title">Dashboard baseline counts <span class="sub">Data restored intact</span></span><span class="chev">›</span><span class="pill core">core</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open the dashboard (แดชบอร์ด).</li><li>Read the headline tiles.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><ul><li>Policies total <span class="val">19,301</span> (<b>not</b> 38,955 — that means stale backend)</li><li>Customers <span class="val">11,218</span> · Agents <span class="val">700</span></li><li>In-force premium <span class="val">฿104.79M</span> (live-computed; verified on the source dataset)</li></ul></div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 1 ===== -->
+    <section class="section" id="p1">
+      <div class="section-head"><span class="phase">P1</span><h2>Reconciliation</h2></div>
+      <p class="section-note">Confirm nothing was lost or doubled in transit. These are whole-dataset invariants.</p>
+
+      <details class="card"><summary><span class="tc-id">1.1</span><span class="tc-title">Money reconciles to the cent <span class="sub">The single most important invariant</span></span><span class="chev">›</span><span class="pill crit">critical</span></summary>
+      <div class="card-body"><ol class="steps"><li>On the prod backend container run <code>php artisan tinker</code>.</li><li><code>App\Models\PolicyPayment::whereNull('voided_at')->sum('amount')</code></li></ol>
+      <div class="expect"><div class="lbl">Expect</div><code>254815817.67</code> — exact. Any drift means the restore was partial or a trigger fired.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">1.2</span><span class="tc-title">Row counts match the dump <span class="sub">Policies, customers, agents, payments</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Query each live table (or read the dashboard + agents/customers list totals).</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><ul><li>policies (live) <span class="val">19,301</span>; soft-deleted exist and are recoverable (collapse/fold members)</li><li>customers (active) <span class="val">11,218</span>; agents <span class="val">700</span>; payment rows <span class="val">21,326</span></li></ul></div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 2 ===== -->
+    <section class="section" id="p2">
+      <div class="section-head"><span class="phase">P2</span><h2>Products &amp; type classification</h2></div>
+      <p class="section-note">Fix <b>P1</b> (#48): the importer tagged every non-motor product as <code>motor</code> via a substring bug. Confirm types are now correct across the catalog.</p>
+
+      <details class="card"><summary><span class="tc-id">2.1</span><span class="tc-title">Health policy is tagged health, not motor <span class="sub">สุพจน์'s policy — the original symptom</span></span><span class="chev">›</span><span class="pill crit">P1</span></summary>
+      <div class="card-body"><ol class="steps"><li>Policies → search <code>50170797</code> → open the 2023 row (policy id <code>9824</code>).</li><li>Read ประเภทสินค้า under the สินค้า dropdown.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>product <span class="val">ประกันสุขภาพ (ALI)</span>, ประเภทสินค้า <span class="val">health</span> (was wrongly <code>motor</code> before the fix).</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">2.2</span><span class="tc-title">Catalog type distribution <span class="sub">motor collapsed from 394 → 182</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Products page, or query <code>products</code> grouped by <code>type</code>.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><ul><li>motor <span class="val">182</span> · life <span class="val">526</span> · home <span class="val">74</span> · accident <span class="val">45</span> · health <span class="val">34</span> · travel <span class="val">17</span> · group <span class="val">1</span></li><li>No motorcycle product mis-typed; no health/PA/travel product typed motor.</li></ul></div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">2.3</span><span class="tc-title">Credit-life with a car-loan name is life <span class="sub">Name mentions รถยนต์, product is life</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open policy id <code>24</code> (ประกันคุ้มครองวงเงินสินเชื่อรถยนต์).</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>ประเภทการประกัน <span class="val">ประกันชีวิต</span>, ประเภทสินค้า <span class="val">life</span> — the car reference in the name must <b>not</b> make it motor.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">2.4</span><span class="tc-title">Product &amp; carrier dropdowns pre-select on edit <span class="sub">Fix #46 — insure_type casing</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open any policy's edit view.</li><li>Look at บริษัทประกัน (carrier) and สินค้า (product).</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>Both dropdowns show the policy's actual carrier and product (not blank). Test one Life and one Non-Life policy.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 3 ===== -->
+    <section class="section" id="p3">
+      <div class="section-head"><span class="phase">P3</span><h2>Installment (ผ่อน) policies</h2></div>
+      <p class="section-note">Fixes <b>#50 / #51</b>: installment premium was the base-only per-installment figure (excluded riders) and stale 1-row schedules drove a false ชำระเกิน. All ผ่อน should now read ชำระครบแล้ว with ฿0 outstanding. Expect <b>0</b> installment policies showing overpaid.</p>
+
+      <details class="card"><summary><span class="tc-id">3.1</span><span class="tc-title">Monthly — whole-life 12×฿1,979 <span class="sub">Policy 12503 · the original overpay report</span></span><span class="chev">›</span><span class="pill crit">P50</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open policy id <code>12503</code> (ตลอดชีพ 90, policy_no <code>12240006366</code>).</li><li>Scroll to การชำระเงิน.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><ul><li>เบี้ยที่ต้องชำระ <span class="val">฿23,748.00</span> = ชำระแล้ว <span class="val">฿23,748.00</span></li><li>ยอดค้างชำระ <span class="val">฿0.00</span> · badge <span class="val">ชำระครบแล้ว</span> (not ชำระเกินยอด)</li><li>12 payment rows of <span class="val">฿1,979</span></li></ul></div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">3.2</span><span class="tc-title">Quarterly — iProtect 4×฿10,978 <span class="sub">Policy 20735 · caught the stale-schedule bug</span></span><span class="chev">›</span><span class="pill crit">P51</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open policy id <code>20735</code> (policy_no <code>509-1037134</code>).</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>รายไตรมาส, 4 งวด; เบี้ยที่ต้องชำระ <span class="val">฿43,912.80</span> = ชำระแล้ว; ยอดค้าง <span class="val">฿0.00</span>; 4 payments ~3 months apart. Must <b>not</b> show เบี้ยที่ต้องชำระ ฿339.12.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">3.3</span><span class="tc-title">Semiannual — iProtect 85, 2×฿1,998 <span class="sub">Policy 19561</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open policy id <code>19561</code> (policy_no <code>511-0094784</code>).</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>ราย 6 เดือน, 2 งวด; เบี้ย <span class="val">฿3,996.72</span> = ชำระแล้ว; ยอดค้าง <span class="val">฿0.00</span>; 2 payments ~6 months apart.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">3.4</span><span class="tc-title">Zero installment policies are overpaid <span class="sub">Dataset-wide invariant</span></span><span class="chev">›</span><span class="pill crit">critical</span></summary>
+      <div class="card-body"><ol class="steps"><li>Query: installment policies (monthly/quarterly/semiannual, numeric term&gt;1) where schedule total &lt; payments.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>count <span class="val">0</span>. No installment policy should display ชำระเกินยอด.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 4 ===== -->
+    <section class="section" id="p4">
+      <div class="section-head"><span class="phase">P4</span><h2>Endorsements &amp; group insurance</h2></div>
+      <p class="section-note">Group policies (Pattern C #1, fold #47) are ONE base policy + member-change endorsements, not scattered negative "policies". <span style="white-space:nowrap">352 endorsement events</span> exist dataset-wide.</p>
+
+      <details class="card"><summary><span class="tc-id">4.1</span><span class="tc-title">Group PA — 1 base + 29 endorsements <span class="sub">Policy 0222465843 · โรงเรียน เทศบาลท่าโขลง ๑</span></span><span class="chev">›</span><span class="pill core">core</span></summary>
+      <div class="card-body"><ol class="steps"><li>Search <code>0222465843</code> — confirm <b>1 result</b> (not 30).</li><li>Note the row badges: <code>$29</code> and <code>Δ premium</code>.</li><li>Open it; scroll to the สลักหลัง section.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><ul><li>base premium <span class="val">฿2,889,638</span> (positive)</li><li>สลักหลัง ledger lists <span class="val">29</span> endorsements, each สมาชิกเพิ่ม/ลด with a running เบี้ย เดิม→ใหม่ total that climbs correctly</li><li>การชำระเงิน shows all <span class="val">29</span> payments ("29 รายการที่ใช้งาน")</li></ul></div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">4.2</span><span class="tc-title">No stray negative-premium "policies" <span class="sub">Refunds live as endorsements</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Search a known group policy (e.g. <code>625-01003-1</code>, 18 endorsements).</li><li>Confirm it is 1 base row, and member-left refunds appear as negative endorsement lines inside it.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>1 base policy; refund endorsements flagged (adjustment_kind = endorsement), not standalone negative-premium policy rows in the list.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 5 ===== -->
+    <section class="section" id="p5">
+      <div class="section-head"><span class="phase">P5</span><h2>Shared policy numbers — display rules</h2></div>
+      <p class="section-note">Three shapes share a policy number and each has a <b>deliberate</b> display rule. Confirm each returns the agreed shape.</p>
+
+      <details class="card"><summary><span class="tc-id">5.1</span><span class="tc-title">Annual renewal → one row per year <span class="sub">Policy 509-1036235 · 7 renewal years</span></span><span class="chev">›</span><span class="pill disp">display</span></summary>
+      <div class="card-body"><ol class="steps"><li>Search <code>509-1036235</code>.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><span class="val">7 results</span> — one per year, badged 1#…7#, same customer/product/carrier, each with its own coverage window. (Decision: keep per-year records.)</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">5.2</span><span class="tc-title">Co-insurance → one row per party <span class="sub">Policy IA010628-25RBK · 4 customers × 2 carriers</span></span><span class="chev">›</span><span class="pill disp">display</span></summary>
+      <div class="card-body"><ol class="steps"><li>Search <code>IA010628-25RBK</code>.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><span class="val">7 results</span> — one per (customer × carrier × product): 4 customers, carriers ทิพยประกันภัย + เมืองไทยประกันภัย, products IAR + ทรัพย์สิน, each its own premium. (Decision: keep separate rows.)</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">5.3</span><span class="tc-title">Installment year → one row, many payments <span class="sub">Policy 50170797 · 4 years</span></span><span class="chev">›</span><span class="pill disp">display</span></summary>
+      <div class="card-body"><ol class="steps"><li>Search <code>50170797</code>.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><span class="val">4 results</span> (one per renewal year), and <b>each</b> year's record carries its 12 monthly payments — installments collapse within a year, renewals stay separate.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 6 ===== -->
+    <section class="section" id="p6">
+      <div class="section-head"><span class="phase">P6</span><h2>Customers</h2></div>
+      <p class="section-note">Fixes #37/#39/#49: type resolution (individual/corporate/foreign), full field mapping, and foreign title/gender (<b>M2</b>).</p>
+
+      <details class="card"><summary><span class="tc-id">6.1</span><span class="tc-title">Individual — full record <span class="sub">สุพจน์ ยุทธนากรกุล · customer id 5893</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Customers → search <code>C8000959</code> → open.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>Thai + English name, ID + expiry, birthdate, gender, nationality/religion, occupation + income, mobile + landline (เบอร์สำรอง), email, registered + mailing address, POLICIES 2/9.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">6.2</span><span class="tc-title">Corporate — juristic name &amp; tax id <span class="sub">Company, not split person fields</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Search a นิติบุคคล (e.g. <code>C8003140</code>, โรงเรียน นานาชาติแอสเตอร์).</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>customer_type corporate; juristic name shown with บริษัท/โรงเรียน prefix; tax id present; person name fields empty. Corporate count ≈ <span class="val">459</span>.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">6.3</span><span class="tc-title">Foreign individual keeps title &amp; gender <span class="sub">M2 · HTAY NAING · customer C8000186</span></span><span class="chev">›</span><span class="pill crit">M2</span></summary>
+      <div class="card-body"><ol class="steps"><li>Search <code>C8000186</code>.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>customer_type <span class="val">foreign_individual</span>, title <span class="val">Mr.</span>, gender <span class="val">ชาย/M</span> (both were blank before the fix). Dataset: <span class="val">0</span> foreign customers with blank title+gender; foreign ≈ <span class="val">122</span>.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 7 ===== -->
+    <section class="section" id="p7">
+      <div class="section-head"><span class="phase">P7</span><h2>Agents &amp; security</h2></div>
+      <p class="section-note">Fixes #48/#49: agent_type (<b>M1</b>), licenses (<b>P2</b>), National ID → encrypted id_card (<b>P4</b>), payment method (<b>P3</b>). PII decryption depends on the matching <code>APP_KEY</code>.</p>
+
+      <details class="card"><summary><span class="tc-id">7.1</span><span class="tc-title">Agent login works <span class="sub">Password = birthdate ddmmyyyy</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>From an incognito window, log in as a real agent (e.g. a ddmmyyyy agent whose DOB you know).</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>login succeeds; the agent sees their own portal. 679 agent logins exist; 16 stub/house are intentionally disabled.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">7.2</span><span class="tc-title">Bank &amp; National ID decrypt <span class="sub">P4 · depends on APP_KEY</span></span><span class="chev">›</span><span class="pill crit">P4</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open agent <code>AG210001</code> (นริสรา, agent id 32) → ข้อมูลส่วนตัว tab.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>bank account shows readable (e.g. กสิกรไทย 744-2-51287-0); id_card decrypts to a 13-digit number (<span class="val">1840100138951</span>). Garbled/empty here = APP_KEY mismatch — fix the key, don't re-import. 665 agents carry an encrypted id_card.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">7.3</span><span class="tc-title">Licenses present &amp; agent types split <span class="sub">P2 + M1</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>On <code>AG210001</code>, check LICENSE LIFE / NON-LIFE.</li><li>In the agent list, confirm ประเภท shows both AG and IN.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>AG210001 shows two license numbers. Agent types: <span class="val">41 AG</span> + <span class="val">659 IN</span> (not all AG). 72 agents carry a license.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">7.4</span><span class="tc-title">Policies carry a payment method <span class="sub">P3 · resolver was stubbed</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open any imported policy; find the payment-method field, or query non-null count.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div><span class="val">18,680</span> live policies have a payment method (was 0 before #48). ~742 null = genuinely blank in source.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">7.5</span><span class="tc-title">MLM upline is sparse — by design <span class="sub">P5 · assigned manually later</span></span><span class="chev">›</span><span class="pill disp">expected</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open an agent → สายงาน &amp; ระดับ.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>Most agents show ไม่มีต้นสาย. Only ~44 uplines wired. This is <b>intentional</b> — source upline data is incomplete; uplines will be assigned manually in-app. Not a bug.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 8 ===== -->
+    <section class="section" id="p8">
+      <div class="section-head"><span class="phase">P8</span><h2>Payments &amp; money integrity</h2></div>
+      <p class="section-note">Tidy #52 + the full payment sweep. Negative rows are flagged endorsements; ฿0 placeholder rows removed; no unexpected overpay beyond the known source cases.</p>
+
+      <details class="card"><summary><span class="tc-id">8.1</span><span class="tc-title">Payment history renders per policy <span class="sub">Rows, dates, amounts</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open 2–3 policies across types; check การชำระเงิน.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>each payment row shows a date, amount, and method; legacy rows marked ข้อมูลระบบเดิม (นำเข้า); the summary tiles (ต้องชำระ / ชำระแล้ว / ค้างชำระ) add up.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">8.2</span><span class="tc-title">Negative payments are flagged endorsements <span class="sub">No mystery negatives</span></span><span class="chev">›</span></summary>
+      <div class="card-body"><ol class="steps"><li>Query negative payment rows whose adjustment_kind ≠ endorsement.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>count <span class="val">0</span> — every negative payment is a flagged refund endorsement.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <!-- ===== PHASE 9 ===== -->
+    <section class="section" id="p9">
+      <div class="section-head"><span class="phase">P9</span><h2>Known residuals — expected, not bugs</h2></div>
+      <p class="section-note">These show imperfect data on purpose; confirm they behave as documented so a tester doesn't file them as regressions.</p>
+
+      <details class="card"><summary><span class="tc-id">9.1</span><span class="tc-title">One active corrupted policy number <span class="sub">M3 · source Excel corruption</span></span><span class="chev">›</span><span class="pill disp">known</span></summary>
+      <div class="card-body"><ol class="steps"><li>Open policy id <code>14638</code> (ศรุต สุทธิสำแดง, อาคเนย์).</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>policy_no shows <span class="val">6.310002251e+11</span>. Known source corruption (parked for hard-copy verification). All other ~820 corrupted numbers are on expired policies. Not a migration regression.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">9.2</span><span class="tc-title">List status label vs detail status <span class="sub">Legacy label by design (PR #36)</span></span><span class="chev">›</span><span class="pill disp">known</span></summary>
+      <div class="card-body"><ol class="steps"><li>Compare a policy's status in the list vs its detail page.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>the list may show the legacy Thai label (e.g. คุ้มครองอยู่) while the detail shows the computed status (e.g. หมดอายุ). This is the intended legacy-first display, not a bug.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+
+      <details class="card"><summary><span class="tc-id">9.3</span><span class="tc-title">Source-limited blanks <span class="sub">Never existed in source</span></span><span class="chev">›</span><span class="pill disp">known</span></summary>
+      <div class="card-body"><ol class="steps"><li>Spot-check customers with blank gender (คุณ) or policy-less customers with no reg-date/agent.</li></ol>
+      <div class="expect"><div class="lbl">Expect</div>~537 customers have no gender (neutral title คุณ); 932 policy-less customers have no registration date/agent. These are absent in the source, not lost. Expected.</div>
+      <div class="result-row"><span class="q">Result</span><span class="pf"><label><input type="checkbox" name="r">Pass</label><label><input type="checkbox" name="r">Fail</label></span></div></div></details>
+    </section>
+
+    <footer>
+      <p>Expected values are from the verified local dataset the restore dump was cut from (<code>sha256 b0791b61…</code>). A failing <b>critical</b> case (money, counts, overpay, PII decryption) blocks go-live; a failing <b>display</b> case is a UI regression; a failing <b>known</b> case means the residual changed and should be re-investigated. Re-run Phase 0–1 after any hotfix redeploy.</p>
+    </footer>
+  </main>
+</div>
+</div>
+
+<script>
+  document.getElementById('openAll').addEventListener('click',()=>document.querySelectorAll('details.card').forEach(d=>d.open=true));
+  document.getElementById('closeAll').addEventListener('click',()=>document.querySelectorAll('details.card').forEach(d=>d.open=false));
+  (function(){
+    var btn=document.getElementById('themeBtn'),root=document.documentElement;
+    function cur(){return root.getAttribute('data-theme')|| (matchMedia('(prefers-color-scheme:dark)').matches?'dark':'light');}
+    btn.addEventListener('click',function(){root.setAttribute('data-theme',cur()==='dark'?'light':'dark');});
+  })();
+</script>
