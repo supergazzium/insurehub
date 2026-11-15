@@ -61,6 +61,8 @@ class BackfillInstallmentPremium extends Command
 
         $fixed = 0;
         $skipped = 0;
+        $staleSchedules = 0;
+        $yearlyFixed = 0;
         $samples = [];
 
         foreach ($policies as $p) {
@@ -86,12 +88,56 @@ class BackfillInstallmentPremium extends Command
 
                 continue;
             }
+
+            // Always clear a single-row schedule on a multi-installment term: a
+            // real N-installment plan can never have exactly one row, so it is a
+            // stale leftover (built from the broken pre-fix premium) that drives
+            // a false ชำระเกิน. Do this BEFORE the uniformity branch so bundled /
+            // multi-year policies get their bogus schedule removed too.
+            $sr = (int) DB::table('policy_installments')->where('policy_id', $p->id)->count();
+            if ($sr === 1 && $term > 1) {
+                $staleSchedules++;
+                if (! $dry) {
+                    DB::table('policy_installments')->where('policy_id', $p->id)->delete();
+                }
+            }
             // non-uniform payments (more than 2 distinct rounded amounts, or a
-            // max/min spread > 10%) => not a true installment plan; leave alone.
+            // max/min spread > 10%). These are NOT within-year installments —
+            // they are YEARLY RENEWALS mis-labeled as monthly/quarterly (one
+            // payment per year, premium creeping up each year). The correct
+            // premium is the LATEST year's payment, the mode is annual, and the
+            // stale installment schedule must go (else it drives a false
+            // ชำระเกิน). A genuinely-bundled group policy (payments on the SAME
+            // dates) is left alone — detected by span: yearly renewals span many
+            // months/years, bundled ones cluster on a day.
             $mn = (float) $agg->mn;
             $mx = (float) $agg->mx;
             $nonUniform = (int) $agg->distinct_amts > 2 || ($mn > 0 && ($mx - $mn) / $mn > 0.10);
             if ($nonUniform) {
+                $dates = DB::table('policy_payments')->where('policy_id', $p->id)->whereNull('voided_at')
+                    ->selectRaw('MIN(payment_date) mn, MAX(payment_date) mx')->first();
+                $spanDays = ($dates && $dates->mn && $dates->mx)
+                    ? (int) ((strtotime($dates->mx) - strtotime($dates->mn)) / 86400) : 0;
+                // yearly renewals span > ~1 year across the payments
+                if ($spanDays > 400) {
+                    $latest = (float) (DB::table('policy_payments')->where('policy_id', $p->id)->whereNull('voided_at')
+                        ->orderByDesc('payment_date')->value('amount'));
+                    if ($latest > 0) {
+                        if (! $dry) {
+                            DB::table('policies')->where('id', $p->id)->update([
+                                'annual_premium' => $latest,
+                                'main_premium' => $latest,
+                                'premium_mode' => 'annual',
+                                'premium_check' => 'ok',
+                                'updated_at' => DB::raw('NOW()'),
+                            ]);
+                            DB::table('policy_installments')->where('policy_id', $p->id)->delete();
+                        }
+                        $yearlyFixed++;
+
+                        continue;
+                    }
+                }
                 $skipped++;
 
                 continue;
@@ -104,38 +150,59 @@ class BackfillInstallmentPremium extends Command
             $curNet = (float) ($p->net_premium ?? 0);
             $annualNet = $curNet > 0 ? round($curNet * $term, 2) : null;
 
-            // already correct?  (annual_premium within ฿2 of the gross annual)
-            if (abs((float) ($p->annual_premium ?? 0) - $annualGross) <= 2.0
-                && abs((float) ($p->main_premium ?? 0) - $annualGross) <= 2.0) {
+            // --- 1. premium fix (only when the stored premium is wrong) ---
+            $premiumWrong = abs((float) ($p->annual_premium ?? 0) - $annualGross) > 2.0
+                || abs((float) ($p->main_premium ?? 0) - $annualGross) > 2.0;
+            if ($premiumWrong) {
+                $upd = [
+                    'annual_premium' => $annualGross,
+                    'main_premium' => $annualGross,
+                    'premium_check' => 'ok',
+                    'updated_at' => DB::raw('NOW()'),
+                ];
+                if ($annualNet !== null) {
+                    $upd['net_premium'] = $annualNet;
+                }
+                if (count($samples) < 6) {
+                    $samples[] = [$p->id, $term, $perInst, (float) ($p->main_premium ?? 0).'→'.$annualGross];
+                }
+                if (! $dry) {
+                    DB::table('policies')->where('id', $p->id)->update($upd);
+                }
+                $fixed++;
+            } else {
                 $skipped++;
-
-                continue;
             }
 
-            // premium_check: the annual gross vs per-installment × term reconciles
-            // by construction here, so mark ok.
-            $upd = [
-                'annual_premium' => $annualGross,
-                'main_premium' => $annualGross,
-                'premium_check' => 'ok',
-                'updated_at' => DB::raw('NOW()'),
-            ];
-            if ($annualNet !== null) {
-                $upd['net_premium'] = $annualNet;
+            // --- 2. stale installment schedule cleanup (independent of the
+            //        premium fix). The schedule was generated BEFORE the premium
+            //        was corrected, so it often holds a single bogus row (e.g.
+            //        one installment of ฿339.12) whose sum != the annual premium.
+            //        PremiumDue prefers sum(amount_due) when a schedule exists, so
+            //        a stale schedule reintroduces the false ชำระเกิน even after
+            //        the premium is right. These policies are fully paid and the
+            //        payments are the record — remove the stale schedule so `due`
+            //        falls back to the (now-correct) annual premium. ---
+            $schedTotal = (float) (DB::table('policy_installments')
+                ->where('policy_id', $p->id)->sum('amount_due'));
+            $schedRows = (int) DB::table('policy_installments')->where('policy_id', $p->id)->count();
+            // a schedule whose total diverges from the annual premium is stale;
+            // so is ANY single-row schedule on a multi-installment term (a real
+            // N-installment plan can never have one row). Both drive a false
+            // ชำระเกิน via PremiumDue's sum(amount_due) branch.
+            if ($schedRows > 0 && (abs($schedTotal - $annualGross) > 2.0 || ($schedRows === 1 && $term > 1))) {
+                $staleSchedules++;
+                if (! $dry) {
+                    DB::table('policy_installments')->where('policy_id', $p->id)->delete();
+                }
             }
-
-            if (count($samples) < 6) {
-                $samples[] = [$p->id, $term, $perInst, (float) ($p->main_premium ?? 0).'→'.$annualGross];
-            }
-
-            if (! $dry) {
-                DB::table('policies')->where('id', $p->id)->update($upd);
-            }
-            $fixed++;
         }
 
         $this->table(['policy_id', 'term', 'per_installment', 'main_premium old→new'], $samples);
-        $this->info(($dry ? '[dry-run] would fix ' : 'fixed ').$fixed.' installment policies ('.$skipped.' already-correct/skipped).');
+        $this->info(($dry ? '[dry-run] would fix ' : 'fixed ').$fixed.' installment premiums; '
+            .$yearlyFixed.' yearly-renewal relabels; '
+            .($dry ? 'would clear ' : 'cleared ').$staleSchedules.' stale schedules; '
+            .$skipped.' skipped.');
 
         return self::SUCCESS;
     }
