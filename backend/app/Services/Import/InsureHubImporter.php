@@ -1016,10 +1016,16 @@ class InsureHubImporter
                 'com_rec_check' => $row->commission_record_status,
                 // Legacy per-policy commission figures: agent share → hub-to-agent,
                 // in-house share → carrier-to-hub (confirmed mapping).
-                'comm_hub_to_agent_amount' => $row->main_commission_ag_amount,
-                'comm_hub_to_agent_rate' => $row->main_commission_ag_pct,
-                'comm_carrier_to_hub_amount' => $row->main_commission_inh_amount,
-                'comm_carrier_to_hub_rate' => $row->main_commission_inh_pct,
+                // A blank source rate/amount means INTENTIONALLY ZERO commission
+                // (overwhelmingly พรบ / ต่อภาษี — compulsory motor + tax renewal,
+                // which are non-commissionable). Store an explicit 0, not null, so
+                // these read as "resolved: zero commission" rather than "unset".
+                // The no_commission follow-up warning flags only NULL (genuinely
+                // unset — a new policy an operator hasn't filled in), never 0.
+                'comm_hub_to_agent_amount' => $this->commissionZeroFill($row->main_commission_ag_amount),
+                'comm_hub_to_agent_rate' => $this->commissionZeroFill($row->main_commission_ag_pct),
+                'comm_carrier_to_hub_amount' => $this->commissionZeroFill($row->main_commission_inh_amount),
+                'comm_carrier_to_hub_rate' => $this->commissionZeroFill($row->main_commission_inh_pct),
                 'premium_check' => $premiumCheck,
                 'imported_from_legacy' => true,
                 'updated_at' => $this->now,
@@ -1514,6 +1520,25 @@ class InsureHubImporter
     private function normAgent(mixed $value): string
     {
         return strtoupper($this->normCode($value));
+    }
+
+    /**
+     * Coalesce a blank source commission rate/amount to an explicit 0.
+     *
+     * A missing commission figure in the source means "intentionally zero"
+     * (the policy earns no commission — overwhelmingly พรบ compulsory motor and
+     * ต่อภาษี tax renewals, which are non-commissionable). Storing 0 rather than
+     * null marks it RESOLVED: the no_commission follow-up warning flags only
+     * null (a genuinely-unset commission an operator still has to fill in),
+     * never 0. A real numeric value passes through unchanged.
+     */
+    private function commissionZeroFill(mixed $value): float
+    {
+        if ($value === null || (is_string($value) && trim($value) === '')) {
+            return 0.0;
+        }
+
+        return (float) $value;
     }
 
     private function normCode(mixed $value): string

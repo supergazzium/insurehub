@@ -333,10 +333,18 @@ class FollowUpController extends Controller
                 ->whereNotNull('p.policy_no')->where('p.policy_no', '!=', '')
                 ->whereRaw('COALESCE(p.shipped_date, p.mailing_date) IS NOT NULL')
                 ->where('p.effective_date', '>=', now()->subDays((int) ($tenant?->no_commission_window_days ?? 180))->toDateString())
-                ->where(fn ($w) => $w->whereNull('p.comm_carrier_to_hub_amount')
-                    ->orWhere('p.comm_carrier_to_hub_amount', 0)
-                    ->orWhereNull('p.comm_hub_to_agent_amount')
-                    ->orWhere('p.comm_hub_to_agent_amount', 0)),
+                // Flag only UNSET commission (NULL RATE), not an explicit 0. The
+                // RATE is the source of truth for "is there commission" — the
+                // amount is derived on demand and is often NULL even on a policy
+                // that has a rate, so we must key the warning on the rate. A 0
+                // rate means "intentionally zero commission" (resolved — e.g.
+                // พรบ / ต่อภาษี, or an operator who deliberately set zero); a NULL
+                // rate means it was never filled in and needs attention. The
+                // legacy import zero-fills blank source commission, so migrated
+                // zero-commission policies don't warn; a new policy the wizard
+                // leaves NULL still does.
+                ->where(fn ($w) => $w->whereNull('p.comm_carrier_to_hub_rate')
+                    ->orWhereNull('p.comm_hub_to_agent_rate')),
             'cancelled' => $reviewed
                 ? $q->where('p.status', 'cancelled')->whereNotNull('p.cancellation_reviewed_at')
                 : $q->where('p.status', 'cancelled')->whereNull('p.cancellation_reviewed_at'),
