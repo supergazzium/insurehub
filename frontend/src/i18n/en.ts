@@ -1182,6 +1182,7 @@ export default {
       dashboard: 'Home',
       profile: 'My Profile',
       referral: 'Team',
+      followUps: 'Follow-ups',
       earnings: 'Earnings',
       settings: 'Settings',
     },

@@ -2468,6 +2468,7 @@ export default {
       dashboard: 'หน้าแรก',
       profile: 'ข้อมูลของฉัน',
       referral: 'ทีมงาน',
+      followUps: 'งานค้าง',
       earnings: 'รายได้',
       settings: 'ตั้งค่า',
     },
