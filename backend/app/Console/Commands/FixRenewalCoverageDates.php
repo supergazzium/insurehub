@@ -63,11 +63,15 @@ class FixRenewalCoverageDates extends Command
         $samples = [];
 
         foreach ($chains as $chain) {
+            // Order by the actual coverage start, not policy_year: some chains
+            // carry duplicate/unrenumbered year labels (two 'year 1' rows), so a
+            // policy_year sort would mis-sequence them and report false overlaps.
+            // effective_date is the true chronological order.
             $years = DB::table('policies')
                 ->where('tenant_id', $tenant)->whereNull('deleted_at')
                 ->where('policy_no', $chain->policy_no)
                 ->where('customer_id', $chain->customer_id)
-                ->orderByRaw('policy_year IS NULL, policy_year')
+                ->orderByRaw('effective_date IS NULL, effective_date')
                 ->orderBy('id')
                 ->get(['id', 'policy_year', 'effective_date', 'expiry_date']);
 
