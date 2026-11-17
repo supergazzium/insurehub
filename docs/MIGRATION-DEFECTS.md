@@ -23,7 +23,25 @@
   the list query and PolicyResource now resolve the label COMPUTED-first (from
   p.status via PolicyStatusLookup::labelFor), legacy only as fallback. All 13,320
   expired policies now read หมดอายุ; list and detail agree.
-- ⬜ D3, D5, D6, D8 + smaller — NOT yet done (next passes).
+- ✅ **D3/D4** payments tagged with wrong $N + endorsement events out of date
+  order. Fold now sorts members chronologically before assigning endorsement_seq,
+  so the ledger is date-ordered and the per-payment $N (count as-of date) is
+  meaningful. Also uses real member dates (only 7 events dataset-wide hit the
+  migration-day fallback).
+- ✅ **D5** empty ฿0 endorsements. Fold skips the endorsement EVENT for a
+  ฿0/NULL-premium member (still moves its payment + soft-deletes), so the count
+  reflects real changes (843 = base + 28, not 29). 0 ฿0 events dataset-wide.
+- ✅ **D6** refunds labelled เบี้ยเพิ่ม. Fold re-applies the authoritative premium-
+  delta SIGN to additionalTotal (the source total_premium_paid sign is
+  unreliable), so a member-left refund shows negative + สมาชิกออก (คืนเบี้ย).
+- ✅ **D8 (Group A only)** overlapping renewal-chain coverage dates. New
+  policies:fix-renewal-coverage-dates recomputes each OVERLAPPING renewal year
+  sequentially (year N eff = year N-1 expiry, +1 term). Scoped to real chains
+  (same policy_no + customer, >1 distinct year); excludes NULL-policy_no rows,
+  co-insurance, and genuine multi-year/pension terms (13 long-span intact).
+  Fixed 267 years across 199 chains; idempotent.
+- ⬜ smaller items (installment badge, customer-year, co-insurance label,
+  refund-as-transfer display) — minor, not yet done.
 
 ---
 

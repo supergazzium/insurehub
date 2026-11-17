@@ -133,10 +133,35 @@ class FoldGroupEndorsements extends Command
                 $basePremium = (float) ($keeper->main_premium ?? 0);
                 $runningPremium = $basePremium;
 
+                // D3/D4 — assign endorsement_seq in chronological order so the
+                // ledger reads in date order and the per-payment "$N" (derived as
+                // the endorsement count AS-OF the payment date) is meaningful. The
+                // manifest member order is not chronological.
+                $keeperEff = $keeper->effective_date ?? $now->toDateString();
+                usort($members, fn ($a, $b) => strcmp(
+                    $this->safeDate($a->effective_date, $keeperEff),
+                    $this->safeDate($b->effective_date, $keeperEff),
+                ));
+
                 foreach ($members as $m) {
-                    $seq++;
                     $delta = (float) ($m->main_premium ?? 0);  // signed delta (authoritative)
-                    $deltaTotal = (float) ($m->total_premium_paid ?? $delta); // incl VAT/duty
+                    // D6 — the member's total_premium_paid (incl VAT/duty) has an
+                    // UNRELIABLE sign at source (a refund can be stored +1,430),
+                    // so take its magnitude and re-apply the authoritative sign of
+                    // the premium delta. A refund (delta < 0) then correctly shows
+                    // a negative additionalTotal and the สมาชิกออก (คืนเบี้ย) label,
+                    // not a phantom เบี้ยเพิ่ม.
+                    $rawTotal = $m->total_premium_paid !== null ? (float) $m->total_premium_paid : $delta;
+                    $deltaTotal = $delta < 0 ? -abs($rawTotal) : abs($rawTotal);
+
+                    // D5 — a ฿0 / NULL-premium member is not a real premium change.
+                    // Still fold it (move its payment, soft-delete the shell) but do
+                    // NOT record an endorsement event or bump the seq, so the ledger
+                    // count reflects real changes only (e.g. 843 = base + 28, not 29).
+                    $isEmpty = abs($delta) < 0.01 && abs($deltaTotal) < 0.01;
+                    if (! $isEmpty) {
+                        $seq++;
+                    }
                     $before = ['annualPremium' => $runningPremium, 'mainPremium' => $runningPremium];
                     $runningPremium = round($runningPremium + $delta, 2);
                     $after = ['annualPremium' => $runningPremium, 'mainPremium' => $runningPremium];
@@ -148,30 +173,34 @@ class FoldGroupEndorsements extends Command
                     // (the best available anchor) rather than today.
                     $occurredAt = $this->safeDate($m->effective_date, $keeper->effective_date ?? $now->toDateString());
 
-                    // 1. record the endorsement event on the base
-                    DB::table('policy_events')->insert([
-                        'policy_id' => $keeper->id,
-                        'type' => 'endorsement.premium_change',
-                        'endorsement_seq' => $seq,
-                        'occurred_at' => $occurredAt,
-                        'by_user_id' => null,
-                        'payload' => json_encode([
-                            'reason' => $delta < 0 ? 'สมาชิกออก (คืนเบี้ย)' : 'สมาชิกเพิ่ม (เก็บเบี้ยเพิ่ม)',
-                            'effectiveDate' => $occurredAt,
-                            'before' => $before,
-                            'after' => $after,
-                            'additionalPremium' => round($delta, 2),
-                            'additionalDutyStamp' => 0,
-                            'additionalVat' => 0,
-                            'additionalTotal' => round($deltaTotal, 2),
-                            'source' => 'legacy-endorsement-fold',
-                            'fromApplication' => $m->application_no,
-                        ], JSON_UNESCAPED_UNICODE),
-                        'voided_at' => null,
-                        'created_at' => $now,
-                        'updated_at' => $now,
-                    ]);
-                    $stats['endorsements_recorded']++;
+                    // 1. record the endorsement event on the base — only for a
+                    //    REAL premium change (D5: a ฿0 member moves its payment and
+                    //    is soft-deleted but produces no endorsement event).
+                    if (! $isEmpty) {
+                        DB::table('policy_events')->insert([
+                            'policy_id' => $keeper->id,
+                            'type' => 'endorsement.premium_change',
+                            'endorsement_seq' => $seq,
+                            'occurred_at' => $occurredAt,
+                            'by_user_id' => null,
+                            'payload' => json_encode([
+                                'reason' => $delta < 0 ? 'สมาชิกออก (คืนเบี้ย)' : 'สมาชิกเพิ่ม (เก็บเบี้ยเพิ่ม)',
+                                'effectiveDate' => $occurredAt,
+                                'before' => $before,
+                                'after' => $after,
+                                'additionalPremium' => round($delta, 2),
+                                'additionalDutyStamp' => 0,
+                                'additionalVat' => 0,
+                                'additionalTotal' => round($deltaTotal, 2),
+                                'source' => 'legacy-endorsement-fold',
+                                'fromApplication' => $m->application_no,
+                            ], JSON_UNESCAPED_UNICODE),
+                            'voided_at' => null,
+                            'created_at' => $now,
+                            'updated_at' => $now,
+                        ]);
+                        $stats['endorsements_recorded']++;
+                    }
 
                     // 2. move the member's payment(s) onto the base, flagged as endorsement
                     $moved = DB::table('policy_payments')->where('policy_id', $m->id)
