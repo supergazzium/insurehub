@@ -1,5 +1,24 @@
 # Migration Defects — from hard-copy page-by-page review (2026-11-17)
 
+## STATUS (money batch — re-import verified)
+- ✅ **D1** amount-due ignores endorsements — fold now resyncs main_premium to the
+  final endorsed total + resets total_premium_paid to base + drops stale schedule.
+  843: due=paid=฿4,074,796 (phantom ฿1.18M overpay gone). Remaining over/under on
+  some policies are REAL payment≠premium discrepancies (left visible by decision).
+- ✅ **D2** refund signs — importer flips 23 positive refunds (neg premium delta) to
+  negative. Payments reconcile exactly to the D2-corrected source (฿234,491,794.27).
+- ✅ **D4 (partial)** malformed endorsement date ('2205-…') crash — fold safeDate()
+  clamps out-of-range years. (Default-date issue for in-range dates still open.)
+- ✅ **D10** VAT carve-out — importer fills vat=total−net−stamp; installment backfill
+  reconciles vat to the ANNUAL figures. net+stamp+vat=total on all but 13 edge
+  cases (net>annual anomalies — left as-is, no invented negative tax).
+- ✅ **D11** commission rate ÷100 scale — importer ×100 (0.0018→0.18=18%), derives
+  rate from amount for the 414 ambiguous rows. 194 small-rate policies confirmed
+  legit (rate×net=amount); 0 still mis-scaled.
+- ⬜ D3, D5, D6, D7, D8, D9 + smaller — NOT yet done (next passes).
+
+---
+
 Source: user's manual review of every policy on staging. Record counts + ledger
 arithmetic mostly correct; **money and date logic around them is wrong.** User
 only viewed pages, changed nothing. Local DB restored to clean dump to match.
