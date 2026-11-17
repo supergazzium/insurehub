@@ -15,7 +15,15 @@
 - ✅ **D11** commission rate ÷100 scale — importer ×100 (0.0018→0.18=18%), derives
   rate from amount for the 414 ambiguous rows. 194 small-rate policies confirmed
   legit (rate×net=amount); 0 still mis-scaled.
-- ⬜ D3, D5, D6, D7, D8, D9 + smaller — NOT yet done (next passes).
+- ✅ **D7** installment schedules imported as paid with FUTURE dates → fake
+  ชำระครบแล้ว/฿0. InstallmentSchedule::reallocate() now leaves a future-due งวด
+  pending (fills only DUE งวด; a future งวด settles only via an explicit link).
+  backfill-installments --resync-existing re-runs it. 0 future-due งวด marked paid.
+- ✅ **D9** expired policies showed คุ้มครองอยู่ (legacy label); list≠detail. Both
+  the list query and PolicyResource now resolve the label COMPUTED-first (from
+  p.status via PolicyStatusLookup::labelFor), legacy only as fallback. All 13,320
+  expired policies now read หมดอายุ; list and detail agree.
+- ⬜ D3, D5, D6, D8 + smaller — NOT yet done (next passes).
 
 ---
 
