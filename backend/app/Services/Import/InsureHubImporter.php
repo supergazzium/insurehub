@@ -1295,18 +1295,39 @@ class InsureHubImporter
                 ->delete();
         }
 
+        // D2 — recover lost refund signs. A refund (member left a group policy)
+        // should be a NEGATIVE payment, but the legacy Payment_Amount sign is
+        // unreliable: 23 refunds were keyed positive at source. The application's
+        // main_premium holds the SIGNED premium delta (authoritative — same
+        // signal FoldGroupEndorsements uses), so a payment that is positive while
+        // its application's premium delta is negative is a mis-signed refund →
+        // flip it. Build the refund set once (application_code of every negative
+        // premium delta) rather than a per-row lookup.
+        $refundApps = [];
+        foreach ($legacy->table('applications')
+            ->where('main_premium', '<', 0)
+            ->pluck('application_code') as $code) {
+            $refundApps[$this->normCode($code)] = true;
+        }
+
         $chunk = [];
         foreach ($legacy->table('payments')->cursor() as $row) {
-            $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
+            $appCode = $this->normCode($row->application_code);
+            $policyId = $this->idCache['policies'][$appCode] ?? null;
             if (! $policyId) {
                 $skip++;
 
                 continue;
             }
+            $amount = (float) ($row->amount ?? 0);
+            // mis-signed refund: positive payment on a negative-premium-delta app
+            if ($amount > 0 && isset($refundApps[$appCode])) {
+                $amount = -$amount;
+            }
             $chunk[] = [
                 'policy_id' => $policyId,
                 'payment_date' => $this->parseDate($row->payment_date) ?? $this->now->toDateString(),
-                'amount' => (float) ($row->amount ?? 0),
+                'amount' => $amount,
                 'method' => 'bankTransfer',
                 'reference' => null,
                 'payment_inscomp_to_id' => $this->idCache['payment_inscomp_tos'][(string) ($row->to_company ?? '')] ?? null,
