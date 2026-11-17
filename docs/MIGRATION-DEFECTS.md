@@ -1,5 +1,56 @@
 # Migration Defects — from hard-copy page-by-page review (2026-11-17)
 
+## SYSTEMATIC VERIFICATION (2026-11-17, before Coolify deploy)
+
+Three independent verifiers built under `docs/verify/`, all run on the fresh
+full re-import (21,395 source → 19,301 live policies, 21,115 payments):
+
+1. **Row-by-row reconciliation** (`verify/` script): join complete
+   (21,395=21,395, 0 unmapped, 0 invented); net_premium pass-through 0
+   mismatches; carrier-commission amount 0 mismatches; **D1 endorsement math 0
+   violations**; payment sum 253,602,089.30 = 234,491,794.27 source-derived +
+   19,110,295.03 backfill (**the earlier ฿672k "gap" was a rounding artifact in
+   the report's own estimate — a subagent proved zero source payment lost; D2
+   flips hit exactly 23 rows; no backfill double-count**).
+2. **Business-rule assertions** (`verify/business_rules.sql`): 8 of 10 rules
+   clean (R1/R2/R3/R6/R7/R8/R9/R10 = 0). R4 (198) and R5 (2) residuals **all
+   proven source-faithful** (stored net = source exactly; the imbalance / rate>1
+   lives in the source's own figures — faithful import, not corruption).
+3. **Deployed-parity checksum** (`verify/parity_checksum.sql`): deterministic
+   per-table content hash; run identically on local + Coolify and `diff` — empty
+   = restore is bit-identical.
+
+Two NEW import bugs found and fixed by this pass:
+- ✅ **D8-status-resync**: `fix-renewal-coverage-dates` runs after
+  `backfill-statuses`; shifting a chain year's dates forward left 35 rows
+  `expired` with a future expiry (and 2 `active` with a future start). D8 now
+  re-derives date-driven status (future eff→issued, past exp→expired, else
+  active) for every row whose window it moves. R1/R2 → 0.
+- ✅ **D10-vat-wrong-total**: `reconcileVat` was passed `total_premium_paid`
+  (a cumulative/multi-installment figure) instead of `main_premium` (this
+  year's gross). Produced absurd vat (฿111,671 on net ฿3,878). Fixed to
+  reconcile against `main_premium`; removed a mistaken ratio clamp that would
+  have unbalanced legitimate net-understated source rows.
+
+Remaining R4 residual (198) and the 3 "vat>net" rows are **source data
+anomalies** (net understated vs gross, or source tracks vat separately from
+`main_premium`) — faithfully preserved. OPEN QUESTION for the user: display as-is
+(faithful) vs. cosmetically cap vat at net on the page.
+
+Also traced (date fidelity):
+- ✅ **3 undated source payments** were stamped with the import run-date →
+  corrected to each policy's effective/create date; importer now falls back to
+  the application's coverage_start/create_date (not "now") for undated rows.
+- **289 policies with NULL effective_date**: 35 are `9000-01-01` placeholders
+  (correctly quarantined as draft), 20 have `expiry < effective` in the SOURCE
+  (impossible range — correctly quarantined), 232 have only a create_date (no
+  coverage_start in source), and **2 clean-date rows were wrongly nulled → both
+  restored**. No remaining import-caused date loss; the rest are faithful
+  quarantine of corrupt/absent source dates.
+- **97 backfill (synthetic catch-up) payments dated to import-day**: these are
+  on the 97 NULL-effective policies above; by design they represent "amount
+  paid, exact date unknown". The other 701 backfills date from policy effective.
+
 ## STATUS (money batch — re-import verified)
 - ✅ **D1** amount-due ignores endorsements — fold now resyncs main_premium to the
   final endorsed total + resets total_premium_paid to base + drops stale schedule.

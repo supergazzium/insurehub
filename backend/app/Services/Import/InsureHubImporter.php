@@ -995,7 +995,12 @@ class InsureHubImporter
                 // vat = total − net − stamp so the components reconcile to the
                 // total. A row that already has vat, or where total == net (no
                 // tax), is left unchanged.
-                'vat' => $this->reconcileVat($row->vat, $row->net_premium, $row->duty_stamp, $row->total_premium_paid),
+                // Reconcile VAT against main_premium (the annual GROSS, which is
+                // also what annual_premium above is set to) — NOT
+                // total_premium_paid, which on some rows carries a cumulative /
+                // multi-installment figure unrelated to this year's tax and
+                // would yield an absurd vat (e.g. net 3,878 → vat 111,671).
+                'vat' => $this->reconcileVat($row->vat, $row->net_premium, $row->duty_stamp, $row->main_premium),
                 'total_premium_paid' => $row->total_premium_paid,
                 'net_customer_paid' => $row->net_customer_paid,
                 'premium_mode' => $this->premiumModeFromTerm($row->installment_term),
@@ -1325,6 +1330,22 @@ class InsureHubImporter
             $refundApps[$this->normCode($code)] = true;
         }
 
+        // Fallback date for undated payments. The source leaves payment_date
+        // blank on a handful of rows; stamping them with the import RUN date
+        // makes them read as "paid today" (misleading). Use the application's
+        // own coverage_start (→ policy effective_date), falling back to its
+        // create_date — both are far better proxies for when the payment
+        // occurred than "now". Built once, keyed by application_code.
+        $appDateMap = [];
+        foreach ($legacy->table('applications')
+            ->select('application_code', 'coverage_start', 'create_date')
+            ->cursor() as $a) {
+            $d = $this->parseDate($a->coverage_start) ?? $this->parseDate($a->create_date);
+            if ($d !== null) {
+                $appDateMap[$this->normCode($a->application_code)] = $d;
+            }
+        }
+
         $chunk = [];
         foreach ($legacy->table('payments')->cursor() as $row) {
             $appCode = $this->normCode($row->application_code);
@@ -1341,7 +1362,9 @@ class InsureHubImporter
             }
             $chunk[] = [
                 'policy_id' => $policyId,
-                'payment_date' => $this->parseDate($row->payment_date) ?? $this->now->toDateString(),
+                'payment_date' => $this->parseDate($row->payment_date)
+                    ?? $appDateMap[$appCode]
+                    ?? $this->now->toDateString(),
                 'amount' => $amount,
                 'method' => 'bankTransfer',
                 'reference' => null,
@@ -1633,6 +1656,13 @@ class InsureHubImporter
         if ($n <= 0 || $t <= 0) {
             return 0.0;                       // nothing to reconcile against
         }
+        // Derive against main_premium (the annual GROSS). By construction this
+        // balances net + stamp + vat == main_premium == annual_premium, so there
+        // is no ratio clamp: a large derived value means the source's own net is
+        // understated relative to its gross, and keeping the derived vat is what
+        // makes the components reconcile to the total. (The earlier absurd values
+        // — vat 111,671 on net 3,878 — came from reconciling against the WRONG
+        // total field, total_premium_paid, not from this formula.)
         $derived = round($t - $n - $s, 2);
 
         return $derived > 0 ? $derived : 0.0; // no negative tax

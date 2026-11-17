@@ -73,7 +73,7 @@ class FixRenewalCoverageDates extends Command
                 ->where('customer_id', $chain->customer_id)
                 ->orderByRaw('effective_date IS NULL, effective_date')
                 ->orderBy('id')
-                ->get(['id', 'policy_year', 'effective_date', 'expiry_date']);
+                ->get(['id', 'policy_year', 'effective_date', 'expiry_date', 'status']);
 
             // anchor on the first row that has an effective_date
             $anchor = $years->firstWhere(fn ($r) => $r->effective_date !== null);
@@ -102,12 +102,36 @@ class FixRenewalCoverageDates extends Command
                     // OVERLAP → shift this year to start at the prior term's end.
                     $newEff = $prevExpiry->copy();
                     $newExp = $newEff->copy()->addDays($span);
+
+                    // Re-derive the date-driven status for the NEW window. This
+                    // command runs after policies:backfill-statuses, which
+                    // stamped active/issued/expired from the OLD (overlapping)
+                    // dates. Shifting the window forward can leave an "expired"
+                    // row whose expiry is now years in the future, or an
+                    // "active" row whose coverage hasn't started — so recompute.
+                    // Only touch rows whose current status is itself
+                    // date-derived (active/issued/expired); never override
+                    // cancelled/draft/submitted/quotation/lapsed.
+                    $update = [
+                        'effective_date' => $newEff->toDateString(),
+                        'expiry_date' => $newExp->toDateString(),
+                        'updated_at' => DB::raw('NOW()'),
+                    ];
+                    if (in_array($r->status, ['active', 'issued', 'expired'], true)) {
+                        $today = Carbon::today();
+                        if ($newEff->gt($today)) {
+                            $newStatus = 'issued';       // not yet in force
+                        } elseif ($newExp->lt($today)) {
+                            $newStatus = 'expired';      // window already past
+                        } else {
+                            $newStatus = 'active';       // spans today
+                        }
+                        if ($newStatus !== $r->status) {
+                            $update['status'] = $newStatus;
+                        }
+                    }
                     if (! $dry) {
-                        DB::table('policies')->where('id', $r->id)->update([
-                            'effective_date' => $newEff->toDateString(),
-                            'expiry_date' => $newExp->toDateString(),
-                            'updated_at' => DB::raw('NOW()'),
-                        ]);
+                        DB::table('policies')->where('id', $r->id)->update($update);
                     }
                     if (count($samples) < 8) {
                         $samples[] = [$chain->policy_no, $r->policy_year,
