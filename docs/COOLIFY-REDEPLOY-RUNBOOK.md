@@ -1,0 +1,166 @@
+# Coolify Redeploy Runbook — migrated data
+
+Step-by-step to get the current (fully-fixed) migrated dataset onto Coolify.
+Run top to bottom. **I (Claude) cannot reach your Coolify/prod — you run every
+step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
+
+---
+
+## 0. What you're deploying
+
+| Item | Value |
+|---|---|
+| **Dump** | `insurehub_migrated_full.sql.gz` (repo root, **gitignored — PII**) |
+| **Dump sha256** | `be44d7d9c5d6189b852f303005857435ca9beb5206f8769c25394324453cd2ab` |
+| **Code** | `main` @ `28600f6` (pushed) |
+| Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,218 customers, 700 agents |
+| Money | payment sum **฿254,815,817.67** exact |
+| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption |
+
+Because the dump was cut **after** every backfill ran locally, **you do NOT run
+any artisan backfill commands on prod.** Restore-and-go.
+
+---
+
+## 1. ⚠️ APP_KEY — the one that will silently break PII
+
+The agent bank accounts, ID cards, and licenses in the dump are **encrypted with
+your local `APP_KEY`**. Coolify's backend must use the **same** `APP_KEY`, or
+those fields decrypt to garbage (you'll see it on an agent's ข้อมูลส่วนตัว tab).
+
+- **Do:** copy the `APP_KEY` from your local `backend/.env` into the Coolify
+  backend service's environment variables (Coolify → backend service →
+  Environment Variables). It starts with `base64:`.
+- **Do NOT** run `php artisan key:generate` on prod — that mints a *new* key and
+  permanently breaks decryption of the restored PII.
+- If prod already has a different `APP_KEY` and you can't change it, the fix is
+  to re-encrypt: not covered here — ask before doing it.
+
+**This is the #1 migration deploy mistake. Confirm the keys match before step 4.**
+
+---
+
+## 2. Deploy the code (likely already done)
+
+Pushing `main` triggers CI → on green, the GitHub `Deploy` workflow fires the
+Coolify webhooks (`COOLIFY_BACKEND_WEBHOOK` / `COOLIFY_FRONTEND_WEBHOOK`).
+
+- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `28600f6` should be
+  green. If `Deploy` says *"COOLIFY_*_WEBHOOK secret is not set"*, the webhooks
+  aren't wired — redeploy manually in Coolify (each service → **Redeploy**).
+- Confirm the backend came up: open `https://<your-domain>/up` → expect `200`.
+
+Code must be live **before** the restore (the dump's schema matches `main`).
+
+---
+
+## 3. Back up what's on prod now (safety net)
+
+Before overwriting, snapshot the current prod DB so you can roll back.
+
+```bash
+# In the Coolify MySQL container's terminal (Coolify → MySQL service → Terminal):
+mysqldump -u root -p --default-character-set=utf8mb4 \
+  --single-transaction --quick --routines --triggers --no-tablespaces \
+  insurehub | gzip > /tmp/insurehub_prod_backup_$(date +%Y%m%d).sql.gz
+# then download it off the container, or copy to a safe volume.
+```
+
+---
+
+## 4. Upload the dump to Coolify
+
+Get `insurehub_migrated_full.sql.gz` onto the Coolify MySQL container. Options:
+
+- **scp** to the host, then `docker cp` into the MySQL container; or
+- Coolify file manager / a mounted volume; or
+- `curl` it from a temporary signed URL.
+
+Verify the file arrived intact:
+
+```bash
+sha256sum insurehub_migrated_full.sql.gz
+# must equal: be44d7d9c5d6189b852f303005857435ca9beb5206f8769c25394324453cd2ab
+```
+
+If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a
+mismatched file.
+
+---
+
+## 5. Restore
+
+```bash
+# In the Coolify MySQL container terminal, with the .gz present:
+
+# 5a. (optional but clean) drop + recreate so no stale rows linger
+mysql -u root -p -e "DROP DATABASE IF EXISTS insurehub;
+  CREATE DATABASE insurehub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+
+# 5b. restore
+gunzip -c insurehub_migrated_full.sql.gz | \
+  mysql -u root -p --default-character-set=utf8mb4 insurehub
+```
+
+Restore is clean (verified by a local round-trip: 0 errors). It should finish in
+well under a minute.
+
+> Make sure the DB name / user in the restore matches what the backend's `.env`
+> `DB_DATABASE` / `DB_USERNAME` point at.
+
+---
+
+## 6. Clear backend caches (so it reads the fresh data + env)
+
+```bash
+# In the Coolify BACKEND container terminal:
+php artisan config:clear
+php artisan cache:clear
+php artisan route:clear
+# NO migrate, NO db:seed, NO backfills — the dump is complete.
+```
+
+(If the backend image has OPcache with `validate_timestamps=Off`, a service
+**Restart** in Coolify guarantees it picks up the new code — same gotcha as
+local.)
+
+---
+
+## 7. Verify (hard gates)
+
+Open the app and confirm, in order:
+
+1. **Login** `admin@insurehub.co.th` → dashboard loads.
+2. **Counts** — dashboard shows **19,301** policies (NOT 38,955 = stale backend),
+   **11,218** customers, **700** agents.
+3. **Money** — in the backend container:
+   `php artisan tinker --execute="echo \App\Models\PolicyPayment::whereNull('voided_at')->sum('amount');"`
+   → **254815817.67** exact.
+4. **PII decrypts (APP_KEY check)** — open agent `AG210001` → ข้อมูลส่วนตัว →
+   bank account reads **กสิกรไทย 744-2-51287-0** (readable, not garbled). Garbled
+   here = APP_KEY mismatch → fix step 1, re-restore.
+5. **Agent login** — an agent logs in (password = birthdate `ddmmyyyy`).
+6. **Commission warning quiet** — งานค้าง → ยังไม่บันทึกค่าคอม shows a small/zero
+   count (migrated zero-commission policies no longer warn).
+
+Then run the full `docs/REDEPLOY-TEST-PLAN.html` (P0–P9) for thorough coverage.
+
+---
+
+## 8. Rollback (if a hard gate fails)
+
+```bash
+# restore the step-3 backup:
+mysql -u root -p -e "DROP DATABASE insurehub; CREATE DATABASE insurehub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
+gunzip -c /tmp/insurehub_prod_backup_YYYYMMDD.sql.gz | mysql -u root -p insurehub
+php artisan config:clear && php artisan cache:clear
+```
+
+---
+
+## Quick reference — what NOT to do
+
+- ❌ `php artisan key:generate` on prod (breaks PII decryption)
+- ❌ `php artisan db:seed` (overwrites migrated data with demo seed)
+- ❌ any `php artisan *backfill*` / `collapse` / `fold` command (already applied in the dump)
+- ❌ restoring a dump whose sha256 doesn't match
