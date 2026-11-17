@@ -80,7 +80,7 @@ Verify the file arrived intact:
 
 ```bash
 sha256sum insurehub_migrated_full.sql.gz
-# must equal: be44d7d9c5d6189b852f303005857435ca9beb5206f8769c25394324453cd2ab
+# must equal: 8155fca092f10497c2eb4860e292b6f908440e7c2f4f64af1f8e4f2fca359d1b
 ```
 
 If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a
@@ -132,16 +132,55 @@ Open the app and confirm, in order:
 
 1. **Login** `admin@insurehub.co.th` → dashboard loads.
 2. **Counts** — dashboard shows **19,301** policies (NOT 38,955 = stale backend),
-   **11,218** customers, **700** agents.
+   **11,252** customers, **700** agents.
 3. **Money** — in the backend container:
    `php artisan tinker --execute="echo \App\Models\PolicyPayment::whereNull('voided_at')->sum('amount');"`
-   → **254815817.67** exact.
+   → **253602089.30** exact.
 4. **PII decrypts (APP_KEY check)** — open agent `AG210001` → ข้อมูลส่วนตัว →
    bank account reads **กสิกรไทย 744-2-51287-0** (readable, not garbled). Garbled
    here = APP_KEY mismatch → fix step 1, re-restore.
 5. **Agent login** — an agent logs in (password = birthdate `ddmmyyyy`).
 6. **Commission warning quiet** — งานค้าง → ยังไม่บันทึกค่าคอม shows a small/zero
    count (migrated zero-commission policies no longer warn).
+
+### 7b. Deployed-parity checksum (the systematic proof)
+
+This proves the Coolify restore is **bit-identical** to the verified local dump —
+not just "counts look right". Run the same script on both and diff.
+
+```bash
+# On the Coolify MySQL container (or via its terminal):
+mysql -u root -p --default-character-set=utf8mb4 insurehub \
+  < docs/verify/parity_checksum.sql
+```
+
+The output must match this local reference **exactly** (same row counts AND
+content hashes). A single changed cell flips a hash; a dropped row changes a
+count:
+
+| tbl | rows | content_hash |
+|---|---|---|
+| policies | 21395 | 4AACB765 |
+| policy_payments | 21115 | 1D71E627 |
+| policy_installments | 3375 | 3C5F4D75 |
+| policy_events | 23008 | 66FD0FFB |
+| commission_ledgers | 80 | E286C99A |
+| customers | 11252 | F040CF13 |
+| agents | 700 | D85806E0 |
+
+Any divergence = the restore is NOT faithful → re-check the sha256 of the
+uploaded dump and re-restore. (The hashes are APP_KEY-independent: they run on
+raw stored ciphertext, so they match across a faithful restore regardless of
+decryption — a hash mismatch is a *data* problem, a garbled bank-account in
+step 4 is an *APP_KEY* problem. Check both.)
+
+Two deeper suites can also be run on the restored DB for logic (not just
+byte-parity) confidence — both ship in `docs/verify/`:
+- `business_rules.sql` — 10 invariants; R1/R2/R3/R6/R7/R8/R9/R10 must be 0.
+  (R4≈198 and R5=2 are known source-faithful anomalies, documented in
+  `docs/MIGRATION-DEFECTS.md`.)
+- the row-by-row source reconciliation (needs the `insurehub_legacy` source DB,
+  so run it locally pre-deploy, not on Coolify).
 
 Then run the full `docs/REDEPLOY-TEST-PLAN.html` (P0–P9) for thorough coverage.
 

@@ -179,13 +179,30 @@ class InstallmentSchedule
         $paidDate = array_fill(0, count($remaining), null);
         $indexById = $installments->pluck('id')->flip()->all();
 
+        // D7 — a future-due งวด (due_date after today) must NOT be auto-settled
+        // by a lump/early payment: it isn't owed yet, so marking it "paid" makes
+        // a still-running plan read ชำระครบแล้ว / ยอดค้าง ฿0. A payment only fills
+        // a future งวด when it is EXPLICITLY linked to it (policy_installment_id);
+        // otherwise unlinked money fills the oldest DUE งวด and any genuine excess
+        // lands on the last DUE งวด (not a future one).
+        $today = Carbon::now('Asia/Bangkok')->toDateString();
+        $isFuture = $installments->map(fn (PolicyInstallment $i) => ($i->due_date?->toDateString() ?? $today) > $today)->all();
+        $lastDue = -1;
+        foreach ($installments as $k => $i) {
+            if (! $isFuture[$k]) {
+                $lastDue = $k;
+            }
+        }
+
         $payments = $policy->payments()->orderBy('payment_date')->orderBy('id')->get();
         foreach ($payments as $payment) {
             $left = (int) round($payment->creditAmount() * 100);
             $date = $payment->payment_date?->toDateString();
 
-            $order = array_keys($remaining);
             $linked = $indexById[$payment->policy_installment_id] ?? null;
+            // candidate งวด: the linked one (even if future — explicit), then every
+            // DUE งวด in order. Future unlinked งวด are excluded from the fill.
+            $order = array_values(array_filter(array_keys($remaining), fn ($k) => ! $isFuture[$k] || $k === $linked));
             if ($linked !== null) {
                 $order = array_merge([$linked], array_values(array_diff($order, [$linked])));
             }
@@ -204,8 +221,11 @@ class InstallmentSchedule
                     $paidDate[$k] = $date;
                 }
             }
+            // leftover excess lands on the last DUE งวด (or the linked one), never
+            // silently onto a future งวด.
             if ($left > 0) {
-                $paid[count($paid) - 1] += $left;
+                $target = $linked ?? ($lastDue >= 0 ? $lastDue : count($paid) - 1);
+                $paid[$target] += $left;
             }
         }
 

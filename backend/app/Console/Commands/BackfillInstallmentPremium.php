@@ -149,6 +149,13 @@ class BackfillInstallmentPremium extends Command
             // current net_premium is one installment's net; annual net = × term.
             $curNet = (float) ($p->net_premium ?? 0);
             $annualNet = $curNet > 0 ? round($curNet * $term, 2) : null;
+            // D10 — vat and duty_stamp are ALSO per-installment and must scale with
+            // net, otherwise annual net + per-installment vat won't reconcile to the
+            // annual total (net + vat + stamp ≠ total on the page).
+            $curVat = (float) ($p->vat ?? 0);
+            $annualVat = $curVat > 0 ? round($curVat * $term, 2) : null;
+            $curStamp = (float) ($p->duty_stamp ?? 0);
+            $annualStamp = $curStamp > 0 ? round($curStamp * $term, 2) : null;
 
             // --- 1. premium fix (only when the stored premium is wrong) ---
             $premiumWrong = abs((float) ($p->annual_premium ?? 0) - $annualGross) > 2.0
@@ -163,6 +170,12 @@ class BackfillInstallmentPremium extends Command
                 if ($annualNet !== null) {
                     $upd['net_premium'] = $annualNet;
                 }
+                if ($annualVat !== null) {
+                    $upd['vat'] = $annualVat;
+                }
+                if ($annualStamp !== null) {
+                    $upd['duty_stamp'] = $annualStamp;
+                }
                 if (count($samples) < 6) {
                     $samples[] = [$p->id, $term, $perInst, (float) ($p->main_premium ?? 0).'→'.$annualGross];
                 }
@@ -172,6 +185,26 @@ class BackfillInstallmentPremium extends Command
                 $fixed++;
             } else {
                 $skipped++;
+            }
+
+            // --- 1b. D10 — reconcile vat to the ANNUAL figures (independent of
+            //        the premium fix). After net is annualized, vat/stamp may
+            //        still be per-installment, so net + stamp + vat ≠ the annual
+            //        total on the page. Recompute vat = annual_total − net − stamp
+            //        whenever they don't already reconcile, keeping the net
+            //        (authoritative WHT/commission basis) untouched. ---
+            $curAnnual = (float) (($upd['annual_premium'] ?? null) ?? ($p->annual_premium ?? 0));
+            $curNetNow = (float) (($upd['net_premium'] ?? null) ?? ($p->net_premium ?? 0));
+            $curStampNow = (float) (($upd['duty_stamp'] ?? null) ?? ($p->duty_stamp ?? 0));
+            $curVatNow = (float) (($upd['vat'] ?? null) ?? ($p->vat ?? 0));
+            if ($curAnnual > 0 && $curNetNow > 0
+                && abs($curNetNow + $curStampNow + $curVatNow - $curAnnual) > 0.5) {
+                $reconVat = round($curAnnual - $curNetNow - $curStampNow, 2);
+                if ($reconVat >= 0 && ! $dry) {
+                    DB::table('policies')->where('id', $p->id)->update([
+                        'vat' => $reconVat, 'updated_at' => DB::raw('NOW()'),
+                    ]);
+                }
             }
 
             // --- 2. stale installment schedule cleanup (independent of the

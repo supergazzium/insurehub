@@ -987,7 +987,20 @@ class InsureHubImporter
                 'main_premium' => $row->main_premium,
                 'net_premium' => $row->net_premium,
                 'duty_stamp' => $row->duty_stamp,
-                'vat' => $row->vat,
+                // D10 — the source embeds tax in total_premium_paid but leaves
+                // vat/duty_stamp blank on ~10k policies, so a page shows
+                // net + vat + stamp ≠ total and WHT/commission read an
+                // unreconciled net. We KEEP the source net (authoritative basis
+                // for WHT/commission — don't shift financial figures) and fill
+                // vat = total − net − stamp so the components reconcile to the
+                // total. A row that already has vat, or where total == net (no
+                // tax), is left unchanged.
+                // Reconcile VAT against main_premium (the annual GROSS, which is
+                // also what annual_premium above is set to) — NOT
+                // total_premium_paid, which on some rows carries a cumulative /
+                // multi-installment figure unrelated to this year's tax and
+                // would yield an absurd vat (e.g. net 3,878 → vat 111,671).
+                'vat' => $this->reconcileVat($row->vat, $row->net_premium, $row->duty_stamp, $row->main_premium),
                 'total_premium_paid' => $row->total_premium_paid,
                 'net_customer_paid' => $row->net_customer_paid,
                 'premium_mode' => $this->premiumModeFromTerm($row->installment_term),
@@ -1022,10 +1035,17 @@ class InsureHubImporter
                 // these read as "resolved: zero commission" rather than "unset".
                 // The no_commission follow-up warning flags only NULL (genuinely
                 // unset — a new policy an operator hasn't filled in), never 0.
+                // D11 — the source stores commission RATES as rate÷100
+                // (0.0018 means 18%, confirmed: amount = rate×100×net on every
+                // verifiable row). Stored as-is, the app reads 0.0018 as 0.18%
+                // and computes a commission 100× too small. commissionRate()
+                // scales ×100 for the normal case, but defers to amount÷net when
+                // a present amount contradicts ×100 (the ~414 rows computed off a
+                // different base) so the amount stays source-of-truth.
                 'comm_hub_to_agent_amount' => $this->commissionZeroFill($row->main_commission_ag_amount),
-                'comm_hub_to_agent_rate' => $this->commissionZeroFill($row->main_commission_ag_pct),
+                'comm_hub_to_agent_rate' => $this->commissionRate($row->main_commission_ag_pct, $row->main_commission_ag_amount, $row->net_premium),
                 'comm_carrier_to_hub_amount' => $this->commissionZeroFill($row->main_commission_inh_amount),
-                'comm_carrier_to_hub_rate' => $this->commissionZeroFill($row->main_commission_inh_pct),
+                'comm_carrier_to_hub_rate' => $this->commissionRate($row->main_commission_inh_pct, $row->main_commission_inh_amount, $row->net_premium),
                 'premium_check' => $premiumCheck,
                 'imported_from_legacy' => true,
                 'updated_at' => $this->now,
@@ -1295,18 +1315,57 @@ class InsureHubImporter
                 ->delete();
         }
 
+        // D2 — recover lost refund signs. A refund (member left a group policy)
+        // should be a NEGATIVE payment, but the legacy Payment_Amount sign is
+        // unreliable: 23 refunds were keyed positive at source. The application's
+        // main_premium holds the SIGNED premium delta (authoritative — same
+        // signal FoldGroupEndorsements uses), so a payment that is positive while
+        // its application's premium delta is negative is a mis-signed refund →
+        // flip it. Build the refund set once (application_code of every negative
+        // premium delta) rather than a per-row lookup.
+        $refundApps = [];
+        foreach ($legacy->table('applications')
+            ->where('main_premium', '<', 0)
+            ->pluck('application_code') as $code) {
+            $refundApps[$this->normCode($code)] = true;
+        }
+
+        // Fallback date for undated payments. The source leaves payment_date
+        // blank on a handful of rows; stamping them with the import RUN date
+        // makes them read as "paid today" (misleading). Use the application's
+        // own coverage_start (→ policy effective_date), falling back to its
+        // create_date — both are far better proxies for when the payment
+        // occurred than "now". Built once, keyed by application_code.
+        $appDateMap = [];
+        foreach ($legacy->table('applications')
+            ->select('application_code', 'coverage_start', 'create_date')
+            ->cursor() as $a) {
+            $d = $this->parseDate($a->coverage_start) ?? $this->parseDate($a->create_date);
+            if ($d !== null) {
+                $appDateMap[$this->normCode($a->application_code)] = $d;
+            }
+        }
+
         $chunk = [];
         foreach ($legacy->table('payments')->cursor() as $row) {
-            $policyId = $this->idCache['policies'][$this->normCode($row->application_code)] ?? null;
+            $appCode = $this->normCode($row->application_code);
+            $policyId = $this->idCache['policies'][$appCode] ?? null;
             if (! $policyId) {
                 $skip++;
 
                 continue;
             }
+            $amount = (float) ($row->amount ?? 0);
+            // mis-signed refund: positive payment on a negative-premium-delta app
+            if ($amount > 0 && isset($refundApps[$appCode])) {
+                $amount = -$amount;
+            }
             $chunk[] = [
                 'policy_id' => $policyId,
-                'payment_date' => $this->parseDate($row->payment_date) ?? $this->now->toDateString(),
-                'amount' => (float) ($row->amount ?? 0),
+                'payment_date' => $this->parseDate($row->payment_date)
+                    ?? $appDateMap[$appCode]
+                    ?? $this->now->toDateString(),
+                'amount' => $amount,
                 'method' => 'bankTransfer',
                 'reference' => null,
                 'payment_inscomp_to_id' => $this->idCache['payment_inscomp_tos'][(string) ($row->to_company ?? '')] ?? null,
@@ -1539,6 +1598,74 @@ class InsureHubImporter
         }
 
         return (float) $value;
+    }
+
+    /**
+     * D10 — fill a blank VAT so net + duty_stamp + vat reconciles to the total.
+     *
+     * Keeps the source net (authoritative WHT/commission basis) and derives
+     * vat = total − net − duty_stamp. Returns the existing vat untouched when it
+     * is already set, and 0 when there is no net/total or the total already
+     * equals net + stamp (no embedded tax). Never negative (a total below net is
+     * a source anomaly — leave vat at 0 rather than invent a negative tax).
+     */
+    /**
+     * D11 — recover the true commission rate from the source's rate÷100 scale.
+     *
+     * The legacy rate is stored as a fraction of a fraction: 0.0018 means 18%,
+     * not 0.18%. Scaling ×100 makes rate×net reproduce the source amount (0.18 ×
+     * net = the stored amount on all 5,069 verifiable rows). A blank rate stays 0
+     * (intentional zero — [[commissionZeroFill]] semantics).
+     *
+     * Guard for the ~414 ambiguous rows where the source amount is NOT rate×100×
+     * net (commission computed off a different base, or a flat amount): there the
+     * amount is authoritative, so we derive the rate as amount÷net instead of
+     * blindly scaling — keeping rate and amount consistent.
+     */
+    private function commissionRate(mixed $rate, mixed $amount, mixed $net): float
+    {
+        if ($rate === null || (is_string($rate) && trim($rate) === '')) {
+            return 0.0;                        // intentional zero
+        }
+        $r = (float) $rate;
+        $scaled = $r * 100.0;                  // 0.0018 → 0.18 (18%)
+
+        $a = $amount === null || (is_string($amount) && trim($amount) === '') ? 0.0 : (float) $amount;
+        $n = (float) ($net ?? 0);
+        if ($a > 0 && $n > 0) {
+            $impliedByAmount = $a / $n;
+            // When the scaled rate disagrees with the amount's implied rate by
+            // more than ~0.5pp, trust the amount: derive rate from it.
+            if (abs($scaled - $impliedByAmount) > 0.005) {
+                return round($impliedByAmount, 6);
+            }
+        }
+
+        return round($scaled, 6);
+    }
+
+    private function reconcileVat(mixed $vat, mixed $net, mixed $dutyStamp, mixed $total): float
+    {
+        $existing = $vat === null || (is_string($vat) && trim($vat) === '') ? 0.0 : (float) $vat;
+        if ($existing != 0.0) {
+            return $existing;                 // source already broke out VAT
+        }
+        $n = (float) ($net ?? 0);
+        $t = (float) ($total ?? 0);
+        $s = (float) ($dutyStamp ?? 0);
+        if ($n <= 0 || $t <= 0) {
+            return 0.0;                       // nothing to reconcile against
+        }
+        // Derive against main_premium (the annual GROSS). By construction this
+        // balances net + stamp + vat == main_premium == annual_premium, so there
+        // is no ratio clamp: a large derived value means the source's own net is
+        // understated relative to its gross, and keeping the derived vat is what
+        // makes the components reconcile to the total. (The earlier absurd values
+        // — vat 111,671 on net 3,878 — came from reconciling against the WRONG
+        // total field, total_premium_paid, not from this formula.)
+        $derived = round($t - $n - $s, 2);
+
+        return $derived > 0 ? $derived : 0.0; // no negative tax
     }
 
     private function normCode(mixed $value): string

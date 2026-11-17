@@ -87,10 +87,16 @@ class PolicyController extends ApiController
                 'ca.name as carrier_name',
                 'pr.code as product_code',
                 'pr.name as product_name',
-                // Legacy label preferred for display (see PolicyListResource),
-                // falling back to the code's label when no legacy status.
-                DB::raw('COALESCE(psl.name_th, ps.name_th) as status_label'),
-                DB::raw('COALESCE(psl.group_name_th, ps.group_name_th) as status_group'),
+                // D9 — prefer the COMPUTED status label (from p.status, derived
+                // from the actual coverage dates), falling back to the legacy
+                // label only when there is no computed status. The legacy label
+                // was captured at migration time and goes stale: every one of the
+                // 13,320 expired policies still carried its old 'คุ้มครองอยู่'
+                // (in-force) legacy label, so legacy-first showed expired policies
+                // as active. Computed-first keeps the list honest and matching the
+                // detail page.
+                DB::raw('COALESCE(ps.name_th, psl.name_th) as status_label'),
+                DB::raw('COALESCE(ps.group_name_th, psl.group_name_th) as status_group'),
             ]);
 
         if ($search = $request->string('q')->toString()) {

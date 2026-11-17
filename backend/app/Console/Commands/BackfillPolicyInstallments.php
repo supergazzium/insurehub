@@ -24,6 +24,7 @@ class BackfillPolicyInstallments extends Command
     protected $signature = 'policies:backfill-installments
         {--tenant= : restrict to one tenant id}
         {--status=issued,active : comma-separated policy statuses to cover}
+        {--resync-existing : also reallocate policies that ALREADY have a schedule (D7 fix)}
         {--dry-run : report only, write nothing}';
 
     protected $description = 'Create installment schedules for existing policies that have none';
@@ -86,6 +87,29 @@ class BackfillPolicyInstallments extends Command
             $dry ? array_sum($byCount) : $written,
             $skipped,
         ));
+
+        // D7 — reallocate policies that ALREADY have a schedule so migrated
+        // greedy allocation (future งวด wrongly marked paid) is corrected: the
+        // updated reallocate() leaves future-due งวด pending. New schedules above
+        // are already correct; this catches the pre-existing ones.
+        if ($this->option('resync-existing')) {
+            $rq = Policy::query()->whereHas('installments');
+            if ($this->option('tenant') !== null) {
+                $rq->where('tenant_id', (int) $this->option('tenant'));
+            }
+            $resynced = 0;
+            if (! $dry) {
+                $rq->orderBy('id')->chunkById(200, function ($policies) use ($schedule, &$resynced): void {
+                    foreach ($policies as $policy) {
+                        $schedule->reallocate($policy);
+                        $resynced++;
+                    }
+                });
+            } else {
+                $resynced = (clone $rq)->count();
+            }
+            $this->info(($dry ? '[dry-run] would reallocate ' : 'reallocated ').$resynced.' existing schedules.');
+        }
 
         return self::SUCCESS;
     }

@@ -114,9 +114,15 @@ class PolicyResource extends JsonResource
             'freelookDocReturnedAt' => $this->freelook_doc_returned_at?->toDateString(),
             'verification' => $this->verificationPayload(),
             'status' => $this->status,
-            // Original Thai label from insurehub_legacy.lu_policy_status.
-            'statusLabel' => $this->legacyStatus?->name_th ?? $this->status,
-            'statusGroup' => $this->legacyStatus?->group_name_th,
+            // D9 — computed-first label: the canonical Thai label for the current
+            // status code (derived from coverage dates), falling back to the
+            // legacy label only when there's no computed status. The legacy label
+            // goes stale (every expired policy still carried 'คุ้มครองอยู่'), and
+            // the list now resolves the same way, so list and detail agree.
+            'statusLabel' => \App\Models\PolicyStatusLookup::labelFor($this->status)
+                ?? $this->legacyStatus?->name_th ?? $this->status,
+            'statusGroup' => \App\Models\PolicyStatusLookup::groupFor($this->status)
+                ?? $this->legacyStatus?->group_name_th,
             'statusNote' => $this->status_note ?? '',
             'notes' => $this->notes ?? '',
             'internalNote' => $this->internal_note ?? '',
