@@ -10,12 +10,12 @@ step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
 
 | Item | Value |
 |---|---|
-| **Dump** | `insurehub_migrated_full.sql.gz` (repo root, **gitignored — PII**) |
-| **Dump sha256** | `be44d7d9c5d6189b852f303005857435ca9beb5206f8769c25394324453cd2ab` |
-| **Code** | `main` @ `28600f6` (pushed) |
-| Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,218 customers, 700 agents |
-| Money | payment sum **฿254,815,817.67** exact |
-| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption |
+| **Dump** | `insurehub_migrated_full_20261120.sql.gz` (repo root, **gitignored — PII**) |
+| **Dump sha256** | `6f4ea9f41826e260bc74bbcd9db0ec703624a7f33457003b483078bb7bbedd84` |
+| **Code** | `fix/migration-premium-gross` @ `cf6919b` (pushed, PR #53) |
+| Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,252 customers, 700 agents |
+| Money | payment sum **฿253,602,089.30** exact |
+| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption, **annual_premium gross fix (468 policies)**, **stale installment-schedule cleanup (92 policies / 153 rows)**, **endorsement source notes (252 events)**, **endorsement re-sequencing to source $N order (22 policies / 199 events)** |
 
 Because the dump was cut **after** every backfill ran locally, **you do NOT run
 any artisan backfill commands on prod.** Restore-and-go.
@@ -40,15 +40,28 @@ those fields decrypt to garbage (you'll see it on an agent's ข้อมูล�
 
 ---
 
-## 2. Deploy the code (likely already done)
+## 2. Deploy the code
 
 Pushing `main` triggers CI → on green, the GitHub `Deploy` workflow fires the
 Coolify webhooks (`COOLIFY_BACKEND_WEBHOOK` / `COOLIFY_FRONTEND_WEBHOOK`).
 
-- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `28600f6` should be
+- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `cf6919b` should be
   green. If `Deploy` says *"COOLIFY_*_WEBHOOK secret is not set"*, the webhooks
   aren't wired — redeploy manually in Coolify (each service → **Redeploy**).
 - Confirm the backend came up: open `https://<your-domain>/up` → expect `200`.
+
+### ⚠️ The FRONTEND must be redeployed this round
+
+Most of this migration is data-only (restore-and-go, no code needed). **This
+release is the exception:** the endorsement history now reads the original source
+note (`payload.sourceNote`) added by the migration. That is a **frontend** change
+(`PolicyApplicationWizard.vue` @ `cf6919b`).
+
+- **Redeploy the frontend service** (webhook on push, or Coolify → frontend →
+  **Redeploy**). Without it, endorsement rows keep showing the generic system
+  reason ("สมาชิกเพิ่ม…") instead of the staff note ("แจ้งเข้า 16 คน").
+- The **backend needs no code change** for the notes — it already passes the full
+  event payload through; the data arrives via the dump restore (step 5).
 
 Code must be live **before** the restore (the dump's schema matches `main`).
 
@@ -70,7 +83,7 @@ mysqldump -u root -p --default-character-set=utf8mb4 \
 
 ## 4. Upload the dump to Coolify
 
-Get `insurehub_migrated_full.sql.gz` onto the Coolify MySQL container. Options:
+Get `insurehub_migrated_full_20261120.sql.gz` onto the Coolify MySQL container. Options:
 
 - **scp** to the host, then `docker cp` into the MySQL container; or
 - Coolify file manager / a mounted volume; or
@@ -79,12 +92,17 @@ Get `insurehub_migrated_full.sql.gz` onto the Coolify MySQL container. Options:
 Verify the file arrived intact:
 
 ```bash
-sha256sum insurehub_migrated_full.sql.gz
-# must equal: 8155fca092f10497c2eb4860e292b6f908440e7c2f4f64af1f8e4f2fca359d1b
+sha256sum insurehub_migrated_full_20261120.sql.gz
+# must equal: 6f4ea9f41826e260bc74bbcd9db0ec703624a7f33457003b483078bb7bbedd84
 ```
 
 If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a
 mismatched file.
+
+> This sha is for **this exact dump file** and only checks the upload didn't
+> corrupt. `mysqldump` isn't byte-reproducible, so re-cutting the dump from the
+> same data yields a *different* file sha — that's normal. The proof the **data**
+> is faithful is the content-hash table in §7b, not this file sha.
 
 ---
 
@@ -98,7 +116,7 @@ mysql -u root -p -e "DROP DATABASE IF EXISTS insurehub;
   CREATE DATABASE insurehub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
 # 5b. restore
-gunzip -c insurehub_migrated_full.sql.gz | \
+gunzip -c insurehub_migrated_full_20261120.sql.gz | \
   mysql -u root -p --default-character-set=utf8mb4 insurehub
 ```
 
@@ -142,6 +160,15 @@ Open the app and confirm, in order:
 5. **Agent login** — an agent logs in (password = birthdate `ddmmyyyy`).
 6. **Commission warning quiet** — งานค้าง → ยังไม่บันทึกค่าคอม shows a small/zero
    count (migrated zero-commission policies no longer warn).
+7. **Premium reconciles (no false overpay)** — open policy `GM 65`
+   (`/policies/21043/edit-draft`) → payment panel shows **ชำระครบแล้ว / ฿0**,
+   not ชำระเกินยอด.
+8. **Endorsement notes + $N order (frontend redeploy check)** — open policy
+   `0222465843` (`/policies/18817/edit-draft`) → สลักหลัง history → the
+   รายละเอียด column reads the staff notes ("แจ้งเข้า 16 คน",
+   "IN260677_นาวิน จ่าย 7%"), NOT the generic "สมาชิกเพิ่ม…". Generic text here =
+   the **frontend wasn't redeployed** (step 2), not a data problem. Also confirm
+   the ฿-24,917 refund shows at **$24** (source order), not $3.
 
 ### 7b. Deployed-parity checksum (the systematic proof)
 
@@ -160,10 +187,10 @@ count:
 
 | tbl | rows | content_hash |
 |---|---|---|
-| policies | 21395 | 4AACB765 |
+| policies | 21395 | F427DDC7 |
 | policy_payments | 21115 | 1D71E627 |
-| policy_installments | 3375 | 3C5F4D75 |
-| policy_events | 23008 | 66FD0FFB |
+| policy_installments | 3222 | 81A86C19 |
+| policy_events | 23008 | 4906979D |
 | commission_ledgers | 80 | E286C99A |
 | customers | 11252 | F040CF13 |
 | agents | 700 | D85806E0 |

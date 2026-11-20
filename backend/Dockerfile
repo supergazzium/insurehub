@@ -5,7 +5,14 @@
 # dependencies change — never on app-code edits. Post-install scripts that need
 # the framework tree (e.g. artisan package:discover) are skipped here and run
 # in the runtime stage where the full app tree is present.
-FROM composer:2 AS vendor
+#
+# Run composer on the SAME PHP version as the runtime (8.4) — not the generic
+# `composer:2` image, which tracks the newest PHP (8.6) and then rejects the
+# locked deps (nette/*, sabberworm/php-css-parser) that only support PHP ≤ 8.5.
+# Using the FrankenPHP 8.4 base here keeps one PHP version across both stages.
+FROM dunglas/frankenphp:1-php8.4-alpine AS vendor
+
+COPY --from=composer:2 /usr/bin/composer /usr/bin/composer
 
 WORKDIR /app
 

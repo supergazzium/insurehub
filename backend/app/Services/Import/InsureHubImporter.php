@@ -916,6 +916,20 @@ class InsureHubImporter
             ->pluck('id', 'application_no')
             ->all();
 
+        // Per-application rider-premium sum, keyed by normalised application_code.
+        // The source's TRUE annual gross premium is Main_Premium + Σ Rider_Premium
+        // (== Total_Premium_Paid per period). main_premium alone is only the main
+        // coverage component and understates the gross on every policy carrying
+        // riders — so annual_premium (and the VAT reconciliation base) must use
+        // the full gross, not main_premium. Built once here. (Rider rows land in
+        // policy_riders via stepRiders; this map is only for the pass-1 gross.)
+        $riderSumByApp = [];
+        foreach ($legacy->table('application_riders')
+            ->select('application_code', 'premium')->cursor() as $rr) {
+            $code = $this->normCode($rr->application_code);
+            $riderSumByApp[$code] = ($riderSumByApp[$code] ?? 0.0) + (float) ($rr->premium ?? 0);
+        }
+
         $chunk = [];
 
         foreach ($legacy->table('applications')->orderBy('application_code')->cursor() as $row) {
@@ -983,7 +997,11 @@ class InsureHubImporter
                 'act_year' => (int) ($row->act_year ?? 1),
                 'new_or_renew' => $row->new_or_renew ? (string) $row->new_or_renew : 'new',
                 'coverage' => (float) ($row->coverage_amount ?? 0),
-                'annual_premium' => (float) ($row->main_premium ?? 0),
+                // Annual GROSS premium = main coverage + all rider premiums.
+                // (See $riderSumByApp above — main_premium alone understates the
+                // gross and reads as a huge "overpay" against the payments.)
+                'annual_premium' => (float) ($row->main_premium ?? 0)
+                    + (float) ($riderSumByApp[$appNo] ?? 0),
                 'main_premium' => $row->main_premium,
                 'net_premium' => $row->net_premium,
                 'duty_stamp' => $row->duty_stamp,
@@ -995,12 +1013,17 @@ class InsureHubImporter
                 // vat = total − net − stamp so the components reconcile to the
                 // total. A row that already has vat, or where total == net (no
                 // tax), is left unchanged.
-                // Reconcile VAT against main_premium (the annual GROSS, which is
-                // also what annual_premium above is set to) — NOT
-                // total_premium_paid, which on some rows carries a cumulative /
-                // multi-installment figure unrelated to this year's tax and
-                // would yield an absurd vat (e.g. net 3,878 → vat 111,671).
-                'vat' => $this->reconcileVat($row->vat, $row->net_premium, $row->duty_stamp, $row->main_premium),
+                // Reconcile VAT against the annual GROSS (main + riders — the same
+                // value annual_premium above is set to) — NOT total_premium_paid,
+                // which on some rows carries a cumulative / multi-installment
+                // figure unrelated to this year's tax and would yield an absurd
+                // vat (e.g. net 3,878 → vat 111,671).
+                'vat' => $this->reconcileVat(
+                    $row->vat,
+                    $row->net_premium,
+                    $row->duty_stamp,
+                    (float) ($row->main_premium ?? 0) + (float) ($riderSumByApp[$appNo] ?? 0)
+                ),
                 'total_premium_paid' => $row->total_premium_paid,
                 'net_customer_paid' => $row->net_customer_paid,
                 'premium_mode' => $this->premiumModeFromTerm($row->installment_term),
