@@ -2961,7 +2961,7 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
                 </div>
               </td>
               <td class="py-2 pr-3">
-                <div :class="ev.voidedAt ? 'line-through' : 'text-slate-700'">{{ endorsementField(ev, 'reason') || endorsementField(ev, 'note') || '—' }}</div>
+                <div :class="ev.voidedAt ? 'line-through' : 'text-slate-700'">{{ endorsementField(ev, 'sourceNote') || endorsementField(ev, 'reason') || endorsementField(ev, 'note') || '—' }}</div>
                 <div v-if="endorsementField(ev, 'detail')" :class="['text-xs mt-0.5 whitespace-pre-line', ev.voidedAt ? 'line-through' : 'text-slate-500']">{{ endorsementField(ev, 'detail') }}</div>
                 <div v-if="ev.voidedAt" class="text-[11px] text-rose-500 mt-0.5">{{ t('endorsement.voidedBy', { name: ev.voidedByName ?? '—', reason: ev.voidReason ?? '' }) }}</div>
               </td>
