@@ -29,6 +29,15 @@ use Illuminate\Support\Facades\DB;
  *   collapse            — unified rule: keeper survives, members' payments move,
  *                         members soft-deleted. Keeper = latest app_date (already
  *                         carries the latest year's premium — no recompute).
+ *   collapse-group      — same mechanics as `collapse`, BUT the members are
+ *                         DISTINCT insureds under one group Policy_Number (all
+ *                         Policy_Year 1), not one insured's installments. The
+ *                         keeper was imported with a SINGLE member's premium while
+ *                         it ends up holding EVERY member's payment, so its
+ *                         annual_premium is recomputed to SUM(keeper payments)
+ *                         (the full group per-year premium). Used for the 9 group
+ *                         policies that previously overpaid (GM 62/63/64/65 and
+ *                         15145364, 20967270, 21523527, 23272215, 511-0040608).
  *   collapse-datafix3   — same mechanics (the #3 iProtect/iCare one-policy fix);
  *                         the rider product-code correction is a separate step.
  *   endorsement-fold4   — fold a $N endorsement row into its base policy: move its
@@ -139,6 +148,12 @@ class CollapseInstallmentPolicies extends Command
             }
 
             $isEndorsementFold = $g['action'] === 'endorsement-fold4';
+            // A GROUP collapse folds DISTINCT insureds (all Policy_Year 1) under
+            // one group Policy_Number — not one insured's installments. For these
+            // the keeper's annual premium is the SUM of every member's gross
+            // (== Σ of the moved payments for the period), NOT one member's
+            // premium. Installment collapses keep the keeper's own premium.
+            $isGroupCollapse = $g['action'] === 'collapse-group';
 
             if ($dry) {
                 $moved = DB::table('policy_payments')->whereIn('policy_id', $memberIds)->count();
@@ -152,7 +167,7 @@ class CollapseInstallmentPolicies extends Command
                 continue;
             }
 
-            DB::transaction(function () use ($keeper, $memberIds, $isEndorsementFold, $now, &$stats, $g): void {
+            DB::transaction(function () use ($keeper, $memberIds, $isEndorsementFold, $isGroupCollapse, $now, &$stats, $g): void {
                 // 1. move payments to keeper (raw update => observer silent)
                 if ($isEndorsementFold) {
                     // flag the moved payment(s) as an endorsement adjustment
@@ -201,6 +216,25 @@ class CollapseInstallmentPolicies extends Command
                         $covUpd['installment_term'] = (string) $payCount;
                         $covUpd['premium_mode'] = $this->premiumModeFromCount($payCount);
                     }
+
+                    // Group collapse: the keeper now holds every member's payment,
+                    // so its annual premium is the SUM of those payments (the full
+                    // group per-year premium), not the single member premium it was
+                    // imported with. Installment collapses must NOT do this — their
+                    // payments are repeat installments of ONE premium.
+                    if ($isGroupCollapse) {
+                        $groupPremium = (float) DB::table('policy_payments')
+                            ->where('policy_id', $keeper->id)
+                            ->whereNull('voided_at')
+                            ->sum('amount');
+                        if ($groupPremium > 0) {
+                            $covUpd['annual_premium'] = round($groupPremium, 2);
+                        }
+                        // Members are distinct insureds enrolled through the year,
+                        // not installments — do not stamp an installment term.
+                        unset($covUpd['installment_term'], $covUpd['premium_mode']);
+                    }
+
                     DB::table('policies')->where('id', $keeper->id)->update($covUpd);
                 }
 
