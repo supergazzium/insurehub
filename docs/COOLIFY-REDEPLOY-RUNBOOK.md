@@ -12,7 +12,7 @@ step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
 |---|---|
 | **Dump** | `insurehub_migrated_full_20261120.sql.gz` (repo root, **gitignored — PII**) |
 | **Dump sha256** | `43720016b6c6fdabf15b1c44d241cd08dc0366f38df38e029b6595900d156b26` |
-| **Code** | `fix/migration-premium-gross` @ `fe5f262` (pushed, PR #53) |
+| **Code** | `fix/migration-premium-gross` @ `47c936e` (pushed, PR #53) |
 | Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,252 customers, 700 agents |
 | Money | payment sum **฿253,602,089.30** exact |
 | Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption, **annual_premium gross fix (468 policies)**, **stale installment-schedule cleanup (92 policies / 153 rows)**, **endorsement source notes (252 events — original Access Internal_Note in payload.sourceNote)** |
@@ -40,15 +40,28 @@ those fields decrypt to garbage (you'll see it on an agent's ข้อมูล�
 
 ---
 
-## 2. Deploy the code (likely already done)
+## 2. Deploy the code
 
 Pushing `main` triggers CI → on green, the GitHub `Deploy` workflow fires the
 Coolify webhooks (`COOLIFY_BACKEND_WEBHOOK` / `COOLIFY_FRONTEND_WEBHOOK`).
 
-- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `fe5f262` should be
+- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `47c936e` should be
   green. If `Deploy` says *"COOLIFY_*_WEBHOOK secret is not set"*, the webhooks
   aren't wired — redeploy manually in Coolify (each service → **Redeploy**).
 - Confirm the backend came up: open `https://<your-domain>/up` → expect `200`.
+
+### ⚠️ The FRONTEND must be redeployed this round
+
+Most of this migration is data-only (restore-and-go, no code needed). **This
+release is the exception:** the endorsement history now reads the original source
+note (`payload.sourceNote`) added by the migration. That is a **frontend** change
+(`PolicyApplicationWizard.vue` @ `47c936e`).
+
+- **Redeploy the frontend service** (webhook on push, or Coolify → frontend →
+  **Redeploy**). Without it, endorsement rows keep showing the generic system
+  reason ("สมาชิกเพิ่ม…") instead of the staff note ("แจ้งเข้า 16 คน").
+- The **backend needs no code change** for the notes — it already passes the full
+  event payload through; the data arrives via the dump restore (step 5).
 
 Code must be live **before** the restore (the dump's schema matches `main`).
 
@@ -142,6 +155,14 @@ Open the app and confirm, in order:
 5. **Agent login** — an agent logs in (password = birthdate `ddmmyyyy`).
 6. **Commission warning quiet** — งานค้าง → ยังไม่บันทึกค่าคอม shows a small/zero
    count (migrated zero-commission policies no longer warn).
+7. **Premium reconciles (no false overpay)** — open policy `GM 65`
+   (`/policies/21043/edit-draft`) → payment panel shows **ชำระครบแล้ว / ฿0**,
+   not ชำระเกินยอด.
+8. **Endorsement notes show (frontend redeploy check)** — open policy
+   `0222465843` (`/policies/18817/edit-draft`) → สลักหลัง history → the
+   รายละเอียด column reads the staff notes ("แจ้งเข้า 16 คน",
+   "IN260677_นาวิน จ่าย 7%"), NOT the generic "สมาชิกเพิ่ม…". Generic text here =
+   the **frontend wasn't redeployed** (step 2), not a data problem.
 
 ### 7b. Deployed-parity checksum (the systematic proof)
 
