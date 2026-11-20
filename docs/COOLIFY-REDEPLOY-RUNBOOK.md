@@ -10,12 +10,12 @@ step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
 
 | Item | Value |
 |---|---|
-| **Dump** | `insurehub_migrated_full.sql.gz` (repo root, **gitignored — PII**) |
-| **Dump sha256** | `be44d7d9c5d6189b852f303005857435ca9beb5206f8769c25394324453cd2ab` |
-| **Code** | `main` @ `28600f6` (pushed) |
-| Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,218 customers, 700 agents |
-| Money | payment sum **฿254,815,817.67** exact |
-| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption |
+| **Dump** | `insurehub_migrated_full_20261120.sql.gz` (repo root, **gitignored — PII**) |
+| **Dump sha256** | `43720016b6c6fdabf15b1c44d241cd08dc0366f38df38e029b6595900d156b26` |
+| **Code** | `fix/migration-premium-gross` @ `fe5f262` (pushed, PR #53) |
+| Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,252 customers, 700 agents |
+| Money | payment sum **฿253,602,089.30** exact |
+| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption, **annual_premium gross fix (468 policies)**, **stale installment-schedule cleanup (92 policies / 153 rows)**, **endorsement source notes (252 events — original Access Internal_Note in payload.sourceNote)** |
 
 Because the dump was cut **after** every backfill ran locally, **you do NOT run
 any artisan backfill commands on prod.** Restore-and-go.
@@ -45,7 +45,7 @@ those fields decrypt to garbage (you'll see it on an agent's ข้อมูล�
 Pushing `main` triggers CI → on green, the GitHub `Deploy` workflow fires the
 Coolify webhooks (`COOLIFY_BACKEND_WEBHOOK` / `COOLIFY_FRONTEND_WEBHOOK`).
 
-- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `28600f6` should be
+- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `fe5f262` should be
   green. If `Deploy` says *"COOLIFY_*_WEBHOOK secret is not set"*, the webhooks
   aren't wired — redeploy manually in Coolify (each service → **Redeploy**).
 - Confirm the backend came up: open `https://<your-domain>/up` → expect `200`.
@@ -70,7 +70,7 @@ mysqldump -u root -p --default-character-set=utf8mb4 \
 
 ## 4. Upload the dump to Coolify
 
-Get `insurehub_migrated_full.sql.gz` onto the Coolify MySQL container. Options:
+Get `insurehub_migrated_full_20261120.sql.gz` onto the Coolify MySQL container. Options:
 
 - **scp** to the host, then `docker cp` into the MySQL container; or
 - Coolify file manager / a mounted volume; or
@@ -79,8 +79,8 @@ Get `insurehub_migrated_full.sql.gz` onto the Coolify MySQL container. Options:
 Verify the file arrived intact:
 
 ```bash
-sha256sum insurehub_migrated_full.sql.gz
-# must equal: 8155fca092f10497c2eb4860e292b6f908440e7c2f4f64af1f8e4f2fca359d1b
+sha256sum insurehub_migrated_full_20261120.sql.gz
+# must equal: 43720016b6c6fdabf15b1c44d241cd08dc0366f38df38e029b6595900d156b26
 ```
 
 If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a
@@ -98,7 +98,7 @@ mysql -u root -p -e "DROP DATABASE IF EXISTS insurehub;
   CREATE DATABASE insurehub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
 # 5b. restore
-gunzip -c insurehub_migrated_full.sql.gz | \
+gunzip -c insurehub_migrated_full_20261120.sql.gz | \
   mysql -u root -p --default-character-set=utf8mb4 insurehub
 ```
 
@@ -160,10 +160,10 @@ count:
 
 | tbl | rows | content_hash |
 |---|---|---|
-| policies | 21395 | 4AACB765 |
+| policies | 21395 | F427DDC7 |
 | policy_payments | 21115 | 1D71E627 |
-| policy_installments | 3375 | 3C5F4D75 |
-| policy_events | 23008 | 66FD0FFB |
+| policy_installments | 3222 | 81A86C19 |
+| policy_events | 23008 | 6082C62C |
 | commission_ledgers | 80 | E286C99A |
 | customers | 11252 | F040CF13 |
 | agents | 700 | D85806E0 |
