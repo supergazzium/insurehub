@@ -11,7 +11,7 @@ step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
 | Item | Value |
 |---|---|
 | **Dump** | `insurehub_migrated_full_20261120.sql.gz` (repo root, **gitignored — PII**) |
-| **Dump sha256** | `817f35add1053ffd2d1ac8da486d16f1f36cf98e14612bf4dfaaa55f0061a11e` |
+| **Dump sha256** | `6f4ea9f41826e260bc74bbcd9db0ec703624a7f33457003b483078bb7bbedd84` |
 | **Code** | `fix/migration-premium-gross` @ `cf6919b` (pushed, PR #53) |
 | Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,252 customers, 700 agents |
 | Money | payment sum **฿253,602,089.30** exact |
@@ -93,11 +93,16 @@ Verify the file arrived intact:
 
 ```bash
 sha256sum insurehub_migrated_full_20261120.sql.gz
-# must equal: 817f35add1053ffd2d1ac8da486d16f1f36cf98e14612bf4dfaaa55f0061a11e
+# must equal: 6f4ea9f41826e260bc74bbcd9db0ec703624a7f33457003b483078bb7bbedd84
 ```
 
 If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a
 mismatched file.
+
+> This sha is for **this exact dump file** and only checks the upload didn't
+> corrupt. `mysqldump` isn't byte-reproducible, so re-cutting the dump from the
+> same data yields a *different* file sha — that's normal. The proof the **data**
+> is faithful is the content-hash table in §7b, not this file sha.
 
 ---
 
