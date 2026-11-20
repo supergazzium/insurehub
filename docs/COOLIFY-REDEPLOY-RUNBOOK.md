@@ -11,11 +11,11 @@ step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
 | Item | Value |
 |---|---|
 | **Dump** | `insurehub_migrated_full_20261120.sql.gz` (repo root, **gitignored — PII**) |
-| **Dump sha256** | `43720016b6c6fdabf15b1c44d241cd08dc0366f38df38e029b6595900d156b26` |
-| **Code** | `fix/migration-premium-gross` @ `47c936e` (pushed, PR #53) |
+| **Dump sha256** | `817f35add1053ffd2d1ac8da486d16f1f36cf98e14612bf4dfaaa55f0061a11e` |
+| **Code** | `fix/migration-premium-gross` @ `cf6919b` (pushed, PR #53) |
 | Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,252 customers, 700 agents |
 | Money | payment sum **฿253,602,089.30** exact |
-| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption, **annual_premium gross fix (468 policies)**, **stale installment-schedule cleanup (92 policies / 153 rows)**, **endorsement source notes (252 events — original Access Internal_Note in payload.sourceNote)** |
+| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption, **annual_premium gross fix (468 policies)**, **stale installment-schedule cleanup (92 policies / 153 rows)**, **endorsement source notes (252 events)**, **endorsement re-sequencing to source $N order (22 policies / 199 events)** |
 
 Because the dump was cut **after** every backfill ran locally, **you do NOT run
 any artisan backfill commands on prod.** Restore-and-go.
@@ -45,7 +45,7 @@ those fields decrypt to garbage (you'll see it on an agent's ข้อมูล�
 Pushing `main` triggers CI → on green, the GitHub `Deploy` workflow fires the
 Coolify webhooks (`COOLIFY_BACKEND_WEBHOOK` / `COOLIFY_FRONTEND_WEBHOOK`).
 
-- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `47c936e` should be
+- Check **GitHub → Actions**: the `CI` then `Deploy` runs for `cf6919b` should be
   green. If `Deploy` says *"COOLIFY_*_WEBHOOK secret is not set"*, the webhooks
   aren't wired — redeploy manually in Coolify (each service → **Redeploy**).
 - Confirm the backend came up: open `https://<your-domain>/up` → expect `200`.
@@ -55,7 +55,7 @@ Coolify webhooks (`COOLIFY_BACKEND_WEBHOOK` / `COOLIFY_FRONTEND_WEBHOOK`).
 Most of this migration is data-only (restore-and-go, no code needed). **This
 release is the exception:** the endorsement history now reads the original source
 note (`payload.sourceNote`) added by the migration. That is a **frontend** change
-(`PolicyApplicationWizard.vue` @ `47c936e`).
+(`PolicyApplicationWizard.vue` @ `cf6919b`).
 
 - **Redeploy the frontend service** (webhook on push, or Coolify → frontend →
   **Redeploy**). Without it, endorsement rows keep showing the generic system
@@ -93,7 +93,7 @@ Verify the file arrived intact:
 
 ```bash
 sha256sum insurehub_migrated_full_20261120.sql.gz
-# must equal: 43720016b6c6fdabf15b1c44d241cd08dc0366f38df38e029b6595900d156b26
+# must equal: 817f35add1053ffd2d1ac8da486d16f1f36cf98e14612bf4dfaaa55f0061a11e
 ```
 
 If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a
@@ -158,11 +158,12 @@ Open the app and confirm, in order:
 7. **Premium reconciles (no false overpay)** — open policy `GM 65`
    (`/policies/21043/edit-draft`) → payment panel shows **ชำระครบแล้ว / ฿0**,
    not ชำระเกินยอด.
-8. **Endorsement notes show (frontend redeploy check)** — open policy
+8. **Endorsement notes + $N order (frontend redeploy check)** — open policy
    `0222465843` (`/policies/18817/edit-draft`) → สลักหลัง history → the
    รายละเอียด column reads the staff notes ("แจ้งเข้า 16 คน",
    "IN260677_นาวิน จ่าย 7%"), NOT the generic "สมาชิกเพิ่ม…". Generic text here =
-   the **frontend wasn't redeployed** (step 2), not a data problem.
+   the **frontend wasn't redeployed** (step 2), not a data problem. Also confirm
+   the ฿-24,917 refund shows at **$24** (source order), not $3.
 
 ### 7b. Deployed-parity checksum (the systematic proof)
 
@@ -184,7 +185,7 @@ count:
 | policies | 21395 | F427DDC7 |
 | policy_payments | 21115 | 1D71E627 |
 | policy_installments | 3222 | 81A86C19 |
-| policy_events | 23008 | 6082C62C |
+| policy_events | 23008 | 4906979D |
 | commission_ledgers | 80 | E286C99A |
 | customers | 11252 | F040CF13 |
 | agents | 700 | D85806E0 |
