@@ -970,6 +970,9 @@ watch(() => [form.netPremium, form.dutyStamp], recomputeWht)
 // Toggling the checkbox: OFF → zero + lock; ON → clear the manual flag and
 // recompute from the current premium so the auto value comes back.
 watch(whtEnabled, (on) => {
+  // During hydration we only MIRROR the saved status into the checkbox; don't
+  // recompute or zero the loaded amount (it already reflects the source).
+  if (hydrating.value) return
   if (!on) { form.whtAmt = 0 }
   else { touched.whtAmt = false; recomputeWht() }
 })
@@ -1847,7 +1850,7 @@ async function hydrateFromDraft(id: string, renewMode = false, preset?: Record<s
     // they never hydrated on edit-draft.
     const premium = (p.premium ?? {}) as Record<string, number | null>
     const installment = (p.installment ?? {}) as Record<string, number | string | null>
-    const wht = (p.wht ?? {}) as Record<string, number | null>
+    const wht = (p.wht ?? {}) as { status?: string | null; amount?: number | null }
 
     form.netPremium = Number(premium.net ?? p.netPremium ?? 0)
     form.mainPremium = Number(premium.main ?? p.mainPremium ?? 0)
@@ -1860,6 +1863,15 @@ async function hydrateFromDraft(id: string, renewMode = false, preset?: Record<s
     form.totalPremiumPaid = Number(premium.totalPaid ?? p.totalPremiumPaid ?? 0)
     form.netCustomerPaid = Number(premium.netCustomerPaid ?? p.netCustomerPaid ?? 0)
     form.whtAmt = Number(wht.amount ?? p.whtAmt ?? 0)
+    // WHT include/exclude: the source records it as wht.status ('include' /
+    // 'exclude' — migrated from Access WHT_Status 1/2). Honour it so an
+    // excluded policy loads with the WHT checkbox off. Fall back to "has an
+    // amount" for policies with no explicit status.
+    whtEnabled.value = wht.status === 'exclude'
+      ? false
+      : wht.status === 'include'
+        ? true
+        : (form.whtAmt > 0)
     form.discountAmount = Number(installment.discountAmount ?? p.discountAmount ?? 0)
 
     form.installmentTerm = String(installment.term ?? p.installmentTerm ?? '')
