@@ -89,6 +89,17 @@ const props = defineProps<{
 const router = useRouter()
 const route = useRoute()
 
+/** Back to the policy list. Prefer the real history entry (the filtered/scrolled
+ *  list the operator came from); fall back to the list route on a direct deep
+ *  link where there is no in-app history to go back to. */
+function goBack(): void {
+  if (window.history.state?.back) {
+    router.back()
+  } else {
+    void router.push({ name: 'policies' })
+  }
+}
+
 const { t } = useI18n()
 
 // ── State ────────────────────────────────────────────────────────────────
@@ -2067,6 +2078,15 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
 
 <template>
   <div class="space-y-6 max-w-5xl">
+    <!-- Back to the policy list — the detail opens in the SAME tab by default,
+         so a clear, prominent back control is the primary way out. goBack()
+         returns to the list the operator came from (preserving its filters /
+         scroll) and falls back to the list route on a direct deep link. -->
+    <button type="button" @click="goBack"
+      class="inline-flex items-center gap-1.5 text-sm text-slate-600 hover:text-brand-600 -mb-2">
+      <i class="pi pi-arrow-left text-xs" />
+      <span>{{ t('policyCreate.backToList') }}</span>
+    </button>
     <!-- Header — mirrors PolicyEdit's format (title / status / actions) -->
     <header class="flex items-center justify-between flex-wrap gap-3">
       <div>
