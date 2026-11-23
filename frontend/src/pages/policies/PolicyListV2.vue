@@ -382,6 +382,19 @@ function resumeDraft(policyId: string): void {
   openInNewTab(router, { name: 'policy-edit-draft', params: { id: policyId } })
 }
 
+/** Open a policy from a ROW click. Default = same tab (predictable, with a back
+ *  button on the detail page). Honour the browser-link convention: ⌘/Ctrl-click
+ *  or middle-click opens a new tab, so power users can fan several policies out
+ *  deliberately without the surprise of every row spawning a tab. */
+function openPolicy(policyId: string, e?: MouseEvent): void {
+  const to = { name: 'policy-edit-draft', params: { id: policyId } }
+  if (e && (e.metaKey || e.ctrlKey || e.button === 1)) {
+    openInNewTab(router, to)
+    return
+  }
+  void router.push(to)
+}
+
 /** Hard-delete a draft. Backend guard (C-11) blocks non-draft rows with
  *  409; frontend confirms first to prevent accidental clicks. */
 async function deleteDraft(policyId: string, label: string): Promise<void> {
@@ -601,7 +614,7 @@ const rangeText = computed(() => {
             <!-- Every row opens the full-page wizard (create/edit share the
                  same UI + fields). Drafts resume; issued+ edit in place. -->
             <tr v-for="p in policyStore.list" :key="p.id" class="hover:bg-slate-50 cursor-pointer"
-              @click="resumeDraft(p.id)">
+              @click="openPolicy(p.id, $event)" @auxclick="openPolicy(p.id, $event)">
               <td class="px-4 py-2 font-mono text-xs text-slate-700">
                 <div>{{ p.applicationNo ?? '—' }}</div>
                 <div v-if="p.policyNo" class="text-[10px] text-slate-400">{{ p.policyNo }}</div>

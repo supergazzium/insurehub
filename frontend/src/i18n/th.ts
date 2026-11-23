@@ -1690,6 +1690,7 @@ export default {
   },
   policyCreate: {
     title: 'สร้างกรมธรรม์ใหม่',
+    backToList: 'กลับไปรายการกรมธรรม์',
     renewTitle: 'ต่ออายุกรมธรรม์',
     renewal: {
       searchButton: 'ค้นหากรมธรรม์เดิม',

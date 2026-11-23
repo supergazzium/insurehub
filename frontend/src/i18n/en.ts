@@ -525,6 +525,7 @@ export default {
   },
   policyCreate: {
     title: 'New policy',
+    backToList: 'Back to policies',
     renewTitle: 'Renew policy',
     renewal: {
       searchButton: 'Find previous policy',
