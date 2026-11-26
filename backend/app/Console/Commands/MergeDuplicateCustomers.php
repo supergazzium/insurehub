@@ -42,6 +42,9 @@ class MergeDuplicateCustomers extends Command
         ['C8003502', 'C9901534', 'E spelling มาลีบู เฮาส์'],
         ['C9900576', 'C9900651', 'E spelling แซงชัวรี่ เนคซัส'],
         ['C9901501', 'C9901718', 'E dup ฤทธิ์รัตน (0 pol)'],
+        // F — same national id_card, surname spelling variant (วงษ์/วงศ์); keep the
+        //     record with phone + real birth date (reviewed 2026-11-26).
+        ['C8003750', 'C8003896', 'F same id_card พรมงคล วงษ์/วงศ์ษาคำ'],
     ];
 
     /** customer_id FK tables to reassign when merging. */
