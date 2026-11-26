@@ -202,6 +202,26 @@ with open(PFX, 'w', newline='', encoding='utf-8') as fh:
     w.writerows(PRODUCT_FIXES)
 print(f"product-fixes -> {PFX} ({len(PRODUCT_FIXES)} rows)")
 
+# ---- GROUP-POLICY reclassification (user-confirmed 2026-11-23) ----
+# These policy_nos are GROUP policies: each folded row is a DISTINCT insured under
+# one group Policy_Number (all Policy_Year 1), NOT one insured's installments. A
+# plain 'collapse' keeps the keeper's single-member premium while it receives every
+# member's payment, producing a huge false ชำระเกิน. 'collapse-group' makes the
+# CollapseInstallmentPolicies command recompute the keeper's annual_premium =
+# SUM(member payments). Verified against the source: member premiums vary widely
+# and SUM(member gross) == SUM(payments). Must be re-applied on every manifest
+# rebuild, or the GM overpay defect returns.
+GROUP_COLLAPSE_POLICY_NOS = {
+    'GM 62', 'GM 63', 'GM 64', 'GM 65',
+    '23272215', '21523527', '15145364', '511-0040608', '20967270',
+}
+_regrouped = 0
+for m in manifest:
+    if m[7] == 'collapse' and m[2] in GROUP_COLLAPSE_POLICY_NOS:
+        m[7] = 'collapse-group'
+        _regrouped += 1
+print(f"reclassified {_regrouped} group policies collapse -> collapse-group")
+
 with open(OUT, 'w', newline='', encoding='utf-8') as fh:
     w = csv.writer(fh)
     w.writerow(['group_id','client_code','policy_no','product','keeper_app','member_apps','n_rows','action'])

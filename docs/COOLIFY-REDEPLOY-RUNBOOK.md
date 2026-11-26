@@ -10,12 +10,12 @@ step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
 
 | Item | Value |
 |---|---|
-| **Dump** | `insurehub_migrated_full_20261120.sql.gz` (repo root, **gitignored — PII**) |
-| **Dump sha256** | `19ff76ae60bf1c475d94ed2edcb93ddfa7351bca2b4f8425004477b43a128b2f` |
+| **Dump** | `insurehub_migrated_full_20261126.sql.gz` (repo root, **gitignored — PII**) |
+| **Dump sha256** | `ae42f953978e72eaac7552a359fe2ade128243784042b0a6fd8d4be11659f617` |
 | **Code** | `fix/wht-policyyear` (PR pending) + merged PR #53 |
-| Rows the dump contains | 19,301 live policies (21,395 incl. collapsed), 11,252 customers, 700 agents |
-| Money | payment sum **฿253,602,089.30** exact |
-| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption, **annual_premium gross fix (468 policies)**, **stale installment-schedule cleanup (92 policies / 153 rows)**, **endorsement source notes (252 events)**, **endorsement re-sequencing to source $N order (22 policies / 199 events)**, **WHT include/exclude restored (5,102 policies)**, **policy_year restored from source (1,957 policies)**, **payment payee restored — InsureHub/Insurance Company (19,986 payments)** |
+| Rows the dump contains | 19,638 live policies (21,801 incl. collapsed), 11,312 customers, 703 agents |
+| Money | payment sum **฿263,795,618.18** exact |
+| Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption, **annual_premium gross fix (468 policies)**, **stale installment-schedule cleanup (92 policies / 153 rows)**, **endorsement source notes (252 events)**, **endorsement re-sequencing to source $N order (22 policies / 199 events)**, **WHT include/exclude restored (5,102 policies)**, **policy_year restored from source (1,957 policies)**, **payment payee restored — InsureHub/Insurance Company (19,986 payments)**, **re-migrated from the 25/11 export (full pipeline via run_migration.sh)**, **same-national-ID customer dedup** |
 
 Because the dump was cut **after** every backfill ran locally, **you do NOT run
 any artisan backfill commands on prod.** Restore-and-go.
@@ -83,7 +83,7 @@ mysqldump -u root -p --default-character-set=utf8mb4 \
 
 ## 4. Upload the dump to Coolify
 
-Get `insurehub_migrated_full_20261120.sql.gz` onto the Coolify MySQL container. Options:
+Get `insurehub_migrated_full_20261126.sql.gz` onto the Coolify MySQL container. Options:
 
 - **scp** to the host, then `docker cp` into the MySQL container; or
 - Coolify file manager / a mounted volume; or
@@ -92,8 +92,8 @@ Get `insurehub_migrated_full_20261120.sql.gz` onto the Coolify MySQL container. 
 Verify the file arrived intact:
 
 ```bash
-sha256sum insurehub_migrated_full_20261120.sql.gz
-# must equal: 19ff76ae60bf1c475d94ed2edcb93ddfa7351bca2b4f8425004477b43a128b2f
+sha256sum insurehub_migrated_full_20261126.sql.gz
+# must equal: ae42f953978e72eaac7552a359fe2ade128243784042b0a6fd8d4be11659f617
 ```
 
 If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a
@@ -116,7 +116,7 @@ mysql -u root -p -e "DROP DATABASE IF EXISTS insurehub;
   CREATE DATABASE insurehub CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;"
 
 # 5b. restore
-gunzip -c insurehub_migrated_full_20261120.sql.gz | \
+gunzip -c insurehub_migrated_full_20261126.sql.gz | \
   mysql -u root -p --default-character-set=utf8mb4 insurehub
 ```
 
@@ -149,8 +149,8 @@ local.)
 Open the app and confirm, in order:
 
 1. **Login** `admin@insurehub.co.th` → dashboard loads.
-2. **Counts** — dashboard shows **19,301** policies (NOT 38,955 = stale backend),
-   **11,252** customers, **700** agents.
+2. **Counts** — dashboard shows **19,638** policies (NOT 38,955 = stale backend),
+   **11,312** customers, **703** agents.
 3. **Money** — in the backend container:
    `php artisan tinker --execute="echo \App\Models\PolicyPayment::whereNull('voided_at')->sum('amount');"`
    → **253602089.30** exact.
@@ -187,13 +187,13 @@ count:
 
 | tbl | rows | content_hash |
 |---|---|---|
-| policies | 21395 | 83DDB896 |
-| policy_payments | 21115 | 1D71E627 |
-| policy_installments | 3222 | 81A86C19 |
-| policy_events | 23008 | 4906979D |
+| policies | 21801 | C954B5D6 |
+| policy_payments | 21490 | 915C2EB7 |
+| policy_installments | 3276 | FED6C591 |
+| policy_events | 23435 | 5DF8EFD9 |
 | commission_ledgers | 80 | E286C99A |
-| customers | 11252 | F040CF13 |
-| agents | 700 | D85806E0 |
+| customers | 11313 | 7AC4AEEF |
+| agents | 703 | DBD8C016 |
 
 Any divergence = the restore is NOT faithful → re-check the sha256 of the
 uploaded dump and re-restore. (The hashes are APP_KEY-independent: they run on
