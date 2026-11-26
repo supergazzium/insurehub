@@ -168,6 +168,15 @@ class BackfillInstallmentPremium extends Command
                     'premium_check' => 'ok',
                     'updated_at' => DB::raw('NOW()'),
                 ];
+                // total_premium_paid is the gross owed for the policy period
+                // (เบี้ยสุทธิ + อากร + VAT), so it must annualize with the premium.
+                // Migrated installment rows carry a per-installment figure; on a
+                // partially-paid plan that leaves รวมเบี้ยที่ต้องชำระ below the
+                // (annualized) net premium (e.g. 50151419 yr7: net 97,140 while
+                // total stayed 8,095, one installment). Set it to the annual gross
+                // so the premium section reconciles; actual collection is tracked
+                // by the payments + schedule, not this field.
+                $upd['total_premium_paid'] = $annualGross;
                 if ($annualNet !== null) {
                     $upd['net_premium'] = $annualNet;
                 }
