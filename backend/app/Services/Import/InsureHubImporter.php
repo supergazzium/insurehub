@@ -1026,13 +1026,13 @@ class InsureHubImporter
                 ),
                 'total_premium_paid' => $row->total_premium_paid,
                 'net_customer_paid' => $row->net_customer_paid,
-                'premium_mode' => $this->premiumModeFromTerm($row->installment_term),
+                'premium_mode' => $this->premiumModeFromTerm($this->effectiveInstallmentTerm($row)),
                 'type_of_paid' => $this->luPaymentType[(string) ($row->payment_type_id ?? '')] ?? null,
                 'type_of_paid_note' => $row->payment_type_note,
                 'finance_company' => $this->luFinanceCompany[(string) ($row->finance_company_id ?? '')] ?? null,
                 'first_due_inst' => $row->first_due_amount,
                 'next_due_inst' => $row->next_due_amount,
-                'installment_term' => $row->installment_term,
+                'installment_term' => $this->effectiveInstallmentTerm($row),
                 'wht_status' => $this->luWhtStatus[(string) ($row->wht_status ?? '')] ?? null,
                 'wht_amt' => $row->wht_amount,
                 'subsidise_from_agent' => $row->subsidy_from_agent,
@@ -1717,6 +1717,43 @@ class InsureHubImporter
      *
      * @return array{0: ?string, 1: ?string}
      */
+    /**
+     * Effective installment term for a source row.
+     *
+     * The legacy Installment_Term column is authoritative when populated, but
+     * ~5,681 rows (e.g. the newest renewal year of a 12-installment health
+     * plan) leave it NULL while the real term lives in the Note_Type_of_paid
+     * field as a '#N/M' marker (e.g. '7#1/12' = year 7, installment 1 of 12).
+     * Without this fallback those rows import as premium_mode=annual with a
+     * single lump payment, hiding the installment plan and its pending
+     * installments. Parse the M from the note when the column is blank.
+     */
+    private function effectiveInstallmentTerm(object $row): ?string
+    {
+        // The '#N/M' marker in Note_Type_of_paid is the AUTHORITATIVE installment
+        // count — the Installment_Term column is unreliable in both directions:
+        //   • NULL while the note says #1/12  → a real 12-installment plan imported
+        //     as annual with one lump payment (e.g. 50151419 year 7).
+        //   • a spurious value (e.g. 6) while the note says #1/1 → a single annual
+        //     payment that BackfillInstallmentPremium then ×6-inflated the net of.
+        // So when the note carries an '#N/M', trust its M; otherwise fall back to
+        // the column.
+        $note = (string) ($row->payment_type_note ?? '');
+        if (preg_match('/#\d+\/(\d+)/', $note, $m)) {
+            $M = (int) $m[1];
+            // M == 1 means a single payment (not an installment plan) regardless
+            // of what the column says — return 1 so premium_mode becomes annual.
+            return (string) max(1, $M);
+        }
+
+        $term = trim((string) ($row->installment_term ?? ''));
+        if ($term !== '' && $term !== '0') {
+            return (string) $row->installment_term;
+        }
+
+        return $row->installment_term === null ? null : (string) $row->installment_term;
+    }
+
     /** Derive the policy premium_mode from the legacy Installment_Term.
      *  Term 12 → monthly, 4 → quarterly, 2 → semiannual; any other
      *  multi-installment term (3, 6, …) → monthly as the installment
