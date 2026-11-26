@@ -235,10 +235,19 @@ class FoldGroupEndorsements extends Command
                 // main_premium stayed at base and total_premium_paid held the full
                 // payment sum, so due returned base while payments summed base +
                 // endorsements → a fake ชำระเกิน of exactly the endorsement total.)
+                // A group policy's premium is base + Σ(member deltas), but it can
+                // never be NEGATIVE: a refund (member leaving) cannot drive the
+                // policy premium below zero. One source row (10-SPG-0000410) carries
+                // a refund endorsement of -2,265 that exceeds its base 2,052, which
+                // would leave main/annual_premium = -213 — an impossible negative
+                // เบี้ย on the page. Floor the stored premium at 0; the oversized
+                // refund is still fully recorded as the endorsement event above, so
+                // the ledger and payments are unchanged.
+                $finalPremium = max(0.0, $runningPremium);
                 DB::table('policies')->where('id', $keeper->id)->update([
                     'endorsement_count' => $seq,
-                    'main_premium' => $runningPremium,
-                    'annual_premium' => $runningPremium,
+                    'main_premium' => $finalPremium,
+                    'annual_premium' => $finalPremium,
                     'total_premium_paid' => $basePremium,
                     'updated_at' => $now,
                 ]);

@@ -11,7 +11,7 @@ the pipeline introduced — fixed).
 | 1 | net_premium > annual_premium | 57 | 2 (sub-฿1,600 rounding) | source: corrupted source net |
 | 2 | installment total_premium_paid != annual | 7 | 0 | source/rounding + GM group |
 | 3 | net+vat+duty != total_premium_paid | 413 | ~7 | 327 source + groups + installments |
-| 4 | annual_premium <= 0 (non-cancelled) | 66 | 0 | 38 source-faithful (incl. 9067) |
+| 4 | annual_premium <= 0 (non-cancelled) | 65 | 1 FIXED (9067 floored to 0) | 37 source-faithful |
 | 5 | payments sum > annual_premium | 256 | ~0 | installments mid-pay + source |
 | 6 | schedule SUM(due) != annual | 0 | 0 | clean |
 | 7 | installment amount_paid > amount_due | 31 | 0 | single-row legacy schedules + groups |
@@ -35,11 +35,10 @@ total_premium_paid — are fixed (PRs #62, #63, #64, and this change).
 
 See `docs/net-premium-anomalies.csv` for the per-policy net anomaly list.
 
-## Note: policy 9067 (10-SPG-0000410) annual = -213 is source-faithful
-Initially flagged as the one real migration bug (keeper's own source row has
-main 2,052 > 0). On tracing the fold: it is a group policy folding a refund
-endorsement of -2,265 that EXCEEDS the base 2,052, so base + Σdeltas = -213 — and
-the two actual payments also net to -213 (paid 2,052, refunded 2,265). The -213
-is faithfully computed from the source; the source refund is simply larger than
-the original premium. Kept as-is per decision, same category as the other 35
-source-negative policies. Zero genuine migration transform bugs remain.
+## Note: policy 9067 (10-SPG-0000410) negative premium — FIXED
+A group policy folding a refund endorsement of -2,265 that EXCEEDS the base 2,052,
+so FoldGroupEndorsements set main/annual_premium = base + Σdeltas = -213 — an
+impossible negative เบี้ย on the page. FIX: floor the keeper's stored premium at 0
+(a policy premium can never be negative); the -2,265 refund stays fully recorded as
+the endorsement event, so the ledger + payments are unchanged. main/annual now 0,
+total_premium_paid stays 2,052. Only this one fold keeper was ever negative.
