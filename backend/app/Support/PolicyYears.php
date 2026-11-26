@@ -39,9 +39,15 @@ final class PolicyYears
             $policyYear = max(1, (int) $source->policy_year) + 1;
         }
 
-        $customerYear = $source?->customer_year !== null
-            ? (int) $source->customer_year + 1
-            : self::customerYearFromHistory($policy);
+        // ปีของลูกค้า (customer_year) tracks act_year (the พ.ร.บ. year): a renewal
+        // bumps the act year by 1, so customer_year follows. Prefer the policy's
+        // own act_year when set; else carry the source's customer_year forward;
+        // else fall back to the customer-history ordinal for a brand-new policy.
+        $customerYear = (int) ($policy->act_year ?? 0) > 0
+            ? (int) $policy->act_year
+            : ($source?->customer_year !== null
+                ? (int) $source->customer_year + 1
+                : self::customerYearFromHistory($policy));
 
         return ['policyYear' => $policyYear, 'customerYear' => $customerYear];
     }
