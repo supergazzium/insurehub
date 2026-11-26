@@ -28,7 +28,7 @@ OUT = os.environ.get("OUT_MANIFEST", "collapse_manifest.csv")
 
 df = pd.read_excel(APP, dtype=str, keep_default_na=False)
 # normalize key fields
-for col in ['Client_Code','Policy_Number','Product_Name','Application_code','App_date']:
+for col in ['Client_Code','Policy_Number','Product_Name','Application_code','App_date','Policy_Year']:
     df[col] = df[col].fillna('').map(lambda s: s.strip())
 
 # ---- NAMED PER-GROUP OVERRIDES (user verdicts #3/#4) ----
@@ -132,13 +132,14 @@ buckets = defaultdict(list)   # (cc,pn,prod) -> [(app, dt, note), ...]
 for _, r in df.iterrows():
     cc, pn, prod, app, dt = r['Client_Code'], r['Policy_Number'], r['Product_Name'], r['Application_code'], r['App_date']
     note = r['Note_Type_of_paid']
+    pyr = r.get('Policy_Year', '') if hasattr(r, 'get') else r['Policy_Year']
     if cc=='' or pn=='' or app=='':
         continue
     if pn == '-':
         continue
     if (cc, pn) in override_policies:
         continue
-    buckets[(cc, pn, prod)].append((app, dt, note))
+    buckets[(cc, pn, prod)].append((app, dt, note, pyr))
 
 manifest = []
 gid = 0
@@ -151,7 +152,7 @@ for (cc, pn, prod), rows in buckets.items():
         continue
     rows_sorted = sorted(rows, key=lambda x: x[0])   # by application_code
     # Classify the bucket's installment shape.
-    seqs = [inst_mn(note) for (_, _, note) in rows_sorted]
+    seqs = [inst_mn(note) for (_, _, note, _pyr) in rows_sorted]
     has_multi_inst = any(m is not None and m > 1 for (n, m) in seqs)   # any #N/M with M>1
 
     if not has_multi_inst:
@@ -159,11 +160,25 @@ for (cc, pn, prod), rows in buckets.items():
         #  whole-life/savings/pension -> collapse ALL rows to 1 policy.
         #  annual-renewable            -> keep each year separate (NO collapse).
         if is_wholelife(prod) and len(rows_sorted) > 1:
+            # RENEWAL GUARD (2026-11-26): a whole-life Policy_Number carrying
+            # DISTINCT source Policy_Year values (1,2,3,…) is the SAME contract
+            # filed yearly as separate renewal rows — each its own premium and
+            # its own total_premium_paid. Collapsing them sums 5 years onto one
+            # keeper (20967270: keeper got Σ=382,181 instead of its own 85,267).
+            # Keep each year as its own policy (leave-asis). Only collapse when the
+            # rows do NOT form a renewal sequence (a single year duplicated, etc.).
+            distinct_years = {p for (_, _, _, p) in rows_sorted if str(p).strip() not in ('', '0', '1')}
+            years_all = [str(p).strip() for (_, _, _, p) in rows_sorted if str(p).strip() not in ('', '0')]
+            is_renewal_seq = len(set(years_all)) >= 2  # ≥2 distinct non-empty policy-years
+            if is_renewal_seq:
+                gid += 1
+                manifest.append([gid, cc, pn, prod, '', '', len(rows_sorted), 'leave-asis'])
+                continue
             multi_rowcount += len(rows_sorted)
             gid += 1
             ms = sorted(rows_sorted, key=lambda x: (datekey(x[1]), x[0]))
             keeper = ms[-1][0]
-            members = [a for (a, _, _) in ms if a != keeper]
+            members = [a for (a, _, _, _) in ms if a != keeper]
             manifest.append([gid, cc, pn, prod, keeper, ';'.join(members), len(rows_sorted), 'collapse'])
         # else: annual-renewable #1/1 -> leave as separate policies (emit nothing)
         continue
@@ -172,7 +187,7 @@ for (cc, pn, prod), rows in buckets.items():
     # each yearly contract -> 1 policy + its installment payments.
     contracts = []   # list of lists of (app, dt)
     cur = []
-    for (app, dt, note) in rows_sorted:
+    for (app, dt, note, _pyr) in rows_sorted:
         n = inst_n(note)
         if n == 1 and cur:        # a new #1/M after we already have rows -> new contract
             contracts.append(cur); cur = []
@@ -212,8 +227,18 @@ print(f"product-fixes -> {PFX} ({len(PRODUCT_FIXES)} rows)")
 # and SUM(member gross) == SUM(payments). Must be re-applied on every manifest
 # rebuild, or the GM overpay defect returns.
 GROUP_COLLAPSE_POLICY_NOS = {
+    # Genuine GROUP policies — one Policy_Number, many DISTINCT insured members,
+    # keeper annual = SUM(member payments). Verified against source.
     'GM 62', 'GM 63', 'GM 64', 'GM 65',
-    '23272215', '21523527', '15145364', '511-0040608', '20967270',
+    # 23272215 — one insured's quarterly installments of a single annual contract
+    # (same 205 main premium, 3-month coverage windows); sum is the year's premium.
+    '23272215',
+    # NOTE (2026-11-26): 20967270 / 15145364 / 21523527 / 511-0040608 are NOT groups.
+    # They are whole-life policies renewed yearly (distinct source Policy_Year 1,2,3…),
+    # now handled by the general RENEWAL GUARD in the whole-life branch above
+    # (distinct Policy_Year => leave-asis, each year its own policy). No list entry
+    # needed. collapse-group wrongly SUMMED every year onto one keeper
+    # (20967270 keeper annual became Σ=382,181.60 vs the true per-year 85,267.00).
 }
 _regrouped = 0
 for m in manifest:
