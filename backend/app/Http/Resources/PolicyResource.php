@@ -419,6 +419,17 @@ class PolicyResource extends JsonResource
             }
         }
 
+        // `riders.rows` is edited independently of the risk schema (the wizard's
+        // สัญญาเพิ่มเติม table), so it isn't in the shim's per-kind key map. Surface
+        // it directly from risk_data so the canonical block carries the riders —
+        // otherwise a life policy's riders don't reach the page and it shows
+        // "ยังไม่มีสัญญาเพิ่มเติม" despite having them.
+        $risk = is_array($this->risk_data) ? $this->risk_data
+            : (is_string($this->risk_data) ? (json_decode($this->risk_data, true) ?: []) : []);
+        if (isset($risk['riders.rows']) && is_array($risk['riders.rows'])) {
+            $fields['riders.rows'] = $risk['riders.rows'];
+        }
+
         return ['kind' => $kind, 'fields' => $fields];
     }
 

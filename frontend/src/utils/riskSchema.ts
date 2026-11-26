@@ -178,6 +178,14 @@ export function hydrateSchemaValues(
       }
     }
   }
+  // `riders.rows` is edited independently of the risk schema (the wizard's
+  // สัญญาเพิ่มเติม table writes it directly), so it is NOT one of the schema
+  // fields iterated above. Carry it through on hydration, otherwise a saved
+  // policy's riders — migrated or manually added — are dropped on reload and
+  // the page shows "ยังไม่มีสัญญาเพิ่มเติม" despite having riders.
+  if (riskData && Array.isArray(riskData['riders.rows'])) {
+    out['riders.rows'] = riskData['riders.rows']
+  }
   return out
 }
 

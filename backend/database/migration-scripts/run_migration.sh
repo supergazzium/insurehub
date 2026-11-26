@@ -91,6 +91,7 @@ echo "########## 6. COMMISSION + RISK ##########"
 art policies:backfill-commission
 art policies:zerofill-imported-commission
 art policies:backfill-risk-data
+art policies:backfill-riskdata-riders   # mirror policy_riders -> risk_data[riders.rows] for display
 
 echo ""
 echo "########## 7. YEARS + ENDORSEMENTS (notes -> resequence -> restore year LAST) ##########"

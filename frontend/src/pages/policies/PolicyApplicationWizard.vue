@@ -1949,12 +1949,18 @@ async function hydrateFromDraft(id: string, renewMode = false, preset?: Record<s
 
     // Hydrate the risk value bag from risk_data + top-level columns.
     const schema = productDetail.value?.productType?.riskSchema as RiskSchema | null | undefined
+    const riskBlock = p.risk as { kind?: string; fields?: Record<string, unknown> } | null | undefined
+    const riskFields = riskBlock?.fields ?? {}
     if (schema) {
       // Prefer the canonical `risk.fields` block from PolicyResource
       // (populated by PolicyRiskShim::readerAll — merges JSON + columns).
-      const riskBlock = p.risk as { kind?: string; fields?: Record<string, unknown> } | null | undefined
-      const riskFields = riskBlock?.fields ?? {}
       form.risk = hydrateSchemaValues(schema, riskFields, p as Record<string, unknown>)
+    } else if (Array.isArray(riskFields['riders.rows'])) {
+      // No risk schema (e.g. a life product whose productType isn't seeded) —
+      // the schema hydration above is skipped entirely, but riders are edited
+      // independently of the schema, so carry them through on their own,
+      // otherwise a life policy's riders never reach the สัญญาเพิ่มเติม table.
+      form.risk = { ...form.risk, 'riders.rows': riskFields['riders.rows'] }
     }
 
     // Customer / agent labels for the EntityPicker chip. Fetched in
