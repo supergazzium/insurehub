@@ -11,8 +11,8 @@ step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
 | Item | Value |
 |---|---|
 | **Dump** | `insurehub_migrated_full_20261126.sql.gz` (repo root, **gitignored — PII**) |
-| **Dump sha256** | `a5ab0537f242fcc9aec018eefe7e0490d1b4861232efbc288809e4853d5a1bcd` |
-| **Code** | `fix/wht-policyyear` (PR pending) + merged PR #53 |
+| **Dump sha256** | `0b49fc29009b40971fbd9403b099b91368ebc97b439edd12841b373438e2ed32` |
+| **Code** | `main` @ PR #60 merged (riders display + premium breakdown; through #53–#60) |
 | Rows the dump contains | 19,638 live policies (21,801 incl. collapsed), 11,312 customers, 703 agents |
 | Money | payment sum **฿263,795,618.18** exact |
 | Fixes baked in | license flags (72 agents), commission zero-fill (1,030 policies), collapse, fold, premium backfill, PII encryption, **annual_premium gross fix (468 policies)**, **stale installment-schedule cleanup (92 policies / 153 rows)**, **endorsement source notes (252 events)**, **endorsement re-sequencing to source $N order (22 policies / 199 events)**, **WHT include/exclude restored (5,102 policies)**, **policy_year restored from source (1,957 policies)**, **payment payee restored — InsureHub/Insurance Company (19,986 payments)**, **re-migrated from the 25/11 export (full pipeline via run_migration.sh)**, **same-national-ID customer dedup** |
@@ -93,7 +93,7 @@ Verify the file arrived intact:
 
 ```bash
 sha256sum insurehub_migrated_full_20261126.sql.gz
-# must equal: a5ab0537f242fcc9aec018eefe7e0490d1b4861232efbc288809e4853d5a1bcd
+# must equal: 0b49fc29009b40971fbd9403b099b91368ebc97b439edd12841b373438e2ed32
 ```
 
 If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a
