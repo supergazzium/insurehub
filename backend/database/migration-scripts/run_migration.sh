@@ -75,9 +75,14 @@ art policies:backfill-premium-gross --force
 art policies:backfill-premium-mode
 
 echo ""
-echo "########## 4. INSTALLMENTS (build -> fix premium -> clear stale) ##########"
-art policies:backfill-installments --status=issued,active
+echo "########## 4. INSTALLMENTS (fix premium -> build schedule -> clear stale) ##########"
+# premium FIRST: annualize installment premium (perInst×term) from payments, so
+# the schedule below is built from the correct annual. If the schedule were built
+# first (from the pre-fix per-installment premium), the premium fix would then
+# delete it as stale and leave the policy with NO schedule (e.g. 50151419 year 7:
+# a 12-installment plan with 1 paid + 11 pending that otherwise showed no schedule).
 art policies:backfill-installment-premium
+art policies:backfill-installments --status=issued,active
 art policies:fix-stale-installments --force
 
 echo ""

@@ -145,37 +145,6 @@ class BackfillInstallmentPremium extends Command
             $perInst = (float) $agg->avg_amt;
             $annualGross = round($perInst * $term, 2);
 
-            // GUARD (2026-11-26): only scale by term when the payments are
-            // genuinely PER-INSTALLMENT slices. The command's premise — stored
-            // premium/net is one installment's figure, so annual = ×term — breaks
-            // for ~52 policies whose single recorded payment is ALREADY the full
-            // annual amount (n_pay=1, term=6). There perInst×term = total×6, and
-            // net×term then exceeds the total paid — an impossible net premium
-            // (e.g. 15159: net 39,188.79 ×6 = 235,132.74 vs total 42,100.00).
-            //
-            // Ground truth is total_premium_paid (the real annual amount). If the
-            // actual payments collected (sum, NOT avg×term) already reconcile with
-            // total_premium_paid, OR the scaled gross would overshoot the total
-            // paid by more than ~20%, the payment is already annual: DO NOT scale —
-            // leave premium/net as imported (the source per-period figures).
-            $paidSum = round((float) ($agg->avg_amt) * (int) $agg->n, 2);
-            $tpp = (float) ($p->total_premium_paid ?? 0);
-            // "Payment is already the full period" signature: fewer payments than
-            // the term, the per-payment amount already reconciles with the total
-            // premium paid (within 20%), and scaling would overshoot that total.
-            // That is a single annual payment mislabeled as a 6-installment plan,
-            // never a mid-term partially-paid plan (none of which exist here:
-            // every multi-installment policy is either fully paid n=term or n=1).
-            $paymentsAreAnnual = ($tpp > 0 && (int) $agg->n < $term)
-                && ($annualGross > $tpp * 1.2)
-                && (abs($perInst - $tpp) <= $tpp * 0.20);
-            if ($paymentsAreAnnual) {
-                // Payment already represents the full period — scaling would
-                // inflate premium AND net past the total paid. Leave as imported.
-                $skipped++;
-
-                continue;
-            }
 
             // scale the current net_premium (a per-installment net) up to annual.
             // current net_premium is one installment's net; annual net = × term.
