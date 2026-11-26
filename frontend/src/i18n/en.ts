@@ -720,6 +720,7 @@ export default {
     installmentCountHint: 'Auto-set from the payment frequency (editable) — prefills the payment modal',
     commissionSection: 'Commission (from product)',
     riderCommission: 'Rider commission (per rider)',
+    mainPlusRiders: 'Main {main} + riders {rider} = {total}',
     commissionRate: 'Rate (hub → agent)',
     commissionYr1: '(year 1)',
     commissionYear: 'Year',
