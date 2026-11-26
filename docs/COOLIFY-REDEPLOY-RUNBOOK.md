@@ -11,7 +11,7 @@ step here.** Verify with `docs/REDEPLOY-TEST-PLAN.html` at the end.
 | Item | Value |
 |---|---|
 | **Dump** | `insurehub_migrated_full_20261126.sql.gz` (repo root, **gitignored — PII**) |
-| **Dump sha256** | `36e56f6574e5c1df891792796404572ed2c59f29cf95a5ed635ec771b2a71ff2` |
+| **Dump sha256** | `44e9f985841fb36cfce9b76d5cdba3772f00735db0ae8fa6cd4b601e91511d60` |
 | **Code** | `main` @ PR #60 merged (riders display + premium breakdown; through #53–#60) |
 | Rows the dump contains | 20435 live policies (21,801 incl. soft-deleted), 11,312 customers, 703 agents |
 | Money | payment sum **฿263,861,196.18** (incl. synthesized legacy rows) |
@@ -93,7 +93,7 @@ Verify the file arrived intact:
 
 ```bash
 sha256sum insurehub_migrated_full_20261126.sql.gz
-# must equal: 36e56f6574e5c1df891792796404572ed2c59f29cf95a5ed635ec771b2a71ff2
+# must equal: 44e9f985841fb36cfce9b76d5cdba3772f00735db0ae8fa6cd4b601e91511d60
 ```
 
 If the sha256 doesn't match, the upload corrupted — re-upload. Do not restore a

@@ -1,0 +1,7 @@
+policy_id,policy_no,application_no,status,app_net,source_net,annual_premium,total_premium_paid,classification
+9764,1001039935,A2303080003,expired,281869.16,281869.16,29360.00,30160.00,SOURCE-FAITHFUL (source net corrupted — kept)
+14002,10-HGS-0000073-2024-10,A2409300007,expired,92969.00,92969.00,24141.00,16404.00,SOURCE-FAITHFUL (source net corrupted — kept)
+20597,626-01002-2696,A2608140016,active,5438.00,5438.00,5460.00,2460.00,SOURCE-FAITHFUL (source net corrupted — kept)
+12186,8141066327735445,A2401170007,expired,1200.00,1200.00,1200.00,120.00,SOURCE-FAITHFUL (source net corrupted — kept)
+2785,000-AC0021-002786,A2104080028,cancelled,600.00,600.00,645.21,145.21,SOURCE-FAITHFUL (source net corrupted — kept)
+7020,P1784423,A2201070002,expired,600.00,600.00,645.21,145.21,SOURCE-FAITHFUL (source net corrupted — kept)
