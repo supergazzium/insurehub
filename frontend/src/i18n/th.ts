@@ -1894,6 +1894,7 @@ export default {
     installmentCountHint: 'สร้างอัตโนมัติจากความถี่การชำระ (แก้ไขได้) — ใช้ตั้งงวดในหน้าบันทึกการชำระเงิน',
     commissionSection: 'ค่าคอมมิชชั่น (จากสินค้า)',
     riderCommission: 'ค่าคอมมิชชั่นสัญญาเพิ่มเติม (ต่อสัญญา)',
+    mainPlusRiders: 'เบี้ยหลัก {main} + เบี้ยสัญญาเพิ่มเติม {rider} = {total}',
     commissionRate: 'อัตรา (บริษัท → ตัวแทน)',
     commissionYr1: '(ปีที่ 1)',
     commissionYear: 'ปีที่',

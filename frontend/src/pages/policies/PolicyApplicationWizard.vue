@@ -1025,6 +1025,20 @@ const riderPremiumTotal = computed<number>(() => {
   }, 0)
 })
 
+/** True when this policy carries riders (so the rider-aware premium breakdown
+ *  and the main+rider commission table apply). Riders are a life concept; the
+ *  rows are the single source of truth (populated from policy_riders for
+ *  migrated policies). */
+const hasRiders = computed<boolean>(() => riderPremiumTotal.value > 0 || riderRows.value.length > 0)
+
+/** เบี้ยหลัก + เบี้ยสัญญาเพิ่มเติม — the premium a life policy with riders must
+ *  total to. Anchored on the entered main premium (grossPremiumInput), not on
+ *  the possibly-stale stored total, so it is always main + Σ riders. */
+const mainPlusRiderTotal = computed<number>(() =>
+  round2((Number(form.grossPremiumInput) || 0) + riderPremiumTotal.value),
+)
+
+
 /** Which formula buttons show. ประกันชีวิต (Life) uses only สูตร 2; every
  *  other product type gets all four. */
 const visibleFormulas = computed<(1 | 2 | 3 | 4)[]>(() =>
@@ -2499,6 +2513,15 @@ async function searchAgents(q: string): Promise<AgentListRow[]> {
             :input-class="'w-full border border-slate-200 rounded-lg px-3 py-1.5 text-sm focus:outline-none focus:border-brand-400'" />
           <p class="text-[10px] text-slate-500 mt-1">
             <i class="pi pi-info-circle mr-1" />{{ t('policyCreate.totalPremiumHint') }}
+          </p>
+          <!-- เบี้ยหลัก + เบี้ยสัญญาเพิ่มเติม = total — shown only when the policy
+               carries riders, so the operator sees exactly what the total is made of. -->
+          <p v-if="hasRiders" class="text-[10px] text-brand-700 mt-1 font-medium">
+            <i class="pi pi-plus-circle mr-1" />{{ t('policyCreate.mainPlusRiders', {
+              main: fmtMoney(Number(form.grossPremiumInput) || 0),
+              rider: fmtMoney(riderPremiumTotal),
+              total: fmtMoney(mainPlusRiderTotal),
+            }) }}
           </p>
         </FormField>
       </div>
