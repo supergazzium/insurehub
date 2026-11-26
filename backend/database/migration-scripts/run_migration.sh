@@ -98,6 +98,7 @@ art policies:backfill-years
 art policies:backfill-endorsement-note
 art policies:resequence-endorsements --force
 art policies:restore-policy-year        # LAST year step: pins policy_year to source
+art policies:customer-year-from-act   # ปีของลูกค้า = act_year
 
 echo ""
 echo "########## 8. AGENTS (license flags -> PII encrypt -> logins) ##########"
